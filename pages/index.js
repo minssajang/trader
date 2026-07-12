@@ -1,6 +1,7 @@
 import Head from 'next/head'
 import Link from 'next/link'
 import { AdSlot } from '../components/AdSlot'
+import { ScreenMockups } from '../components/ScreenMockups'
 import { useAdSlot } from '../lib/AdSlotsContext'
 
 const FEATURES = [
@@ -59,7 +60,6 @@ export default function Home() {
             <Link href="/board">자유게시판</Link>
             <Link href="/apply">신청</Link>
             <Link href="/check">내 정보 조회</Link>
-            <Link href="/admin">관리자</Link>
           </nav>
         </header>
 
@@ -112,6 +112,14 @@ export default function Home() {
           </div>
         </div>
 
+        <div className="section-title">
+          <h2>실제 화면 미리보기</h2>
+          <p>탭을 눌러 각 화면을 둘러보세요</p>
+        </div>
+        <div style={{ marginBottom: 48 }}>
+          <ScreenMockups />
+        </div>
+
         <div className="section-title" style={{ marginTop: 48 }}>
           <h2>선물 거래가 처음이신가요?</h2>
           <p>주식과 뭐가 다른지, CME・CFD가 뭔지 간단히 정리했어요</p>
@@ -160,7 +168,10 @@ export default function Home() {
         </div>
 
         <AdSlot slot={footerSlot} label="하단 배너" style={{ marginTop: 20 }} />
-        <footer className="site">문의: minssajang@gmail.com</footer>
+        <footer className="site">
+          문의: minssajang@gmail.com
+          <Link href="/admin" className="admin-link">admin</Link>
+        </footer>
       </div>
     </>
   )

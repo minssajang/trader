@@ -168,6 +168,15 @@ footer.site {
   font-size: 13px;
   text-align: center;
 }
+footer.site .admin-link {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  opacity: 0.45;
+  font-size: 11px;
+  text-decoration: none;
+}
+footer.site .admin-link:hover { opacity: 0.9; }
 
 /* ── 랜딩페이지 전용 (index.js) ── */
 .landing-wrap {

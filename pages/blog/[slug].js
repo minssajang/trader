@@ -217,7 +217,10 @@ export default function BlogPost({ post, html, allPosts }) {
           </article>
         )}
 
-        <footer className="site">문의: minssajang@gmail.com</footer>
+        <footer className="site">
+          문의: minssajang@gmail.com
+          <Link href="/admin" className="admin-link">admin</Link>
+        </footer>
       </div>
 
       <style>{`

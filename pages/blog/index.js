@@ -117,7 +117,10 @@ export default function BlogIndex() {
         </div>
 
         <AdSlot slot={footerSlot} label="하단 배너" style={{ marginTop: 20 }} />
-        <footer className="site">문의: minssajang@gmail.com</footer>
+        <footer className="site">
+          문의: minssajang@gmail.com
+          <Link href="/admin" className="admin-link">admin</Link>
+        </footer>
       </div>
     </>
   )
