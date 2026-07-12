@@ -117,7 +117,7 @@ export default function Home() {
             실시간 손절/익절 지원.</p>
             <p className="product-note">🏢 프랍펌(자금 지원 트레이딩 회사)에서 특히 많이 쓰는 선물 트레이딩 플랫폼이에요.</p>
             {versions.ninja
-              ? <a href={versions.ninja.download_url} className="btn-cta primary" style={{ marginTop: 16 }}>⬇️ 다운로드 (v{versions.ninja.version})</a>
+              ? <Link href="/download?app=ninja" className="btn-cta primary" style={{ marginTop: 16 }}>⬇️ 다운로드 (v{versions.ninja.version})</Link>
               : <span className="product-note" style={{ marginTop: 16, display: 'block' }}>다운로드 준비 중</span>}
           </div>
           <div className="card product-card">
@@ -126,7 +126,7 @@ export default function Home() {
             <p>MT5 공식 파이썬 API 연동. 계정 로그인 기반, 다양한 심볼 지원.</p>
             <p className="product-note">🌍 전 세계 CFD 브로커들이 표준으로 채택한 플랫폼이에요.</p>
             {versions.mt5
-              ? <a href={versions.mt5.download_url} className="btn-cta primary" style={{ marginTop: 16 }}>⬇️ 다운로드 (v{versions.mt5.version})</a>
+              ? <Link href="/download?app=mt5" className="btn-cta primary" style={{ marginTop: 16 }}>⬇️ 다운로드 (v{versions.mt5.version})</Link>
               : <span className="product-note" style={{ marginTop: 16, display: 'block' }}>다운로드 준비 중</span>}
           </div>
         </div>

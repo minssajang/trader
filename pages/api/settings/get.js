@@ -8,6 +8,7 @@ const DEFAULT_AD_SLOTS = [
   { id: 'footer',      name: '전체 페이지 하단 푸터 배너', active: false, code: '', source: 'adsense' },
   { id: 'home_left',   name: '홈 페이지 좌측 사이드',     active: false, code: '', source: 'adsense' },
   { id: 'home_right',  name: '홈 페이지 우측 사이드',     active: false, code: '', source: 'adsense' },
+  { id: 'download_interstitial', name: '다운로드 전면 광고(카운트다운)', active: false, code: '', source: 'adsense' },
 ]
 
 const DEFAULTS = { adSlots: DEFAULT_AD_SLOTS, adsOn: true }
