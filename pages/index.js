@@ -56,8 +56,10 @@ function DownloadButton({ info, app }) {
 
   return (
     <>
-      <button type="button" className="btn-cta primary" style={{ marginTop: 16 }} onClick={() => setShowComingSoon(true)}>
-        ⬇️ 다운로드
+      <button type="button" className="btn-cta primary" style={{
+        marginTop: 16, background: 'var(--muted)', boxShadow: 'none',
+      }} onClick={() => setShowComingSoon(true)}>
+        ⏳ 다운로드 준비 중
       </button>
       {showComingSoon && (
         <div onClick={() => setShowComingSoon(false)} style={{
