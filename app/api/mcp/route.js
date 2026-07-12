@@ -651,6 +651,45 @@ const baseHandler = createMcpHandler(
       }
     )
 
+    // ── Claude 시스템 프롬프트 툴 (fresh-season 이식) ─────────────────────────
+    const SYSTEM_PROMPT_IDS = ['claude', 'main', 'main2', 'month']
+
+    server.registerTool(
+      'get_system_prompt',
+      {
+        title: 'Claude 시스템 프롬프트 조회',
+        description: 'admin의 "Claude 지침" 탭에 저장해둔 지침을 불러온다. id를 안 주면 main 탭을 반환한다.',
+        inputSchema: {
+          id: z.enum(SYSTEM_PROMPT_IDS).optional().describe('claude(클로드 실행지침)/main(블로그 글작성지침)/main2(블로그 글작성지침 보조)/month(글감관리 월기획지침). 기본: main'),
+        },
+      },
+      async ({ id }) => {
+        const resolvedId = SYSTEM_PROMPT_IDS.includes(id) ? id : 'main'
+        const { data, error } = await supabase.from('system_prompts').select('content, updated_at').eq('id', resolvedId).single()
+        if (error || !data) return { content: [{ type: 'text', text: '(저장된 지침 없음)' }] }
+        return { content: [{ type: 'text', text: data.content || '(내용 비어있음)' }] }
+      }
+    )
+
+    server.registerTool(
+      'update_system_prompt',
+      {
+        title: 'Claude 시스템 프롬프트 갱신',
+        description: 'admin의 "Claude 지침" 탭 내용을 덮어쓴다. 사용자가 대화 중 직접 지침 변경을 요청했을 때만 호출한다.',
+        inputSchema: {
+          id: z.enum(SYSTEM_PROMPT_IDS).describe('claude/main/main2/month 중 어느 탭을 갱신할지'),
+          content: z.string().describe('새 지침 전체 내용 (마크다운)'),
+        },
+        annotations: { destructiveHint: true },
+      },
+      async ({ id, content }) => {
+        const nowIso = nowKST()
+        const { error } = await supabase.from('system_prompts').upsert({ id, content, updated_at: nowIso }, { onConflict: 'id' })
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        return { content: [{ type: 'text', text: `✅ "${id}" 지침 저장 완료` }] }
+      }
+    )
+
     // ── GitHub 저장소 확인 툴 ────────────────────────────────────────────
     // trader 저장소(minssajang/trader)에 실제로 어떤 파일이 올라가 있는지 확인할 때 쓴다.
     // 공개 저장소라 토큰 없이도 동작하지만(시간당 60회 제한), GITHUB_TOKEN 환경변수를
@@ -827,6 +866,7 @@ const baseHandler = createMcpHandler(
       '블로그 글 관리 도구(list_blog_posts/create_blog_post/update_blog_post/list_blog_categories), ' +
       '블로그 키워드 리서치·발행기록 도구(naver_keyword_volume/search_keyword_data/pick_keyword/' +
       'search_keyword_picks/mark_keyword_used/add_publish_log/get_publish_log), ' +
+      'Claude 시스템 프롬프트 도구(get_system_prompt/update_system_prompt), ' +
       'DB 직접 조회·수정 도구(list_tables/get_rows/upsert_row/delete_row/run_sql), ' +
       'GitHub 저장소(minssajang/trader) 파일 확인 도구(list_github_files/get_github_file)를 제공한다. ' +
       '입금 확인 후 issue_license로 키를 발급하고, 발급된 키는 반드시 신청자 이메일로 안내해야 한다.',
