@@ -6,6 +6,7 @@ import BlogMenuPanel from '../components/admin/BlogMenuPanel'
 import ContentLogPanel from '../components/admin/ContentLogPanel'
 import SystemPromptPanel from '../components/admin/SystemPromptPanel'
 import PopupPanel from '../components/admin/PopupPanel'
+import BoardAdminPanel from '../components/admin/BoardAdminPanel'
 import { S, Toast } from '../components/admin/AdminUI'
 
 const TAB_LABELS = {
@@ -14,6 +15,7 @@ const TAB_LABELS = {
   blogmanage: '📝 블로그관리',
   blogmenu: '📂 블로그메뉴관리',
   contentlog: '📋 발행기록',
+  freeboard: '💬 자유게시판',
   systemprompt: '🤖 Claude 지침',
   popup: '📢 팝업관리',
   password: '🔒 비밀번호 변경',
@@ -163,6 +165,7 @@ export default function Admin() {
             {activeTab === 'blogmanage' && <BlogAdminPanel adminToken={adminToken} showToast={showToast} initialView="list" />}
             {activeTab === 'blogmenu' && <BlogMenuPanel adminToken={adminToken} />}
             {activeTab === 'contentlog' && <ContentLogPanel adminToken={adminToken} />}
+            {activeTab === 'freeboard' && <BoardAdminPanel adminToken={adminToken} />}
             {activeTab === 'systemprompt' && <SystemPromptPanel adminToken={adminToken} />}
             {activeTab === 'popup' && <PopupPanel adminToken={adminToken} />}
             {activeTab === 'password' && <PasswordPanel adminToken={adminToken} showToast={showToast} />}

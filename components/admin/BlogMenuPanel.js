@@ -66,6 +66,7 @@ export default function BlogMenuPanel({ adminToken }) {
         {ICON_CHOICES.map(ic => (
           <button key={ic} type="button" onClick={() => setNewIcon(ic)} style={{
             width: 34, height: 34, borderRadius: 8, fontSize: 16, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1,
             background: newIcon === ic ? 'rgba(76,175,80,0.2)' : '#0f1115',
             border: newIcon === ic ? '1.5px solid #4CAF50' : '1.5px solid #2a2e38',
           }}>{ic}</button>
@@ -107,7 +108,11 @@ export default function BlogMenuPanel({ adminToken }) {
               <button onClick={() => deleteCategory(cat.id, cat.label)} style={{
                 background: 'none', border: 'none', cursor: 'pointer',
                 color: '#9aa0ab', fontSize: 16, lineHeight: 1, padding: '0 2px',
-              }}>×</button>
+                display: 'flex', alignItems: 'center',
+              }}
+                onMouseEnter={e => e.currentTarget.style.color = '#4CAF50'}
+                onMouseLeave={e => e.currentTarget.style.color = '#9aa0ab'}
+              >×</button>
             </div>
           ))}
         </div>

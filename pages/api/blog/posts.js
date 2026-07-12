@@ -30,7 +30,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'GET') {
-    const { id, slug, category, limit = 20, offset = 0, q } = req.query
+    const { id, slug, category, limit = 20, offset = 0, q, post_type } = req.query
     if (id) {
       let query = supabase.from('blog_posts').select('*').eq('id', id)
       if (!isAdmin) query = query.eq('status', 'published')
@@ -47,6 +47,7 @@ export default async function handler(req, res) {
     }
     let query = supabase.from('blog_posts').select('*').order('created_at', { ascending: false })
     if (!isAdmin) query = query.eq('status', 'published')
+    query = query.eq('post_type', post_type || 'blog')
     if (category) query = query.eq('category', category)
     if (q) {
       const safeQ = String(q).replace(/[(),]/g, ' ').trim()
