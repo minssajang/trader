@@ -1,7 +1,6 @@
 import Head from 'next/head'
 import Link from 'next/link'
 import { AdSlot } from '../components/AdSlot'
-import { ScreenMockups } from '../components/ScreenMockups'
 import { useAdSlot } from '../lib/AdSlotsContext'
 
 const FEATURES = [
@@ -110,14 +109,6 @@ export default function Home() {
             <p>MT5 공식 파이썬 API 연동. 계정 로그인 기반, 다양한 심볼 지원.</p>
             <p className="product-note">🌍 전 세계 CFD 브로커들이 표준으로 채택한 플랫폼이에요.</p>
           </div>
-        </div>
-
-        <div className="section-title">
-          <h2>실제 화면 미리보기</h2>
-          <p>탭을 눌러 각 화면을 둘러보세요</p>
-        </div>
-        <div style={{ marginBottom: 48 }}>
-          <ScreenMockups />
         </div>
 
         <div className="section-title" style={{ marginTop: 48 }}>
