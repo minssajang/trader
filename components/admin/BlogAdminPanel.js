@@ -69,7 +69,9 @@ const TOOL_PANELS = {
           { text: 'GA4 속성 생성 및 데이터 스트림 추가', desc: '측정 ID(G-XXXXXXXX) 발급' },
           { text: '측정 ID를 사이트 <head>에 삽입', desc: '_app.js에 Script 컴포넌트로 gtag.js 로드' },
           { text: 'Search Console 연결', desc: 'GA4 관리 → 속성 → Search Console 링크' },
+          { text: '내부 트래픽(내 IP) 필터 설정', desc: '관리 → 데이터 필터 → 내부 트래픽 정의' },
           { text: '목표/전환 이벤트 설정', desc: '신청 완료, 문의 클릭 등 중요 액션을 전환으로 표시' },
+          { text: '주간/월간 리포트 이메일 자동 발송 설정', desc: 'GA4 → 리포트 → 공유 → 이메일 예약 전송 설정' },
         ] },
       { title: '📋 주기적으로 확인', color: '#3b82f6',
         items: [
@@ -77,6 +79,7 @@ const TOOL_PANELS = {
           { text: '[주간] 유입 채널별 트래픽 분석', desc: '획득 → 트래픽 획득' },
           { text: '[주간] 인기 페이지 TOP 10 확인', desc: '참여 → 페이지 및 화면' },
           { text: '[월간] 이탈률·평균 참여 시간 확인', desc: '참여 시간 짧으면 도입부 개선' },
+          { text: '[월간] 기기별·지역별 접속 현황', desc: '모바일 비율이 높으면 모바일 UX를 우선 최적화' },
         ] } ],
   },
   ogtag: {
@@ -88,12 +91,15 @@ const TOOL_PANELS = {
           { text: 'og:title 추가', desc: '<meta property="og:title" content="사이트 제목" />' },
           { text: 'og:description 추가 (80~160자)', desc: '<meta property="og:description" content="..." />' },
           { text: 'og:image 추가 (1200x630px 권장)', desc: 'SNS 공유 시 표시되는 썸네일' },
+          { text: 'og:url / og:type / og:site_name 추가', desc: 'og:type은 website' },
+          { text: 'Twitter Card 태그 추가', desc: '<meta name="twitter:card" content="summary_large_image" />' },
           { text: '블로그 글 페이지에도 동적 OG 태그 적용', desc: '각 글의 제목/요약/커버이미지가 OG로 출력되는지 확인' },
         ] },
       { title: '📋 주기적으로 확인', color: '#8b5cf6',
         items: [
           { text: 'Facebook 공유 디버거로 OG 태그 확인', desc: '캐시 새로고침도 여기서 가능' },
           { text: '카카오톡 공유 미리보기 확인', desc: '링크 공유 시 썸네일·제목 테스트' },
+          { text: 'og:image 사이즈 및 깨짐 확인', desc: '1200x630px 유지, 8MB 이하, HTTPS 필수' },
         ] } ],
   },
   seo: {
@@ -105,7 +111,9 @@ const TOOL_PANELS = {
           { text: 'sitemap.xml 자동 생성 및 제출', desc: '새 글 발행 시 sitemap 자동 갱신 확인' },
           { text: 'robots.txt 정상 설정 확인', desc: '/admin은 Disallow, /blog는 Allow' },
           { text: 'canonical URL 태그 삽입', desc: '중복 페이지 문제 방지' },
+          { text: 'HTTPS 적용 확인', desc: 'HTTP 접속 시 자동으로 HTTPS 리다이렉트 되는지 확인' },
           { text: '모바일 반응형 확인', desc: '구글은 모바일 우선 색인' },
+          { text: 'Core Web Vitals 점수 확인', desc: '서치콘솔 → 경험 → Core Web Vitals — LCP·INP·CLS 점수 확인 및 개선' },
         ] },
       { title: '✍️ 글 작성 시 매번 체크', color: '#06b6d4',
         items: [
@@ -113,6 +121,7 @@ const TOOL_PANELS = {
           { text: '메타 description 작성 (80~160자)', desc: '키워드 포함 + 클릭 유도 문구' },
           { text: 'URL 슬러그를 짧고 명확하게', desc: '영문 소문자+하이픈, 한글 금지' },
           { text: 'H2·H3 소제목으로 콘텐츠 구조화', desc: '목차 역할 + 구글이 구조 파악' },
+          { text: '이미지 alt 텍스트 입력', desc: '모든 이미지에 alt="설명" 추가 — 이미지 검색 유입 + 접근성 향상' },
           { text: '내부 링크 2~3개 이상 삽입', desc: '관련 글·/apply 로 연결' },
           { text: '발행 후 서치콘솔에서 URL 색인 요청', desc: 'URL 검사 → 색인 생성 요청' },
         ] } ],
@@ -127,10 +136,17 @@ const TOOL_PANELS = {
           { text: '네이버 서치어드바이저 등록', desc: '소유권 인증 · sitemap 제출' },
           { text: '빙 웹마스터 도구 등록', desc: '구글 서치콘솔에서 가져오기 가능' },
         ] },
+      { title: '선택 등록', color: '#10b981',
+        items: [
+          { text: '다음(카카오) 검색 등록', desc: '사이트 등록 신청' },
+          { text: '줌(ZUM) 등록', desc: '구글·다음 등록 시 자동 수집' },
+          { text: '얀덱스 웹마스터 등록', desc: '소유권 인증 · sitemap 제출' },
+        ] },
       { title: '🔧 등록 후 해야 할 것', color: '#10b981',
         items: [
           { text: '각 검색엔진에 sitemap.xml 제출', desc: '구글·네이버·빙 모두 제출' },
           { text: '소유권 인증 메타태그 삽입', desc: '구글·네이버 인증 메타태그 <head>에 추가' },
+          { text: 'ads.txt 파일 확인', desc: '/ads.txt 브라우저에서 직접 접근해서 확인' },
         ] } ],
   },
 }
@@ -142,21 +158,29 @@ const ROUTINES = {
     items: [
       { text: '서치콘솔 URL 색인 요청', link: 'https://search.google.com/search-console', desc: 'URL 검사 → 색인 생성 요청' },
       { text: '실시간 트래픽 확인', link: 'https://analytics.google.com', desc: '발행 후 GA4 실시간 탭 확인' },
+      { text: 'OG태그 디버거 확인', link: 'https://developers.facebook.com/tools/debug/', desc: '페이스북 공유 미리보기 테스트' },
     ],
   },
   weekly: {
     label: '📅 매주 토요일 확인', color: '#0891b2',
     items: [
       { text: '애드센스 수익/RPM 확인', link: 'https://www.google.com/adsense', desc: '보고서 → 날짜별 수익 추이' },
+      { text: '애드센스 정책 위반 경고 확인', link: 'https://www.google.com/adsense', desc: '알림 탭 빨간 경고 확인' },
       { text: '서치콘솔 검색 성과 확인', link: 'https://search.google.com/search-console', desc: '클릭수·노출수·CTR 키워드 분석' },
       { text: 'GA4 인기 페이지 TOP 10', link: 'https://analytics.google.com', desc: '참여 → 페이지 및 화면' },
+      { text: 'GA4 유입 채널별 분석', link: 'https://analytics.google.com', desc: '획득 → 트래픽 획득' },
     ],
   },
   monthly: {
     label: '🗓️ 매월 마지막 토요일', color: '#d97706',
     items: [
       { text: '애드센스 광고 위치 CTR 분석', link: 'https://www.google.com/adsense', desc: '어떤 위치 광고가 잘 클릭되는지 파악' },
+      { text: '애드센스 모바일 광고 노출 확인', link: 'https://www.google.com/adsense', desc: '반응형 광고 단위 정상 작동 여부' },
       { text: '서치콘솔 색인 현황 확인', link: 'https://search.google.com/search-console', desc: '색인 안 된 페이지 원인 파악' },
+      { text: '서치콘솔 모바일 사용성 오류', link: 'https://search.google.com/search-console', desc: '경험 → 모바일 사용성' },
+      { text: 'Core Web Vitals 점수 확인', link: 'https://search.google.com/search-console', desc: 'LCP·INP·CLS 점수 개선' },
+      { text: 'GA4 이탈률·참여 시간 확인', link: 'https://analytics.google.com', desc: '참여 시간 짧은 글 도입부 개선' },
+      { text: 'GA4 기기별·지역별 접속 현황', link: 'https://analytics.google.com', desc: '모바일 비율 높으면 UX 우선 최적화' },
       { text: 'CTR 낮은 글 제목/메타설명 개선', link: 'https://search.google.com/search-console', desc: '성과 → CTR 낮은 페이지 찾아 수정' },
       { text: '오래된 글 콘텐츠 업데이트', link: null, desc: '6개월~1년 된 글 최신 정보로 갱신 후 재색인 요청' },
     ],
@@ -343,9 +367,22 @@ export default function BlogAdminPanel({ adminToken, showToast, initialView }) {
       {view === 'write' && (
         <div style={{ display: 'grid', gridTemplateColumns: preview ? '1fr 1.1fr' : '1fr', gap: 24 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <button onClick={() => { setView('list'); setEditId(null); setForm(emptyForm) }} style={S.btnGhost}>← 목록</button>
-              <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{editId ? '✏️ 글 수정' : '📝 새 글 작성'}</h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button onClick={() => { setView('list'); setEditId(null); setForm(emptyForm) }} style={S.btnGhost}>← 목록</button>
+                <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{editId ? '✏️ 글 수정' : '📝 새 글 작성'}</h2>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button onClick={() => setPreview(v => !v)} style={S.btnGhost}>{preview ? '✏️ 편집' : '👁 미리보기'}</button>
+                <button onClick={() => handleSave('draft')} disabled={loading} style={S.btn('#555')}>💾 임시저장</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(63,81,181,0.1)', border: '1.5px solid #3F51B5', borderRadius: 8, padding: '4px 10px' }}>
+                  <input type="datetime-local" value={form.scheduledAt} onChange={e => setForm(v => ({ ...v, scheduledAt: e.target.value }))}
+                    min={new Date(Date.now() + 60000).toISOString().slice(0, 16)}
+                    style={{ border: 'none', background: 'transparent', fontSize: 12, color: '#8c9eff', outline: 'none', cursor: 'pointer' }} />
+                  <button onClick={() => handleSave('scheduled')} disabled={loading} style={{ ...S.btn('#3F51B5'), padding: '5px 10px', fontSize: 12 }}>⏰ 예약</button>
+                </div>
+                <button onClick={() => handleSave('published')} disabled={loading} style={S.btn()}>{loading ? '저장 중...' : '🚀 발행'}</button>
+              </div>
             </div>
 
             <input value={form.title} onChange={e => setForm(v => ({ ...v, title: e.target.value, slug: v.slug || slugify(e.target.value) }))}
@@ -393,18 +430,6 @@ export default function BlogAdminPanel({ adminToken, showToast, initialView }) {
               <textarea value={form.content} onChange={e => setForm(v => ({ ...v, content: e.target.value }))}
                 rows={22} placeholder={'# 제목\n\n본문을 마크다운으로 작성하세요.\n\n## 소제목\n\n- 항목 1\n- 항목 2\n\n**굵게** *기울임* `코드`'}
                 style={{ ...S.input, fontFamily: 'monospace', resize: 'vertical', lineHeight: 1.7 }} />
-            </div>
-
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button onClick={() => setPreview(v => !v)} style={S.btnGhost}>{preview ? '✏️ 편집' : '👁 미리보기'}</button>
-              <button onClick={() => handleSave('draft')} disabled={loading} style={S.btn('#555')}>💾 임시저장</button>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(63,81,181,0.1)', border: '1.5px solid #3F51B5', borderRadius: 8, padding: '4px 10px' }}>
-                <input type="datetime-local" value={form.scheduledAt} onChange={e => setForm(v => ({ ...v, scheduledAt: e.target.value }))}
-                  min={new Date(Date.now() + 60000).toISOString().slice(0, 16)}
-                  style={{ border: 'none', background: 'transparent', fontSize: 12, color: '#8c9eff', outline: 'none', cursor: 'pointer' }} />
-                <button onClick={() => handleSave('scheduled')} disabled={loading} style={{ ...S.btn('#3F51B5'), padding: '5px 10px', fontSize: 12 }}>⏰ 예약</button>
-              </div>
-              <button onClick={() => handleSave('published')} disabled={loading} style={S.btn()}>{loading ? '저장 중...' : '🚀 발행'}</button>
             </div>
           </div>
 
