@@ -150,6 +150,11 @@ export default function Admin() {
         </aside>
 
         <main style={{ flex: 1, minWidth: 0, padding: '32px 28px 60px' }}>
+          <style>{`
+            /* styles/site.css의 전역 button { width:100%; margin-top:20px } 이 관리자 화면
+               버튼들(미리보기/발행/삭제 등)을 전부 강제로 늘려버리는 문제를 이 영역 안에서만 되돌린다. */
+            main button { width: auto; margin-top: 0; }
+          `}</style>
           <div style={{ maxWidth: 900, margin: '0 auto' }}>
             {activeTab === 'licenses' && <LicenseAdminPanel adminToken={adminToken} showToast={showToast} />}
             {activeTab === 'blogwrite' && <BlogAdminPanel adminToken={adminToken} showToast={showToast} initialView="write" />}

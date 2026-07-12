@@ -11,11 +11,13 @@ export const S = {
     background: color, color: '#fff', border: 'none', borderRadius: 9,
     padding: '10px 22px', fontFamily: 'inherit',
     fontSize: 14, fontWeight: 700, cursor: 'pointer',
+    width: 'auto', marginTop: 0,
   }),
   btnGhost: {
     background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
     padding: '8px 16px', fontFamily: 'inherit',
     fontSize: 13, fontWeight: 700, cursor: 'pointer',
+    width: 'auto', marginTop: 0,
   },
   label: { color: '#9aa0ab', fontSize: 12, marginBottom: 5, display: 'block', fontWeight: 600 },
   row: { background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 10, padding: '12px 16px', marginBottom: 8 },
