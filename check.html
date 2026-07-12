@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>내 정보 조회 - 매매 시스템</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="site">
+    <h1>내 정보 조회</h1>
+    <nav class="site">
+      <a href="index.html">소개</a>
+      <a href="apply.html">신청</a>
+    </nav>
+  </header>
+
+  <div class="card">
+    <h2>라이선스 상태 확인</h2>
+    <form id="checkForm">
+      <label for="name">이름</label>
+      <input type="text" id="name" required>
+
+      <label for="email">이메일</label>
+      <input type="email" id="email" required>
+
+      <button type="submit" id="submitBtn">조회하기</button>
+    </form>
+
+    <div id="result" class="result-box"></div>
+  </div>
+
+  <footer class="site">문의: minssajang@gmail.com</footer>
+</div>
+
+<script src="js/supabase-config.js"></script>
+<script>
+const STATUS_LABEL = { active: "활성", pending: "입금 확인 대기중", expired: "만료됨", cancelled: "취소됨" };
+
+document.getElementById("checkForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const submitBtn = document.getElementById("submitBtn");
+  const result = document.getElementById("result");
+  submitBtn.disabled = true;
+  submitBtn.textContent = "조회 중...";
+  result.className = "result-box";
+
+  try {
+    const rows = await callRpc("check_license", {
+      p_name: document.getElementById("name").value.trim(),
+      p_email: document.getElementById("email").value.trim(),
+    });
+
+    if (!rows || rows.length === 0) {
+      result.textContent = "일치하는 신청 내역을 찾지 못했습니다. 이름/이메일을 다시 확인해주세요.";
+      result.className = "result-box show err";
+    } else {
+      const r = rows[0];
+      const badgeClass = r.status || "pending";
+      const label = STATUS_LABEL[r.status] || r.status;
+      let html = `<span class="badge ${badgeClass}">${label}</span><br><br>`;
+      html += `제품: ${r.product === "nt8" ? "NinjaTrader 8" : "MetaTrader 5"}<br>`;
+      if (r.requested_months) html += `신청 기간: ${r.requested_months}개월<br>`;
+      if (r.start_date) html += `시작일: ${r.start_date}<br>`;
+      if (r.expire_date) html += `만료일: ${r.expire_date}<br>`;
+      if (r.license_key) html += `라이선스 키: ${r.license_key}<br>`;
+      result.innerHTML = html;
+      result.className = "result-box show " + (r.status === "active" ? "ok" : "err");
+    }
+  } catch (err) {
+    result.textContent = "조회 중 오류가 발생했습니다: " + err.message;
+    result.className = "result-box show err";
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "조회하기";
+  }
+});
+</script>
+</body>
+</html>
