@@ -26,6 +26,7 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
   const [confirmTarget, setConfirmTarget] = useState(null)
 
   const [app, setApp] = useState('ninja')
+  const appRows = rows.filter(r => r.app === app)
   const [version, setVersion] = useState('')
   const [changelog, setChangelog] = useState('')
   const [file, setFile] = useState(null)
@@ -99,19 +100,25 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
     <div style={S.card}>
       <div style={S.cardTitle}>📦 버전 관리 ({rows.length})</div>
 
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+        {['ninja', 'mt5'].map(a => (
+          <button key={a} onClick={() => setApp(a)}
+            style={{
+              ...S.btnGhost,
+              padding: '6px 16px',
+              background: app === a ? '#4CAF50' : 'none',
+              color: app === a ? '#fff' : '#9aa0ab',
+              borderColor: app === a ? '#4CAF50' : '#2a2e38',
+            }}>
+            {APP_LABEL[a]} ({rows.filter(r => r.app === a).length})
+          </button>
+        ))}
+      </div>
+
       <div style={{ ...S.row, marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-          <div>
-            <label style={S.label}>제품</label>
-            <select value={app} onChange={e => setApp(e.target.value)} style={{ ...S.input, width: 160 }}>
-              <option value="ninja">NT8 (Ninja)</option>
-              <option value="mt5">MT5</option>
-            </select>
-          </div>
-          <div>
-            <label style={S.label}>버전</label>
-            <input value={version} onChange={e => setVersion(e.target.value)} placeholder="예: 1.1.0" style={{ ...S.input, width: 160 }} />
-          </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={S.label}>버전</label>
+          <input value={version} onChange={e => setVersion(e.target.value)} placeholder="예: 1.1.0" style={{ ...S.input, width: 160 }} />
         </div>
         <label style={S.label}>변경 내용</label>
         <textarea value={changelog} onChange={e => setChangelog(e.target.value)} rows={3} style={{ ...S.textarea, marginBottom: 12 }} />
@@ -124,14 +131,13 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
       </div>
 
       {loading && <div style={{ color: '#9aa0ab', fontSize: 14 }}>불러오는 중...</div>}
-      {!loading && rows.length === 0 && <div style={{ color: '#9aa0ab', fontSize: 14 }}>등록된 버전이 없습니다</div>}
+      {!loading && appRows.length === 0 && <div style={{ color: '#9aa0ab', fontSize: 14 }}>{APP_LABEL[app]}에 등록된 버전이 없습니다</div>}
 
-      {!loading && rows.length > 0 && (
+      {!loading && appRows.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={th}>제품</th>
                 <th style={th}>버전</th>
                 <th style={th}>변경 내용</th>
                 <th style={th}>등록일</th>
@@ -141,9 +147,8 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {appRows.map(r => (
                 <tr key={r.id}>
-                  <td style={td}>{APP_LABEL[r.app] || r.app}</td>
                   <td style={td}>v{r.version}</td>
                   <td style={{ ...td, maxWidth: 260, whiteSpace: 'pre-wrap', color: '#9aa0ab' }}>{r.changelog}</td>
                   <td style={td}>{new Date(r.created_at).toLocaleDateString('ko-KR')}</td>
