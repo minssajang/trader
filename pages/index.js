@@ -11,8 +11,10 @@ export default function Home() {
         <header className="site">
           <h1>매매 시스템</h1>
           <nav className="site">
+            <Link href="/blog">블로그</Link>
             <Link href="/apply">신청</Link>
             <Link href="/check">내 정보 조회</Link>
+            <Link href="/admin">관리자</Link>
           </nav>
         </header>
 

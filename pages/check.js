@@ -39,6 +39,7 @@ export default function Check() {
           <h1>내 정보 조회</h1>
           <nav className="site">
             <Link href="/">소개</Link>
+            <Link href="/blog">블로그</Link>
             <Link href="/apply">신청</Link>
           </nav>
         </header>

@@ -24,7 +24,12 @@ export default function Apply() {
         p_months: parseInt(months, 10),
         p_phone: phone.trim() || null,
       })
-      setResult({ ok: true, msg: '신청이 접수되었습니다. 위 계좌로 입금해주시면 확인 후 이메일로 라이선스 키를 보내드립니다.' })
+      setResult({
+        ok: true,
+        msg: months === '0'
+          ? '무료체험 신청이 접수되었습니다. 확인 후 이메일로 라이선스 키를 보내드립니다.'
+          : '신청이 접수되었습니다. 위 계좌로 입금해주시면 확인 후 이메일로 라이선스 키를 보내드립니다.',
+      })
       setName(''); setEmail(''); setPhone(''); setProduct('nt8'); setMonths('1')
     } catch (err) {
       setResult({ ok: false, msg: '신청 중 오류가 발생했습니다: ' + err.message })
@@ -42,6 +47,7 @@ export default function Apply() {
           <h1>신청</h1>
           <nav className="site">
             <Link href="/">소개</Link>
+            <Link href="/blog">블로그</Link>
             <Link href="/check">내 정보 조회</Link>
           </nav>
         </header>
@@ -66,10 +72,11 @@ export default function Apply() {
 
             <label htmlFor="months">신청 기간</label>
             <select id="months" value={months} onChange={e => setMonths(e.target.value)}>
+              <option value="0">무료체험 (7일)</option>
               <option value="1">1개월</option>
               <option value="3">3개월</option>
               <option value="6">6개월</option>
-              <option value="12">12개월</option>
+              <option value="12">1년</option>
             </select>
 
             <button type="submit" disabled={submitting}>{submitting ? '신청 중...' : '신청하기'}</button>
@@ -79,11 +86,17 @@ export default function Apply() {
             <div className={`result-box show ${result.ok ? 'ok' : 'err'}`}>{result.msg}</div>
           )}
 
-          <div className="deposit-info">
-            <strong>입금 계좌 안내</strong><br />
-            카카오뱅크 3333-24-9824590 (예금주: 민찬홍)<br />
-            신청 접수 후 위 계좌로 입금해주시면, 확인 후 이메일로 라이선스 키를 보내드립니다.
-          </div>
+          {months === '0' ? (
+            <div className="deposit-info">
+              무료체험은 입금 없이 신청만 하시면 됩니다. 확인 후 이메일로 라이선스 키를 보내드립니다.
+            </div>
+          ) : (
+            <div className="deposit-info">
+              <strong>입금 계좌 안내</strong><br />
+              카카오뱅크 3333-24-9824590 (예금주: 민찬홍)<br />
+              신청 접수 후 위 계좌로 입금해주시면, 확인 후 이메일로 라이선스 키를 보내드립니다.
+            </div>
+          )}
         </div>
 
         <footer className="site">문의: minssajang@gmail.com</footer>

@@ -35,12 +35,32 @@ function addMonths(dateStr, months) {
   return d.toISOString().slice(0, 10)
 }
 
+function addDays(dateStr, days) {
+  const d = dateStr ? new Date(dateStr) : new Date()
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+// requested_months === 0 은 "무료체험(7일)"을 의미한다
+function computeExpireDate(startDate, months) {
+  return months === 0 ? addDays(startDate, 7) : addMonths(startDate, months)
+}
+
 function genLicenseKey() {
   return randomUUID().replace(/-/g, '').slice(0, 20).toUpperCase().replace(/(.{5})/g, '$1-').replace(/-$/, '')
 }
 
+// 신청 → 입금확인 → 라이선스 발행 → 메일발송, 4단계 파이프라인 (admin 화면과 동일한 규칙)
+function getStage(r) {
+  if (r.status === 'expired' || r.status === 'cancelled') return 'closed'
+  if (r.status === 'active') return r.email_sent_at ? 'done' : 'issued'
+  return r.deposit_confirmed_at ? 'deposit' : 'applied'
+}
+
+const STAGE_LABEL = { applied: '① 신청', deposit: '② 입금확인', issued: '③ 라이선스 발행', done: '④ 메일발송 완료', closed: '만료·취소' }
+
 function fmtRow(r) {
-  return `ID:${r.id} | ${r.name} (${r.email}${r.phone ? `, ${r.phone}` : ''}) | 제품:${r.product} | 상태:${r.status} | 신청기간:${r.requested_months}개월` +
+  return `ID:${r.id} | 단계:${STAGE_LABEL[getStage(r)]} | ${r.name} (${r.email}${r.phone ? `, ${r.phone}` : ''}) | 제품:${r.product} | 신청기간:${r.requested_months === 0 ? '무료체험(7일)' : r.requested_months + '개월'}` +
     (r.start_date ? ` | 시작:${r.start_date}` : '') +
     (r.expire_date ? ` | 만료:${r.expire_date}` : '') +
     (r.license_key ? ` | 키:${r.license_key}` : '') +
@@ -85,12 +105,46 @@ const baseHandler = createMcpHandler(
         const { data: row, error: fetchErr } = await supabase.from('licenses').select('*').eq('id', id).maybeSingle()
         if (fetchErr) return { content: [{ type: 'text', text: `❌ ${fetchErr.message}` }], isError: true }
         if (!row) return { content: [{ type: 'text', text: `❌ id="${id}" 신청 내역을 찾을 수 없음` }], isError: true }
-        const months = row.requested_months || 1
+        const months = row.requested_months ?? 1
         const start = new Date().toISOString().slice(0, 10)
-        const update = { status: 'active', license_key: genLicenseKey(), start_date: start, expire_date: addMonths(start, months) }
+        const update = { status: 'active', license_key: genLicenseKey(), start_date: start, expire_date: computeExpireDate(start, months) }
         const { data, error } = await supabase.from('licenses').update(update).eq('id', id).select().single()
         if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
         return { content: [{ type: 'text', text: `✅ 라이선스 발급 완료\n${fmtRow(data)}\n\n이메일(${data.email})로 라이선스 키를 안내해야 한다: ${data.license_key}` }] }
+      }
+    )
+
+    server.registerTool(
+      'confirm_deposit',
+      {
+        title: '입금 확인 처리',
+        description: '실제로 입금이 확인된 신청 건을 "② 입금확인" 단계로 넘긴다. 아직 키는 발급하지 않는다 (그 다음 issue_license 호출). 무료체험(requested_months=0)은 신청 즉시 자동으로 이 단계를 건너뛰므로 호출할 필요 없음.',
+        inputSchema: {
+          id: z.string().describe('licenses 테이블의 id'),
+        },
+      },
+      async ({ id }) => {
+        const { data, error } = await supabase.from('licenses')
+          .update({ deposit_confirmed_at: new Date().toISOString() }).eq('id', id).select().single()
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        return { content: [{ type: 'text', text: `✅ 입금 확인 처리 완료\n${fmtRow(data)}` }] }
+      }
+    )
+
+    server.registerTool(
+      'mark_email_sent',
+      {
+        title: '메일 발송 완료 처리',
+        description: '라이선스 키를 신청자 이메일로 실제 발송한 뒤 "④ 메일발송 완료" 단계로 넘긴다. 실제 이메일 발송은 이 서버가 대신 해주지 않으므로, 직접 보낸 뒤에만 호출할 것.',
+        inputSchema: {
+          id: z.string().describe('licenses 테이블의 id'),
+        },
+      },
+      async ({ id }) => {
+        const { data, error } = await supabase.from('licenses')
+          .update({ email_sent_at: new Date().toISOString() }).eq('id', id).select().single()
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        return { content: [{ type: 'text', text: `✅ 메일 발송 완료 처리\n${fmtRow(data)}` }] }
       }
     )
 
@@ -148,6 +202,82 @@ const baseHandler = createMcpHandler(
         const { data, error } = await supabase.from('licenses').update({ note }).eq('id', id).select().single()
         if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
         return { content: [{ type: 'text', text: `✅ 메모 저장 완료\n${fmtRow(data)}` }] }
+      }
+    )
+
+    // ── 블로그 관리 툴 (fresh-season 패턴을 trader용으로 축소) ────────────────
+
+    server.registerTool(
+      'list_blog_posts',
+      {
+        title: '블로그 글 목록 조회',
+        description: '블로그 글 목록을 조회한다. status(draft/published)나 category로 필터링 가능.',
+        inputSchema: {
+          status: z.enum(['draft', 'published']).optional().describe('상태로 필터링. 비우면 전체'),
+          category: z.string().optional().describe('카테고리로 필터링'),
+          limit: z.number().int().min(1).max(200).optional().describe('가져올 행 수. 기본 50'),
+        },
+      },
+      async ({ status, category, limit = 50 }) => {
+        let q = supabase.from('blog_posts').select('*').order('created_at', { ascending: false }).limit(limit)
+        if (status) q = q.eq('status', status)
+        if (category) q = q.eq('category', category)
+        const { data, error } = await q
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        if (!data?.length) return { content: [{ type: 'text', text: '조회된 글 없음' }] }
+        const lines = data.map(p => `ID:${p.id} | ${p.status === 'published' ? '✅발행' : '📝임시'} | ${p.title} | 카테고리:${p.category || '-'} | slug:${p.slug}`)
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      }
+    )
+
+    server.registerTool(
+      'create_blog_post',
+      {
+        title: '블로그 글 작성',
+        description: '새 블로그 글을 작성한다. status를 published로 주면 즉시 발행되고 published_at이 현재시각(KST)으로 기록된다.',
+        inputSchema: {
+          title: z.string().describe('글 제목'),
+          slug: z.string().describe('URL 슬러그 (영문 소문자+하이픈)'),
+          content: z.string().describe('본문 (마크다운)'),
+          category: z.string().optional().describe('카테고리. 예: 전략 / 공지 / 가이드'),
+          summary: z.string().optional().describe('목록·검색결과에 보일 짧은 요약'),
+          status: z.enum(['draft', 'published']).optional().describe('기본: published'),
+        },
+      },
+      async ({ title, slug, content, category = '', summary = '', status = 'published' }) => {
+        const now = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00')
+        const { data, error } = await supabase.from('blog_posts').insert([{
+          id: randomUUID(), title, slug, content, category, summary, status,
+          published_at: status === 'published' ? now : null,
+          created_at: now,
+        }]).select().single()
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        return { content: [{ type: 'text', text: `✅ 작성 완료 (ID:${data.id})\n${status === 'published' ? `/blog/${data.slug} 에 발행됨` : '임시저장됨'}` }] }
+      }
+    )
+
+    server.registerTool(
+      'update_blog_post',
+      {
+        title: '블로그 글 수정',
+        description: '기존 블로그 글의 내용이나 상태를 수정한다 (예: draft → published 전환). id는 list_blog_posts로 조회.',
+        inputSchema: {
+          id: z.string().describe('blog_posts 테이블의 id'),
+          title: z.string().optional(),
+          slug: z.string().optional(),
+          content: z.string().optional(),
+          category: z.string().optional(),
+          summary: z.string().optional(),
+          status: z.enum(['draft', 'published']).optional(),
+        },
+      },
+      async ({ id, ...updates }) => {
+        if (updates.status === 'published' && !updates.published_at) {
+          updates.published_at = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00')
+        }
+        const { data, error } = await supabase.from('blog_posts').update(updates).eq('id', id).select().single()
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        return { content: [{ type: 'text', text: `✅ 수정 완료\nID:${data.id} | ${data.status === 'published' ? '✅발행' : '📝임시'} | ${data.title}` }] }
       }
     )
 
@@ -324,6 +454,7 @@ const baseHandler = createMcpHandler(
   {
     instructions:
       '매매 시스템(trader) 라이선스 관리 서버. 라이선스 신청 조회/발급/연장/취소 도구와 ' +
+      '블로그 글 관리 도구(list_blog_posts/create_blog_post/update_blog_post), ' +
       'DB 직접 조회·수정 도구(list_tables/get_rows/upsert_row/delete_row/run_sql), ' +
       'GitHub 저장소(minssajang/trader) 파일 확인 도구(list_github_files/get_github_file)를 제공한다. ' +
       '입금 확인 후 issue_license로 키를 발급하고, 발급된 키는 반드시 신청자 이메일로 안내해야 한다.',
