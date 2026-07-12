@@ -43,6 +43,37 @@ const GLOSSARY = [
   { term: 'CFD', label: '차액결제거래', desc: '실제 자산을 소유하지 않고 가격 변동분만 정산하는 파생상품이에요. 거래소가 아니라 브로커를 통해 거래되고, MetaTrader 5가 주로 다루는 방식이에요.' },
 ]
 
+function DownloadButton({ info, app }) {
+  const [showComingSoon, setShowComingSoon] = useState(false)
+
+  if (info) {
+    return (
+      <Link href={`/download?app=${app}`} className="btn-cta primary" style={{ marginTop: 16 }}>
+        ⬇️ 다운로드 (v{info.version})
+      </Link>
+    )
+  }
+
+  return (
+    <>
+      <button type="button" className="btn-cta primary" style={{ marginTop: 16 }} onClick={() => setShowComingSoon(true)}>
+        ⬇️ 다운로드
+      </button>
+      {showComingSoon && (
+        <div onClick={() => setShowComingSoon(false)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20,
+        }}>
+          <div onClick={e => e.stopPropagation()} className="card" style={{ maxWidth: 320, textAlign: 'center' }}>
+            <p style={{ margin: '0 0 16px', fontSize: 15 }}>⏳ 다운로드 준비 중입니다.<br />조금만 기다려주세요!</p>
+            <button type="button" className="btn-cta primary" style={{ width: 'auto' }} onClick={() => setShowComingSoon(false)}>확인</button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function Home() {
   const topSlot = useAdSlot('home_top')
   const footerSlot = useAdSlot('footer')
@@ -115,18 +146,14 @@ export default function Home() {
             <p>NT8 PythonBridge 애드온과 연동. Market Replay 화면 자동화, 예약매매,
             실시간 손절/익절 지원.</p>
             <p className="product-note">🏢 프랍펌(자금 지원 트레이딩 회사)에서 특히 많이 쓰는 선물 트레이딩 플랫폼이에요.</p>
-            {versions.ninja
-              ? <Link href="/download?app=ninja" className="btn-cta primary" style={{ marginTop: 16 }}>⬇️ 다운로드 (v{versions.ninja.version})</Link>
-              : <span className="product-note" style={{ marginTop: 16, display: 'block' }}>다운로드 준비 중</span>}
+            <DownloadButton info={versions.ninja} app="ninja" />
           </div>
           <div className="card product-card">
             <span className="tag">MT5</span>
             <h3>MetaTrader 5 버전</h3>
             <p>MT5 공식 파이썬 API 연동. 계정 로그인 기반, 다양한 심볼 지원.</p>
             <p className="product-note">🌍 전 세계 CFD 브로커들이 표준으로 채택한 플랫폼이에요.</p>
-            {versions.mt5
-              ? <Link href="/download?app=mt5" className="btn-cta primary" style={{ marginTop: 16 }}>⬇️ 다운로드 (v{versions.mt5.version})</Link>
-              : <span className="product-note" style={{ marginTop: 16, display: 'block' }}>다운로드 준비 중</span>}
+            <DownloadButton info={versions.mt5} app="mt5" />
           </div>
         </div>
 
