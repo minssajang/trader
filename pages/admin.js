@@ -2,11 +2,15 @@ import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import LicenseAdminPanel from '../components/admin/LicenseAdminPanel'
 import BlogAdminPanel from '../components/admin/BlogAdminPanel'
+import ContentLogPanel from '../components/admin/ContentLogPanel'
+import KeywordPanel from '../components/admin/KeywordPanel'
 import { S, Toast } from '../components/admin/AdminUI'
 
 const TAB_LABELS = {
   licenses: '🔑 라이선스 관리',
   blog: '📝 블로그',
+  contentlog: '📋 발행기록',
+  keyword: '🔍 키워드관리',
   password: '🔒 비밀번호 변경',
 }
 
@@ -146,6 +150,8 @@ export default function Admin() {
           <div style={{ maxWidth: 900, margin: '0 auto' }}>
             {activeTab === 'licenses' && <LicenseAdminPanel adminToken={adminToken} showToast={showToast} />}
             {activeTab === 'blog' && <BlogAdminPanel adminToken={adminToken} showToast={showToast} />}
+            {activeTab === 'contentlog' && <ContentLogPanel adminToken={adminToken} />}
+            {activeTab === 'keyword' && <KeywordPanel token={adminToken} />}
             {activeTab === 'password' && <PasswordPanel adminToken={adminToken} showToast={showToast} />}
           </div>
         </main>
