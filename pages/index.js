@@ -1,7 +1,10 @@
+import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import { AdSlot } from '../components/AdSlot'
+import { ScreenMockups } from '../components/ScreenMockups'
 import { useAdSlot } from '../lib/AdSlotsContext'
+import { callRpc } from '../lib/publicSupabase'
 
 const FEATURES = [
   { icon: '⚡', title: '실시간 연동', desc: '실시간 시세를 그대로 받아와서 바로바로 반영돼요.' },
@@ -44,6 +47,17 @@ const GLOSSARY = [
 export default function Home() {
   const topSlot = useAdSlot('home_top')
   const footerSlot = useAdSlot('footer')
+  const [versions, setVersions] = useState({}) // { ninja: {version, download_url}, mt5: {...} }
+
+  useEffect(() => {
+    ['ninja', 'mt5'].forEach(app => {
+      callRpc('get_latest_version', { p_app: app })
+        .then(rows => {
+          if (rows && rows[0]) setVersions(v => ({ ...v, [app]: rows[0] }))
+        })
+        .catch(() => {})
+    })
+  }, [])
 
   return (
     <>
@@ -102,13 +116,27 @@ export default function Home() {
             <p>NT8 PythonBridge 애드온과 연동. Market Replay 화면 자동화, 예약매매,
             실시간 손절/익절 지원.</p>
             <p className="product-note">🏢 프랍펌(자금 지원 트레이딩 회사)에서 특히 많이 쓰는 선물 트레이딩 플랫폼이에요.</p>
+            {versions.ninja
+              ? <a href={versions.ninja.download_url} className="btn-cta primary" style={{ marginTop: 16 }}>⬇️ 다운로드 (v{versions.ninja.version})</a>
+              : <span className="product-note" style={{ marginTop: 16, display: 'block' }}>다운로드 준비 중</span>}
           </div>
           <div className="card product-card">
             <span className="tag">MT5</span>
             <h3>MetaTrader 5 버전</h3>
             <p>MT5 공식 파이썬 API 연동. 계정 로그인 기반, 다양한 심볼 지원.</p>
             <p className="product-note">🌍 전 세계 CFD 브로커들이 표준으로 채택한 플랫폼이에요.</p>
+            {versions.mt5
+              ? <a href={versions.mt5.download_url} className="btn-cta primary" style={{ marginTop: 16 }}>⬇️ 다운로드 (v{versions.mt5.version})</a>
+              : <span className="product-note" style={{ marginTop: 16, display: 'block' }}>다운로드 준비 중</span>}
           </div>
+        </div>
+
+        <div className="section-title">
+          <h2>실제 화면 미리보기</h2>
+          <p>탭을 눌러 각 화면을 둘러보세요</p>
+        </div>
+        <div style={{ marginBottom: 48 }}>
+          <ScreenMockups />
         </div>
 
         <div className="section-title" style={{ marginTop: 48 }}>

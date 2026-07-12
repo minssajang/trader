@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import LicenseAdminPanel from '../components/admin/LicenseAdminPanel'
+import VersionAdminPanel from '../components/admin/VersionAdminPanel'
 import BlogAdminPanel from '../components/admin/BlogAdminPanel'
 import BlogMenuPanel from '../components/admin/BlogMenuPanel'
 import ContentLogPanel from '../components/admin/ContentLogPanel'
@@ -13,6 +14,7 @@ import { S, Toast } from '../components/admin/AdminUI'
 
 const TAB_LABELS = {
   licenses: '🔑 라이선스 관리',
+  versions: '📦 버전 관리',
   blogwrite: '✍️ 블로그글쓰기',
   blogmanage: '📝 블로그관리',
   blogmenu: '📂 블로그메뉴관리',
@@ -165,6 +167,7 @@ export default function Admin() {
           `}</style>
           <div style={{ maxWidth: 900, margin: '0 auto' }}>
             {activeTab === 'licenses' && <LicenseAdminPanel adminToken={adminToken} showToast={showToast} />}
+            {activeTab === 'versions' && <VersionAdminPanel adminToken={adminToken} showToast={showToast} />}
             {activeTab === 'blogwrite' && <BlogAdminPanel adminToken={adminToken} showToast={showToast} initialView="write" />}
             {activeTab === 'blogmanage' && <BlogAdminPanel adminToken={adminToken} showToast={showToast} initialView="list" />}
             {activeTab === 'blogmenu' && <BlogMenuPanel adminToken={adminToken} />}
