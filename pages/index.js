@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import { AdSlot } from '../components/AdSlot'
-import { ScreenMockups } from '../components/ScreenMockups'
 import { useAdSlot } from '../lib/AdSlotsContext'
 import { callRpc } from '../lib/publicSupabase'
 
@@ -129,14 +128,6 @@ export default function Home() {
               ? <Link href="/download?app=mt5" className="btn-cta primary" style={{ marginTop: 16 }}>⬇️ 다운로드 (v{versions.mt5.version})</Link>
               : <span className="product-note" style={{ marginTop: 16, display: 'block' }}>다운로드 준비 중</span>}
           </div>
-        </div>
-
-        <div className="section-title">
-          <h2>실제 화면 미리보기</h2>
-          <p>탭을 눌러 각 화면을 둘러보세요</p>
-        </div>
-        <div style={{ marginBottom: 48 }}>
-          <ScreenMockups />
         </div>
 
         <div className="section-title" style={{ marginTop: 48 }}>
