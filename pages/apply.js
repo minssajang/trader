@@ -6,6 +6,7 @@ import { callRpc } from '../lib/publicSupabase'
 export default function Apply() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [product, setProduct] = useState('nt8')
   const [months, setMonths] = useState('1')
   const [submitting, setSubmitting] = useState(false)
@@ -21,9 +22,10 @@ export default function Apply() {
         p_email: email.trim(),
         p_product: product,
         p_months: parseInt(months, 10),
+        p_phone: phone.trim() || null,
       })
       setResult({ ok: true, msg: '신청이 접수되었습니다. 위 계좌로 입금해주시면 확인 후 이메일로 라이선스 키를 보내드립니다.' })
-      setName(''); setEmail(''); setProduct('nt8'); setMonths('1')
+      setName(''); setEmail(''); setPhone(''); setProduct('nt8'); setMonths('1')
     } catch (err) {
       setResult({ ok: false, msg: '신청 중 오류가 발생했습니다: ' + err.message })
     }
@@ -52,6 +54,9 @@ export default function Apply() {
 
             <label htmlFor="email">이메일</label>
             <input type="email" id="email" required value={email} onChange={e => setEmail(e.target.value)} />
+
+            <label htmlFor="phone">전화번호</label>
+            <input type="text" id="phone" placeholder="010-1234-5678" value={phone} onChange={e => setPhone(e.target.value)} />
 
             <label htmlFor="product">제품</label>
             <select id="product" value={product} onChange={e => setProduct(e.target.value)}>

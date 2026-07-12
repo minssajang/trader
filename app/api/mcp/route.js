@@ -10,6 +10,8 @@
 //   SUPABASE_URL                - trader Supabase 프로젝트 URL
 //   SUPABASE_SERVICE_ROLE_KEY   - service_role(secret) 키. 절대 커밋 금지, 여기서만 서버사이드로 사용
 //   MCP_SHARED_SECRET           - 이 MCP 서버 보호용 공유 비밀키 (직접 정해서 등록)
+//   GITHUB_TOKEN (선택)          - list_github_files/get_github_file 툴의 GitHub API 요청 한도를
+//                                  늘리고 싶을 때만 등록. 없어도 동작(공개 저장소, 시간당 60회 제한)
 //
 // claude.ai 커스텀 커넥터 등록 URL:
 //   https://<vercel-deployment>.vercel.app/api/mcp?key=여기에_MCP_SHARED_SECRET_값
@@ -38,7 +40,7 @@ function genLicenseKey() {
 }
 
 function fmtRow(r) {
-  return `ID:${r.id} | ${r.name} (${r.email}) | 제품:${r.product} | 상태:${r.status} | 신청기간:${r.requested_months}개월` +
+  return `ID:${r.id} | ${r.name} (${r.email}${r.phone ? `, ${r.phone}` : ''}) | 제품:${r.product} | 상태:${r.status} | 신청기간:${r.requested_months}개월` +
     (r.start_date ? ` | 시작:${r.start_date}` : '') +
     (r.expire_date ? ` | 만료:${r.expire_date}` : '') +
     (r.license_key ? ` | 키:${r.license_key}` : '') +
@@ -146,6 +148,63 @@ const baseHandler = createMcpHandler(
         const { data, error } = await supabase.from('licenses').update({ note }).eq('id', id).select().single()
         if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
         return { content: [{ type: 'text', text: `✅ 메모 저장 완료\n${fmtRow(data)}` }] }
+      }
+    )
+
+    // ── GitHub 저장소 확인 툴 ────────────────────────────────────────────
+    // trader 저장소(minssajang/trader)에 실제로 어떤 파일이 올라가 있는지 확인할 때 쓴다.
+    // 공개 저장소라 토큰 없이도 동작하지만(시간당 60회 제한), GITHUB_TOKEN 환경변수를
+    // 등록해두면 그 제한이 훨씬 늘어난다.
+
+    server.registerTool(
+      'list_github_files',
+      {
+        title: 'GitHub 저장소 파일 목록 조회',
+        description: 'minssajang/trader 저장소의 특정 경로에 어떤 파일·폴더가 있는지 조회한다. path를 비우면 저장소 루트를 본다. GitHub에 실제로 무엇이 올라가 있는지 확인할 때 사용.',
+        inputSchema: {
+          path: z.string().optional().describe('조회할 경로. 예: "pages" 또는 "app/api/mcp". 비우면 루트'),
+          ref: z.string().optional().describe('브랜치/커밋. 기본: main'),
+        },
+      },
+      async ({ path = '', ref = 'main' }) => {
+        const url = `https://api.github.com/repos/minssajang/trader/contents/${path}?ref=${encodeURIComponent(ref)}`
+        const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'trader-mcp' }
+        if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+        const res = await fetch(url, { headers })
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          return { content: [{ type: 'text', text: `❌ GitHub API 오류 (${res.status}): ${text}` }], isError: true }
+        }
+        const data = await res.json()
+        const list = Array.isArray(data) ? data : [data]
+        const lines = list.map(f => `${f.type === 'dir' ? '📁' : '📄'} ${f.path}${f.type === 'file' ? ` (${f.size} bytes)` : ''}`)
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      }
+    )
+
+    server.registerTool(
+      'get_github_file',
+      {
+        title: 'GitHub 저장소 파일 내용 조회',
+        description: 'minssajang/trader 저장소의 특정 파일 내용을 텍스트로 가져온다. list_github_files로 경로 확인 후 사용. 100KB 넘는 파일은 GitHub API 제약으로 못 가져올 수 있다.',
+        inputSchema: {
+          path: z.string().describe('파일 경로. 예: "pages/admin.js"'),
+          ref: z.string().optional().describe('브랜치/커밋. 기본: main'),
+        },
+      },
+      async ({ path, ref = 'main' }) => {
+        const url = `https://api.github.com/repos/minssajang/trader/contents/${path}?ref=${encodeURIComponent(ref)}`
+        const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'trader-mcp' }
+        if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+        const res = await fetch(url, { headers })
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          return { content: [{ type: 'text', text: `❌ GitHub API 오류 (${res.status}): ${text}` }], isError: true }
+        }
+        const data = await res.json()
+        if (data.type !== 'file') return { content: [{ type: 'text', text: `❌ "${path}"는 파일이 아니라 ${data.type}입니다` }], isError: true }
+        const content = Buffer.from(data.content, data.encoding || 'base64').toString('utf-8')
+        return { content: [{ type: 'text', text: `[${path}] (${data.size} bytes)\n\n${content}` }] }
       }
     )
 
@@ -265,7 +324,8 @@ const baseHandler = createMcpHandler(
   {
     instructions:
       '매매 시스템(trader) 라이선스 관리 서버. 라이선스 신청 조회/발급/연장/취소 도구와 ' +
-      'DB 직접 조회·수정 도구(list_tables/get_rows/upsert_row/delete_row/run_sql)를 제공한다. ' +
+      'DB 직접 조회·수정 도구(list_tables/get_rows/upsert_row/delete_row/run_sql), ' +
+      'GitHub 저장소(minssajang/trader) 파일 확인 도구(list_github_files/get_github_file)를 제공한다. ' +
       '입금 확인 후 issue_license로 키를 발급하고, 발급된 키는 반드시 신청자 이메일로 안내해야 한다.',
   },
   { basePath: '/api', maxDuration: 30, verboseLogs: true }
