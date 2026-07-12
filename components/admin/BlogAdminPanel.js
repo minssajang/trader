@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { S } from './AdminUI'
-import BlogMenuPanel from './BlogMenuPanel'
 import { parseMarkdown as parseMd } from '../../lib/parseMarkdown'
 
 function nowKST() {
@@ -166,8 +165,8 @@ const ROUTINES = {
 
 const emptyForm = { title: '', slug: '', summary: '', content: '', category: '', tags: '', thumbnail: '', scheduledAt: '', publishedAt: '' }
 
-export default function BlogAdminPanel({ adminToken, showToast }) {
-  const [view, setView] = useState('list') // list | write | menu
+export default function BlogAdminPanel({ adminToken, showToast, initialView }) {
+  const [view, setView] = useState(initialView === 'write' ? 'write' : 'list') // list | write
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(false)
   const [filterType, setFilterType] = useState('all')
@@ -311,15 +310,6 @@ export default function BlogAdminPanel({ adminToken, showToast }) {
 
   const filteredPosts = filterType === 'all' ? posts : posts.filter(p => (p.category || '') === filterType)
 
-  if (view === 'menu') {
-    return (
-      <div>
-        <button onClick={() => setView('list')} style={{ ...S.btnGhost, marginBottom: 16 }}>← 목록으로</button>
-        <BlogMenuPanel adminToken={adminToken} />
-      </div>
-    )
-  }
-
   return (
     <div>
       <style>{`
@@ -344,10 +334,7 @@ export default function BlogAdminPanel({ adminToken, showToast }) {
       {view === 'list' && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div style={{ ...S.cardTitle, marginBottom: 0 }}>📝 블로그 관리 ({posts.length})</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setView('menu')} style={S.btnGhost}>📂 카테고리 관리</button>
-            <button onClick={handleNew} style={S.btn()}>+ 새 글</button>
-          </div>
+          <button onClick={handleNew} style={S.btn()}>+ 새 글</button>
         </div>
       )}
 
