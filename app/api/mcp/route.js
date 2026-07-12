@@ -29,6 +29,12 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://trader-beta-liard.vercel.app'
+
+function nowKST() {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00')
+}
+
 function addMonths(dateStr, months) {
   const d = dateStr ? new Date(dateStr) : new Date()
   d.setMonth(d.getMonth() + months)
@@ -233,26 +239,73 @@ const baseHandler = createMcpHandler(
     server.registerTool(
       'create_blog_post',
       {
-        title: '블로그 글 작성',
-        description: '새 블로그 글을 작성한다. status를 published로 주면 즉시 발행되고 published_at이 현재시각(KST)으로 기록된다.',
+        title: '블로그 글 작성 (본문 포함, fresh-season 풀 기능 이식)',
+        description:
+          '블로그 글 본문 전체를 실제로 사이트에 올린다. 기본 상태는 published라 호출 즉시 공개된다. ' +
+          'status를 draft로 주면 임시저장, scheduled로 주면 scheduled_at 시각에 자동 발행된다.',
         inputSchema: {
           title: z.string().describe('글 제목'),
           slug: z.string().describe('URL 슬러그 (영문 소문자+하이픈)'),
           content: z.string().describe('본문 (마크다운)'),
-          category: z.string().optional().describe('카테고리. 예: 전략 / 공지 / 가이드'),
-          summary: z.string().optional().describe('목록·검색결과에 보일 짧은 요약'),
-          status: z.enum(['draft', 'published']).optional().describe('기본: published'),
+          category: z.string().optional().describe('카테고리. 예: 전략 / 공지 / 가이드 (list_blog_categories로 조회 가능)'),
+          summary: z.string().optional().describe('목록·검색결과·SEO description에 쓰일 짧은 요약'),
+          tags: z.array(z.string()).optional().describe('태그 5~8개 권장'),
+          cover_image: z.string().optional().describe('커버 이미지 URL'),
+          author: z.string().optional().describe('작성자 표시명. 비우면 기본값(트레이더 편집팀) 사용'),
+          status: z.enum(['published', 'draft', 'scheduled']).optional().describe('기본값 published'),
+          scheduled_at: z.string().optional().describe('status가 scheduled일 때만 사용, ISO 날짜'),
+          title_score: z.number().optional().describe('제목 점수표(10점 만점) 채점 결과. 방문자에게는 노출되지 않고 관리자만 조회 가능.'),
+          seo_score: z.number().optional().describe('SEO 체크리스트(100점 만점) 채점 결과. 방문자에게는 노출되지 않고 관리자만 조회 가능.'),
+          title_score_detail: z.array(z.object({
+            label: z.string(), points: z.number(), max: z.number(), reason: z.string(),
+          })).optional().describe('제목 점수 항목별 배점·이유 breakdown. title_score를 줄 때 항상 함께 채운다.'),
+          seo_score_detail: z.array(z.object({
+            label: z.string(), points: z.number(), max: z.number(), pass: z.boolean(), desc: z.string(),
+          })).optional().describe('SEO 체크리스트 항목별 배점·통과여부·이유 breakdown. seo_score를 줄 때 항상 함께 채운다.'),
+          naver_summary: z.string().optional().describe('네이버 블로그에 붙여넣을 요약글(300~500자 + 원문 링크). 관리자만 조회 가능.'),
+          instagram_cards: z.string().optional().describe('인스타그램 카드뉴스 슬라이드 스크립트(4~6장). 관리자만 조회 가능.'),
         },
+        annotations: { destructiveHint: false, idempotentHint: false },
       },
-      async ({ title, slug, content, category = '', summary = '', status = 'published' }) => {
-        const now = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00')
-        const { data, error } = await supabase.from('blog_posts').insert([{
-          id: randomUUID(), title, slug, content, category, summary, status,
-          published_at: status === 'published' ? now : null,
-          created_at: now,
-        }]).select().single()
+      async ({ title, slug, content, category = '', summary = '', tags, cover_image, author, status = 'published', scheduled_at, title_score, seo_score, title_score_detail, seo_score_detail, naver_summary, instagram_cards }) => {
+        const nowIso = nowKST()
+        const row = {
+          id: randomUUID(), post_type: 'blog', title, slug, content, category,
+          summary: summary || null, tags: Array.isArray(tags) ? tags : [], cover_image: cover_image || null,
+          author_name: (author && String(author).trim()) || '트레이더 편집팀',
+          status,
+          scheduled_at: status === 'scheduled' ? (scheduled_at || null) : null,
+          published_at: status === 'published' ? nowIso : null,
+          created_at: nowIso, updated_at: nowIso,
+          title_score: title_score ?? null, seo_score: seo_score ?? null,
+          title_score_detail: title_score_detail ?? null, seo_score_detail: seo_score_detail ?? null,
+          naver_summary: naver_summary ?? null, instagram_cards: instagram_cards ?? null,
+        }
+        const { data, error } = await supabase.from('blog_posts').insert([row]).select().single()
         if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
-        return { content: [{ type: 'text', text: `✅ 작성 완료 (ID:${data.id})\n${status === 'published' ? `/blog/${data.slug} 에 발행됨` : '임시저장됨'}` }] }
+
+        const indexing = { google: null, indexnow: null }
+        if (status === 'published') {
+          const pageUrl = `${SITE_URL}/blog/${data.slug}`
+          try {
+            if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON 미설정')
+            const { GoogleAuth } = await import('google-auth-library')
+            const gauth = new GoogleAuth({ credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON), scopes: ['https://www.googleapis.com/auth/indexing'] })
+            const client = await gauth.getClient()
+            const r = await client.request({ url: 'https://indexing.googleapis.com/v3/urlNotifications:publish', method: 'POST', data: { url: pageUrl, type: 'URL_UPDATED' } })
+            indexing.google = { ok: true, status: r.status }
+          } catch (e) { indexing.google = { ok: false, error: e?.response?.data || e?.message || String(e) } }
+          try {
+            if (!process.env.INDEXNOW_KEY) throw new Error('INDEXNOW_KEY 미설정')
+            const r = await fetch('https://api.indexnow.org/indexnow', {
+              method: 'POST', headers: { 'Content-Type': 'application/json; charset=utf-8' },
+              body: JSON.stringify({ host: new URL(SITE_URL).host, key: process.env.INDEXNOW_KEY, keyLocation: `${SITE_URL}/${process.env.INDEXNOW_KEY}.txt`, urlList: [pageUrl] }),
+            })
+            indexing.indexnow = { ok: r.ok, status: r.status }
+          } catch (e) { indexing.indexnow = { ok: false, error: e.message } }
+        }
+
+        return { content: [{ type: 'text', text: `✅ 작성 완료 (ID:${data.id})\n${status === 'published' ? `/blog/${data.slug} 에 발행됨` : status === 'scheduled' ? `${scheduled_at}에 예약발행 설정됨` : '임시저장됨'}\n색인요청 — google:${JSON.stringify(indexing.google)} indexnow:${JSON.stringify(indexing.indexnow)}` }] }
       }
     )
 
@@ -260,7 +313,7 @@ const baseHandler = createMcpHandler(
       'update_blog_post',
       {
         title: '블로그 글 수정',
-        description: '기존 블로그 글의 내용이나 상태를 수정한다 (예: draft → published 전환). id는 list_blog_posts로 조회.',
+        description: '기존 블로그 글의 내용이나 상태를 수정한다 (예: draft → published 전환, 예약발행 설정 등). id는 list_blog_posts로 조회.',
         inputSchema: {
           id: z.string().describe('blog_posts 테이블의 id'),
           title: z.string().optional(),
@@ -268,16 +321,39 @@ const baseHandler = createMcpHandler(
           content: z.string().optional(),
           category: z.string().optional(),
           summary: z.string().optional(),
-          status: z.enum(['draft', 'published']).optional(),
+          tags: z.array(z.string()).optional(),
+          cover_image: z.string().optional(),
+          status: z.enum(['published', 'draft', 'scheduled']).optional(),
+          scheduled_at: z.string().optional(),
+          title_score: z.number().optional(),
+          seo_score: z.number().optional(),
+          title_score_detail: z.array(z.object({ label: z.string(), points: z.number(), max: z.number(), reason: z.string() })).optional(),
+          seo_score_detail: z.array(z.object({ label: z.string(), points: z.number(), max: z.number(), pass: z.boolean(), desc: z.string() })).optional(),
+          naver_summary: z.string().optional(),
+          instagram_cards: z.string().optional(),
         },
       },
       async ({ id, ...updates }) => {
-        if (updates.status === 'published' && !updates.published_at) {
-          updates.published_at = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00')
-        }
+        if (updates.status === 'published' && !updates.published_at) updates.published_at = nowKST()
+        updates.updated_at = nowKST()
         const { data, error } = await supabase.from('blog_posts').update(updates).eq('id', id).select().single()
         if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
-        return { content: [{ type: 'text', text: `✅ 수정 완료\nID:${data.id} | ${data.status === 'published' ? '✅발행' : '📝임시'} | ${data.title}` }] }
+        return { content: [{ type: 'text', text: `✅ 수정 완료\nID:${data.id} | ${data.status === 'published' ? '✅발행' : data.status === 'scheduled' ? '⏰예약' : '📝임시'} | ${data.title}` }] }
+      }
+    )
+
+    server.registerTool(
+      'list_blog_categories',
+      {
+        title: '블로그 카테고리 목록 조회',
+        description: '등록된 블로그 커스텀 카테고리 목록을 조회한다. create_blog_post 호출 전 어떤 category 값을 쓸 수 있는지 확인할 때 사용.',
+        inputSchema: {},
+      },
+      async () => {
+        const { data, error } = await supabase.from('blog_categories').select('*').order('label')
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        if (!data?.length) return { content: [{ type: 'text', text: '등록된 카테고리 없음 — 자유 텍스트로 category를 지정해도 됨' }] }
+        return { content: [{ type: 'text', text: data.map(c => `${c.icon || '📁'} ${c.label}`).join('\n') }] }
       }
     )
 

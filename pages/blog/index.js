@@ -4,9 +4,16 @@ import Link from 'next/link'
 
 export default function BlogIndex() {
   const [posts, setPosts] = useState([])
+  const [customCategories, setCustomCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [category, setCategory] = useState('')
   const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    fetch('/api/blog/categories').then(r => r.json())
+      .then(d => setCustomCategories(Array.isArray(d) ? d : []))
+      .catch(() => setCustomCategories([]))
+  }, [])
 
   useEffect(() => {
     fetch('/api/blog/posts?limit=100')
@@ -16,11 +23,6 @@ export default function BlogIndex() {
       .finally(() => setLoading(false))
   }, [])
 
-  const categories = useMemo(
-    () => [...new Set(posts.map(p => p.category).filter(Boolean))],
-    [posts]
-  )
-
   const filtered = useMemo(() => {
     return posts.filter(p => {
       if (category && p.category !== category) return false
@@ -29,10 +31,13 @@ export default function BlogIndex() {
     })
   }, [posts, category, search])
 
+  const catIcon = (label) => customCategories.find(c => c.label === label)?.icon || '📁'
+
   return (
     <>
       <Head>
         <title>블로그 - 매매 시스템</title>
+        <meta name="description" content="트레이더 매매 시스템 블로그 — 전략, 공지, 가이드" />
       </Head>
       <div className="wrap">
         <header className="site">
@@ -53,14 +58,14 @@ export default function BlogIndex() {
               color: !category ? '#fff' : 'var(--muted)',
               border: '1px solid var(--border)', borderRadius: 999,
             }}>전체</button>
-          {categories.map(c => (
-            <button key={c} onClick={() => setCategory(c)}
+          {customCategories.map(c => (
+            <button key={c.id} onClick={() => setCategory(c.label)}
               style={{
                 width: 'auto', marginTop: 0, padding: '6px 14px', fontSize: 13,
-                background: category === c ? 'var(--accent)' : 'transparent',
-                color: category === c ? '#fff' : 'var(--muted)',
+                background: category === c.label ? 'var(--accent)' : 'transparent',
+                color: category === c.label ? '#fff' : 'var(--muted)',
                 border: '1px solid var(--border)', borderRadius: 999,
-              }}>{c}</button>
+              }}>{c.icon || '📁'} {c.label}</button>
           ))}
           <input
             value={search}
@@ -72,21 +77,34 @@ export default function BlogIndex() {
 
         {loading && <p style={{ color: 'var(--muted)' }}>불러오는 중...</p>}
         {!loading && filtered.length === 0 && (
-          <div className="card"><p style={{ color: 'var(--muted)', margin: 0 }}>아직 글이 없습니다.</p></div>
+          <div className="card"><p style={{ color: 'var(--muted)', margin: 0 }}>{search ? `"${search}"에 대한 검색 결과가 없어요.` : '아직 글이 없습니다.'}</p></div>
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {filtered.map(post => (
             <Link key={post.id} href={`/blog/${post.slug}`} className="card"
-              style={{ display: 'block', textDecoration: 'none', color: 'inherit' }}>
-              {post.category && (
-                <span className="badge active" style={{ marginBottom: 8, display: 'inline-block' }}>{post.category}</span>
+              style={{ display: 'flex', gap: 16, textDecoration: 'none', color: 'inherit', padding: post.cover_image ? 16 : 24 }}>
+              {post.cover_image && (
+                <img src={post.cover_image} alt={post.title} referrerPolicy="no-referrer"
+                  style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
               )}
-              <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px' }}>{post.title}</h2>
-              {post.summary && <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>{post.summary}</p>}
-              <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10, marginBottom: 0 }}>
-                {(post.published_at || post.created_at || '').slice(0, 10)}
-              </p>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                {post.category && (
+                  <span className="badge active" style={{ marginBottom: 8, display: 'inline-block' }}>{catIcon(post.category)} {post.category}</span>
+                )}
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px' }}>{post.title}</h2>
+                {post.summary && <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>{post.summary}</p>}
+                {Array.isArray(post.tags) && post.tags.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                    {post.tags.slice(0, 5).map((t, i) => (
+                      <span key={i} style={{ fontSize: 11, color: 'var(--accent)', background: 'rgba(76,175,80,0.1)', borderRadius: 999, padding: '2px 8px' }}>#{t}</span>
+                    ))}
+                  </div>
+                )}
+                <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10, marginBottom: 0 }}>
+                  {(post.published_at || post.created_at || '').slice(0, 10)}
+                </p>
+              </div>
             </Link>
           ))}
         </div>
