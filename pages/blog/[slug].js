@@ -56,10 +56,10 @@ export default function BlogPost({ post, html, allPosts }) {
   return (
     <>
       <Head>
-        <title>{post ? `${post.title} - 매매 시스템` : '글을 찾을 수 없습니다'}</title>
-        <meta name="description" content={post?.summary || '트레이더 매매 시스템 블로그'} />
-        <meta property="og:title" content={post ? `${post.title} - 매매 시스템` : '매매 시스템'} />
-        <meta property="og:description" content={post?.summary || '트레이더 매매 시스템 블로그'} />
+        <title>{post ? `${post.title} - 간편 매매 시스템` : '글을 찾을 수 없습니다'}</title>
+        <meta name="description" content={post?.summary || '트레이더 간편 매매 시스템 블로그'} />
+        <meta property="og:title" content={post ? `${post.title} - 간편 매매 시스템` : '간편 매매 시스템'} />
+        <meta property="og:description" content={post?.summary || '트레이더 간편 매매 시스템 블로그'} />
         {post?.cover_image && <meta property="og:image" content={post.cover_image} />}
         <meta property="og:url" content={`${SITE_URL}/blog/${post?.slug || ''}`} />
         <meta property="og:type" content="article" />
@@ -199,16 +199,16 @@ export default function BlogPost({ post, html, allPosts }) {
             )}
 
             <div className="card" style={{ marginTop: 40, textAlign: 'center' }}>
-              <h2 style={{ marginTop: 0 }}>🔑 매매 시스템 신청하기</h2>
+              <h2 style={{ marginTop: 0 }}>🔑 간편 매매 시스템 신청하기</h2>
               <p style={{ color: 'var(--muted)' }}>
-                실시간 시세 연동, HMA 기반 크로스 예약 진입, 손절/익절 이동평균선 모드까지 —
+                실시간 시세 연동, 스마트 자동 진입, 손절/익절 자동화까지 —
                 NinjaTrader 8 / MetaTrader 5 자동매매 보조 프로그램을 지금 신청해보세요.
               </p>
               <Link href="/apply" style={{
                 display: 'inline-block', marginTop: 12, padding: '12px 28px',
                 background: 'var(--accent)', color: '#fff', borderRadius: 8,
                 fontWeight: 700, textDecoration: 'none',
-              }}>매매 시스템 신청하기 →</Link>
+              }}>간편 매매 시스템 신청하기 →</Link>
             </div>
 
             <div style={{ marginTop: 32 }}>

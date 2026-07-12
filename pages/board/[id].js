@@ -71,7 +71,7 @@ export default function BoardDetail() {
 
   return (
     <>
-      <Head><title>{post?.title || '자유게시판'} - 매매 시스템</title></Head>
+      <Head><title>{post?.title || '자유게시판'} - 간편 매매 시스템</title></Head>
       <div className="wrap">
         <header className="site">
           <h1>자유게시판</h1>

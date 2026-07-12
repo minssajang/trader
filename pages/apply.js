@@ -3,12 +3,16 @@ import Head from 'next/head'
 import Link from 'next/link'
 import { callRpc } from '../lib/publicSupabase'
 
+// 베타 오픈 기간에는 무료체험만 받는다 (유료 신청은 잠시 막아둠 — 나중에 필요하면
+// months select에 1/3/6/12개월 옵션을 다시 보여주면 된다, apply_license RPC는 그대로 지원함)
+const TRIAL_ONLY = true
+
 export default function Apply() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [product, setProduct] = useState('nt8')
-  const [months, setMonths] = useState('1')
+  const [months, setMonths] = useState(TRIAL_ONLY ? '0' : '1')
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState(null) // { ok, msg }
 
@@ -30,7 +34,7 @@ export default function Apply() {
           ? '무료체험 신청이 접수되었습니다. 확인 후 이메일로 라이선스 키를 보내드립니다.'
           : '신청이 접수되었습니다. 위 계좌로 입금해주시면 확인 후 이메일로 라이선스 키를 보내드립니다.',
       })
-      setName(''); setEmail(''); setPhone(''); setProduct('nt8'); setMonths('1')
+      setName(''); setEmail(''); setPhone(''); setProduct('nt8'); setMonths(TRIAL_ONLY ? '0' : '1')
     } catch (err) {
       setResult({ ok: false, msg: '신청 중 오류가 발생했습니다: ' + err.message })
     }
@@ -40,7 +44,7 @@ export default function Apply() {
   return (
     <>
       <Head>
-        <title>신청 - 매매 시스템</title>
+        <title>신청 - 간편 매매 시스템</title>
       </Head>
       <div className="wrap">
         <header className="site">
@@ -53,7 +57,12 @@ export default function Apply() {
         </header>
 
         <div className="card">
-          <h2>사용 신청</h2>
+          <h2>{TRIAL_ONLY ? '🎁 일주일 무료체험 신청' : '사용 신청'}</h2>
+          {TRIAL_ONLY && (
+            <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -8, marginBottom: 16 }}>
+              베타 오픈 기간 동안은 무료체험만 신청받고 있어요. 입금 없이 바로 신청하세요.
+            </p>
+          )}
           <form onSubmit={submit}>
             <label htmlFor="name">이름</label>
             <input type="text" id="name" required value={name} onChange={e => setName(e.target.value)} />
@@ -70,16 +79,22 @@ export default function Apply() {
               <option value="mt5">MetaTrader 5 버전</option>
             </select>
 
-            <label htmlFor="months">신청 기간</label>
-            <select id="months" value={months} onChange={e => setMonths(e.target.value)}>
-              <option value="0">무료체험 (7일)</option>
-              <option value="1">1개월</option>
-              <option value="3">3개월</option>
-              <option value="6">6개월</option>
-              <option value="12">1년</option>
-            </select>
+            {TRIAL_ONLY ? (
+              <input type="hidden" value="0" readOnly />
+            ) : (
+              <>
+                <label htmlFor="months">신청 기간</label>
+                <select id="months" value={months} onChange={e => setMonths(e.target.value)}>
+                  <option value="0">무료체험 (7일)</option>
+                  <option value="1">1개월</option>
+                  <option value="3">3개월</option>
+                  <option value="6">6개월</option>
+                  <option value="12">1년</option>
+                </select>
+              </>
+            )}
 
-            <button type="submit" disabled={submitting}>{submitting ? '신청 중...' : '신청하기'}</button>
+            <button type="submit" disabled={submitting}>{submitting ? '신청 중...' : (TRIAL_ONLY ? '무료체험 신청하기' : '신청하기')}</button>
           </form>
 
           {result && (

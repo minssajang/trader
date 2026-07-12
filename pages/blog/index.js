@@ -40,8 +40,8 @@ export default function BlogIndex() {
   return (
     <>
       <Head>
-        <title>블로그 - 매매 시스템</title>
-        <meta name="description" content="트레이더 매매 시스템 블로그 — 전략, 공지, 가이드" />
+        <title>블로그 - 간편 매매 시스템</title>
+        <meta name="description" content="트레이더 간편 매매 시스템 블로그 — 전략, 공지, 가이드" />
       </Head>
       <div className="wrap">
         <header className="site">

@@ -52,7 +52,7 @@ function LoginScreen({ onLogin }) {
         <div style={{ marginBottom: 28 }}>
           <div style={{ width: 44, height: 44, background: '#4CAF50', borderRadius: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, marginBottom: 16 }}>📈</div>
           <h1 style={{ fontSize: 24, fontWeight: 800, color: '#e8eaed', margin: 0 }}>Admin</h1>
-          <p style={{ color: '#9aa0ab', fontSize: 14, marginTop: 4 }}>매매 시스템 관리자</p>
+          <p style={{ color: '#9aa0ab', fontSize: 14, marginTop: 4 }}>간편 매매 시스템 관리자</p>
         </div>
         <form onSubmit={submit}>
           <input type="password" placeholder="비밀번호" value={pw} onChange={e => setPw(e.target.value)}
@@ -132,12 +132,12 @@ export default function Admin() {
 
   return (
     <>
-      <Head><title>Admin — 매매 시스템</title></Head>
+      <Head><title>Admin — 간편 매매 시스템</title></Head>
       <div style={{ minHeight: '100vh', background: '#0f1115', fontFamily: '-apple-system, "Segoe UI", "Malgun Gothic", sans-serif', color: '#e8eaed', display: 'flex' }}>
         <aside style={{ width: 220, minWidth: 220, background: '#171a21', borderRight: '1px solid #2a2e38', display: 'flex', flexDirection: 'column', height: '100vh', position: 'sticky', top: 0 }}>
           <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid #2a2e38' }}>
             <div style={{ fontSize: 15, fontWeight: 700 }}>Admin Panel</div>
-            <div style={{ fontSize: 11, color: '#9aa0ab', marginTop: 2 }}>매매 시스템</div>
+            <div style={{ fontSize: 11, color: '#9aa0ab', marginTop: 2 }}>간편 매매 시스템</div>
           </div>
           <nav style={{ flex: 1, padding: '12px 0' }}>
             {Object.entries(TAB_LABELS).map(([id, label]) => (
