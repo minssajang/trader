@@ -20,7 +20,7 @@ export default function BoardIndex() {
   return (
     <>
       <Head>
-        <title>자유게시판 - 간편 매매 시스템</title>
+        <title>자유게시판 - EasyTrade</title>
       </Head>
       <div className="wrap">
         <header className="site">

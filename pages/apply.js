@@ -44,7 +44,7 @@ export default function Apply() {
   return (
     <>
       <Head>
-        <title>신청 - 간편 매매 시스템</title>
+        <title>신청 - EasyTrade</title>
       </Head>
       <div className="wrap">
         <header className="site">

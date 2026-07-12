@@ -48,12 +48,12 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>닌자 트레이더 간편 매매 시스템</title>
+        <title>EasyTrade — 닌자 트레이더 자동매매 시스템</title>
         <meta name="description" content="그냥 손쉬운 예약매매 시스템 — 실시간 연동, 손쉬운 손절 익절까지. 베타 오픈 기념 일주일 무료체험 진행 중" />
       </Head>
       <div className="landing-wrap">
         <header className="site">
-          <div className="brand">간편 매매 시스템</div>
+          <div className="brand">EasyTrade</div>
           <nav className="site">
             <Link href="/blog">블로그</Link>
             <Link href="/board">자유게시판</Link>

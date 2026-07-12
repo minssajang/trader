@@ -46,7 +46,7 @@ export default function BoardWrite() {
 
   return (
     <>
-      <Head><title>자유게시판 글쓰기 - 간편 매매 시스템</title></Head>
+      <Head><title>자유게시판 글쓰기 - EasyTrade</title></Head>
       <div className="wrap">
         <header className="site">
           <h1>자유게시판 글쓰기</h1>
