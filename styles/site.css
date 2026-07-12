@@ -153,3 +153,13 @@ footer.site {
   font-size: 13px;
   text-align: center;
 }
+
+/* 좌/우 사이드 레일 광고 (넓은 화면에서만 노출) */
+.ad-rail {
+  position: fixed; top: 120px; width: 160px; z-index: 50; display: none;
+}
+.ad-rail-left { left: calc(50% - 560px); }
+.ad-rail-right { right: calc(50% - 560px); }
+@media (min-width: 1180px) {
+  .ad-rail { display: block; }
+}

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import { parseMarkdown } from '../../lib/parseMarkdown'
+import { AdSlot } from '../../components/AdSlot'
+import { useAdSlot } from '../../lib/AdSlotsContext'
 
 // ── 관련도 점수 계산: 같은 카테고리(+3), 태그(+2/개), 제목 키워드 겹침(+1/개)
 function scoreRelated(post, allPosts) {
@@ -27,6 +29,7 @@ const SITE_URL = 'https://trader-beta-liard.vercel.app'
 
 export default function BlogPost({ post, html, allPosts }) {
   const relatedPool = post ? scoreRelated(post, allPosts).slice(0, 3) : []
+  const middleSlot = useAdSlot('blog_middle')
 
   const [adminExtra, setAdminExtra] = useState(null)
   const [copiedField, setCopiedField] = useState('')
@@ -170,6 +173,8 @@ export default function BlogPost({ post, html, allPosts }) {
 
             <div className="blog-content" style={{ fontSize: 15, lineHeight: 1.85 }}
               dangerouslySetInnerHTML={{ __html: html }} />
+
+            <AdSlot slot={middleSlot} label="본문 중간 배너" style={{ margin: '32px 0' }} />
 
             {Array.isArray(post.tags) && post.tags.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 32, paddingTop: 24, borderTop: '1px solid var(--border)' }}>

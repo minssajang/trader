@@ -1,7 +1,12 @@
 import Head from 'next/head'
 import Link from 'next/link'
+import { AdSlot } from '../components/AdSlot'
+import { useAdSlot } from '../lib/AdSlotsContext'
 
 export default function Home() {
+  const topSlot = useAdSlot('home_top')
+  const footerSlot = useAdSlot('footer')
+
   return (
     <>
       <Head>
@@ -18,6 +23,8 @@ export default function Home() {
             <Link href="/admin">관리자</Link>
           </nav>
         </header>
+
+        <AdSlot slot={topSlot} label="상단 배너" style={{ marginBottom: 20 }} />
 
         <div className="card">
           <h2>소개</h2>
@@ -51,6 +58,7 @@ export default function Home() {
           </ol>
         </div>
 
+        <AdSlot slot={footerSlot} label="하단 배너" style={{ marginTop: 20 }} />
         <footer className="site">문의: minssajang@gmail.com</footer>
       </div>
     </>

@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
+import { AdSlot } from '../../components/AdSlot'
+import { useAdSlot } from '../../lib/AdSlotsContext'
 
 export default function BoardIndex() {
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
+  const topSlot = useAdSlot('board_top')
 
   useEffect(() => {
     fetch('/api/board/posts?limit=50')
@@ -28,6 +31,8 @@ export default function BoardIndex() {
             <Link href="/apply">신청</Link>
           </nav>
         </header>
+
+        <AdSlot slot={topSlot} label="게시판 상단 배너" style={{ marginBottom: 20 }} />
 
         <section style={{ margin: '4px 0 24px', display: 'flex', justifyContent: 'flex-end' }}>
           <Link href="/board/write" style={{

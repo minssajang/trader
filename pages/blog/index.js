@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
+import { AdSlot } from '../../components/AdSlot'
+import { useAdSlot } from '../../lib/AdSlotsContext'
 
 export default function BlogIndex() {
   const [posts, setPosts] = useState([])
@@ -8,6 +10,8 @@ export default function BlogIndex() {
   const [loading, setLoading] = useState(true)
   const [category, setCategory] = useState('')
   const [search, setSearch] = useState('')
+  const topSlot = useAdSlot('blog_top')
+  const footerSlot = useAdSlot('footer')
 
   useEffect(() => {
     fetch('/api/blog/categories').then(r => r.json())
@@ -49,6 +53,8 @@ export default function BlogIndex() {
             <Link href="/check">내 정보 조회</Link>
           </nav>
         </header>
+
+        <AdSlot slot={topSlot} label="블로그 상단 배너" style={{ marginBottom: 20 }} />
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
           <button
@@ -110,6 +116,7 @@ export default function BlogIndex() {
           ))}
         </div>
 
+        <AdSlot slot={footerSlot} label="하단 배너" style={{ marginTop: 20 }} />
         <footer className="site">문의: minssajang@gmail.com</footer>
       </div>
     </>

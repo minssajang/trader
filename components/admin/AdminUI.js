@@ -7,6 +7,12 @@ export const S = {
     padding: '10px 14px', color: '#e8eaed', fontFamily: 'inherit',
     fontSize: 14, outline: 'none', width: '100%', boxSizing: 'border-box',
   },
+  textarea: {
+    background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 8,
+    padding: '10px 14px', color: '#e8eaed', fontFamily: 'monospace',
+    fontSize: 13, outline: 'none', width: '100%', boxSizing: 'border-box',
+    resize: 'vertical', lineHeight: 1.7,
+  },
   btn: (color = '#4CAF50') => ({
     background: color, color: '#fff', border: 'none', borderRadius: 9,
     padding: '10px 22px', fontFamily: 'inherit',
@@ -21,6 +27,22 @@ export const S = {
   },
   label: { color: '#9aa0ab', fontSize: 12, marginBottom: 5, display: 'block', fontWeight: 600 },
   row: { background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 10, padding: '12px 16px', marginBottom: 8 },
+}
+
+export function Toggle({ value, onChange }) {
+  return (
+    <div onClick={() => onChange(!value)} style={{
+      width: 50, height: 28, borderRadius: 14,
+      background: value ? '#4CAF50' : '#2a2e38',
+      position: 'relative', cursor: 'pointer', transition: 'background 0.2s', flexShrink: 0,
+    }}>
+      <div style={{
+        width: 22, height: 22, borderRadius: 11, background: '#fff',
+        position: 'absolute', top: 3, left: value ? 25 : 3, transition: 'left 0.2s',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+      }} />
+    </div>
+  )
 }
 
 export function Toast({ msg }) {
