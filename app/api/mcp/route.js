@@ -12,17 +12,27 @@
 //   MCP_SHARED_SECRET           - 이 MCP 서버 보호용 공유 비밀키 (직접 정해서 등록)
 //   GITHUB_TOKEN (선택)          - list_github_files/get_github_file 툴의 GitHub API 요청 한도를
 //                                  늘리고 싶을 때만 등록. 없어도 동작(공개 저장소, 시간당 60회 제한)
+//   NAVER_AD_API_KEY / NAVER_AD_SECRET_KEY / NAVER_AD_CUSTOMER_ID (선택)
+//                                - naver_keyword_volume 툴의 네이버 검색광고 키워드도구 API
+//   NAVER_CLIENT_ID / NAVER_CLIENT_SECRET (선택)
+//                                - naver_keyword_volume이 네이버 블로그 문서수(docCount)도 함께 반환하게 함
+//   GOOGLE_SERVICE_ACCOUNT_JSON / INDEXNOW_KEY (선택)
+//                                - 블로그 발행 시 Google Indexing API / IndexNow 자동 색인 요청
 //
 // claude.ai 커스텀 커넥터 등록 URL:
 //   https://<vercel-deployment>.vercel.app/api/mcp?key=여기에_MCP_SHARED_SECRET_값
 //
 // run_sql / list_tables 툴이 쓰는 run_sql_query RPC 함수는 sql/002_settings_and_admin.sql에 정의돼 있다.
 // (Supabase SQL Editor에서 최초 1회 실행 필요)
+// 키워드 리서치·발행기록 툴(naver_keyword_volume/search_keyword_data/pick_keyword/
+// search_keyword_picks/mark_keyword_used/add_publish_log/get_publish_log)이 쓰는
+// keyword_stats/keyword_picks/publish_log 테이블은 sql/005_keyword_tools.sql에 정의돼 있다.
 
 import { createMcpHandler } from 'mcp-handler'
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
+import crypto from 'crypto'
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -33,6 +43,79 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://trader-beta-liard.
 
 function nowKST() {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00')
+}
+
+function fmt(n) { return (n || 0).toLocaleString('ko-KR') }
+
+// ── 네이버 검색광고 키워드도구 (fresh-season과 동일 로직) ──────────────────
+const NAVER_BASE_URL = 'https://api.naver.com'
+const NAVER_URI = '/keywordstool'
+
+function buildNaverHeaders() {
+  const apiKey = process.env.NAVER_AD_API_KEY
+  const secretKey = process.env.NAVER_AD_SECRET_KEY
+  const customerId = process.env.NAVER_AD_CUSTOMER_ID
+  if (!apiKey || !secretKey || !customerId) {
+    throw new Error('네이버 검색광고 API 환경변수가 설정되지 않았습니다 (NAVER_AD_API_KEY / NAVER_AD_SECRET_KEY / NAVER_AD_CUSTOMER_ID)')
+  }
+  const timestamp = Date.now().toString()
+  const message = `${timestamp}.GET.${NAVER_URI}`
+  const signature = crypto.createHmac('sha256', secretKey).update(message).digest('base64')
+  return {
+    'Content-Type': 'application/json; charset=UTF-8',
+    'X-Timestamp': timestamp,
+    'X-API-KEY': apiKey,
+    'X-Customer': String(customerId),
+    'X-Signature': signature,
+  }
+}
+
+function normalizeKeywords(raw) {
+  return String(raw || '').split(',').map(k => k.trim().replace(/\s+/g, '')).filter(Boolean).slice(0, 5)
+}
+
+async function fetchNaverKeywordData(keywords) {
+  const headers = buildNaverHeaders()
+  const hintKeywords = keywords.join(',')
+  const url = `${NAVER_BASE_URL}${NAVER_URI}?hintKeywords=${encodeURIComponent(hintKeywords)}&showDetail=1`
+  const response = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(8000) })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(`네이버 API 오류 (${response.status}): ${text}`)
+  }
+  const data = await response.json()
+  const list = Array.isArray(data?.keywordList) ? data.keywordList : []
+  const parsed = list.map(item => {
+    const pc = item.monthlyPcQcCnt === '< 10' ? 5 : Number(item.monthlyPcQcCnt) || 0
+    const mobile = item.monthlyMobileQcCnt === '< 10' ? 5 : Number(item.monthlyMobileQcCnt) || 0
+    return {
+      keyword: item.relKeyword,
+      monthlySearchPc: pc,
+      monthlySearchMobile: mobile,
+      monthlySearchTotal: pc + mobile,
+      competition: item.compIdx,
+    }
+  }).sort((a, b) => b.monthlySearchTotal - a.monthlySearchTotal)
+
+  const clientId = process.env.NAVER_CLIENT_ID
+  const clientSecret = process.env.NAVER_CLIENT_SECRET
+  if (clientId && clientSecret) {
+    const docCounts = await Promise.all(
+      parsed.map(async (item) => {
+        try {
+          const res = await fetch(
+            `https://openapi.naver.com/v1/search/blog?query=${encodeURIComponent(item.keyword)}&display=1`,
+            { headers: { 'X-Naver-Client-Id': clientId, 'X-Naver-Client-Secret': clientSecret }, signal: AbortSignal.timeout(5000) }
+          )
+          if (!res.ok) return null
+          const d = await res.json()
+          return d.total ?? null
+        } catch { return null }
+      })
+    )
+    return parsed.map((item, i) => ({ ...item, docCount: docCounts[i] }))
+  }
+  return parsed
 }
 
 function addMonths(dateStr, months) {
@@ -208,6 +291,217 @@ const baseHandler = createMcpHandler(
         const { data, error } = await supabase.from('licenses').update({ note }).eq('id', id).select().single()
         if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
         return { content: [{ type: 'text', text: `✅ 메모 저장 완료\n${fmtRow(data)}` }] }
+      }
+    )
+
+    // ── 블로그 키워드 리서치 + 발행기록 툴 (fresh-season MCP 그대로 이식) ─────────
+
+    server.registerTool(
+      'naver_keyword_volume',
+      {
+        title: '네이버 키워드 실시간 검색량 조회',
+        description:
+          '네이버 검색광고 키워드도구로 키워드별 월간 검색량(PC/모바일 합산)과 경쟁정도를 실시간으로 ' +
+          '조회한다. NAVER_CLIENT_ID/SECRET 환경변수가 설정되어 있으면 네이버 블로그 문서수(docCount)도 ' +
+          '함께 반환된다. 조회 결과는 keyword_stats에 자동 저장되어 search_keyword_data로 다시 불러올 수 있다.',
+        inputSchema: {
+          hintKeywords: z.string().describe('쉼표로 구분된 한글 키워드 문자열, 최대 5개. 예: "매매전략,자동매매,HMA크로스"'),
+        },
+      },
+      async ({ hintKeywords }) => {
+        const keywords = normalizeKeywords(hintKeywords)
+        if (keywords.length === 0) {
+          return { content: [{ type: 'text', text: '키워드가 비어있습니다. 쉼표로 구분된 키워드를 1개 이상 입력해주세요.' }], isError: true }
+        }
+        try {
+          const results = await fetchNaverKeywordData(keywords)
+          const nowIso = nowKST()
+          for (const hint of keywords) {
+            const rows = results.filter(r => r.keyword).map(r => ({
+              hint, keyword: r.keyword,
+              pc: r.monthlySearchPc || 0, mobile: r.monthlySearchMobile || 0, total: r.monthlySearchTotal || 0,
+              competition: r.competition || '-', created_at: nowIso,
+            }))
+            if (rows.length > 0) await supabase.from('keyword_stats').upsert(rows, { onConflict: 'hint,keyword' })
+          }
+          return { content: [{ type: 'text', text: JSON.stringify({ query: keywords, saved: results.length, results }, null, 2) }] }
+        } catch (err) {
+          return { content: [{ type: 'text', text: `오류: ${err.message || '키워드 조회 중 오류가 발생했습니다.'}` }], isError: true }
+        }
+      }
+    )
+
+    server.registerTool(
+      'search_keyword_data',
+      {
+        title: '전체 키워드 데이터 검색/열람',
+        description:
+          'keyword_stats 테이블 전체를 검색·열람한다. query를 주면 키워드에 그 문자열이 포함된 것만, ' +
+          '비우면 검색량 높은 순으로 전체를 반환한다. competition을 주면 그 경쟁도만 걸러서 본다 — ' +
+          '예를 들어 competition:"낮음"으로 호출하면 위쪽이 곧 "검색량 높고 경쟁 낮은" 황금키워드 후보다.',
+        inputSchema: {
+          query: z.string().optional().describe('키워드에 포함될 부분 문자열. 비우면 전체 반환'),
+          competition: z.string().optional().describe('경쟁도로 필터링 (예: "낮음")'),
+          limit: z.number().int().min(1).max(300).optional().describe('최대 개수 (기본 100)'),
+        },
+      },
+      async ({ query, competition, limit }) => {
+        let q = supabase.from('keyword_stats').select('hint, keyword, pc, mobile, total, competition').order('total', { ascending: false }).limit(limit || 100)
+        if (query) q = q.ilike('keyword', `%${query}%`)
+        if (competition) q = q.eq('competition', competition)
+        const { data, error } = await q
+        if (error) return { content: [{ type: 'text', text: `오류: ${error.message}` }], isError: true }
+        if (!data || !data.length) return { content: [{ type: 'text', text: '검색 결과 없음' }] }
+        const lines = [`검색 결과 (${data.length}건, 검색량 순):`]
+        data.forEach(k => lines.push(`- [${k.hint}] ${k.keyword} · 합계 ${fmt(k.total)} (PC ${fmt(k.pc)} / 모바일 ${fmt(k.mobile)})${k.competition ? ' · 경쟁도 ' + k.competition : ''}`))
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      }
+    )
+
+    server.registerTool(
+      'pick_keyword',
+      {
+        title: '키워드 찜하기 (나중에 쓸 글감 bookmark)',
+        description:
+          '검색량 높고 경쟁 낮은 "황금키워드"처럼 지금 당장은 안 쓰더라도 나중에 글로 쓰고 싶은 키워드를 ' +
+          '찜해둔다(keyword_picks에 upsert). memo에 "이 키워드면 이런 글을 써야겠다"는 계획을 짧게 적어둔다.',
+        inputSchema: {
+          group: z.string().describe('이 키워드를 묶을 그룹 이름 (자유롭게 지정)'),
+          keyword: z.string(),
+          pc: z.number().optional(), mobile: z.number().optional(), total: z.number().optional(),
+          competition: z.string().optional(),
+          memo: z.string().optional().describe('어떤 글로 연결할지 계획 메모'),
+        },
+        annotations: { destructiveHint: false, idempotentHint: true },
+      },
+      async ({ group, keyword, pc, mobile, total, competition, memo }) => {
+        const row = {
+          tool_id: group, hint: group, keyword,
+          pc: pc || 0, mobile: mobile || 0, total: total != null ? total : (pc || 0) + (mobile || 0),
+          competition: competition || null, memo: memo || null,
+        }
+        const { error } = await supabase.from('keyword_picks').upsert(row, { onConflict: 'tool_id,keyword' })
+        if (error) return { content: [{ type: 'text', text: `오류: ${error.message}` }], isError: true }
+        return { content: [{ type: 'text', text: `⭐ 찜 완료: [${group}] ${keyword}${memo ? ' — ' + memo : ''}` }] }
+      }
+    )
+
+    server.registerTool(
+      'search_keyword_picks',
+      {
+        title: '찜한 키워드 전체 검색/열람',
+        description:
+          'pick_keyword로 찜해둔 키워드를 전체 열람·검색한다. 기본적으로 아직 글에 안 쓴(미사용) 키워드만 ' +
+          '보여준다 — 글감을 정하기 전에 호출해서 "찜해둔 것 중 오늘 쓸 만한 게 있는지" 확인하면 좋다.',
+        inputSchema: {
+          query: z.string().optional().describe('키워드 또는 메모에 포함될 부분 문자열'),
+          include_used: z.boolean().optional().describe('true면 이미 사용 처리된 키워드도 함께 보여준다 (기본 false)'),
+        },
+      },
+      async ({ query, include_used }) => {
+        let q = supabase.from('keyword_picks').select('tool_id, keyword, pc, mobile, total, competition, memo, used_at, used_in_title, used_in_slug').order('total', { ascending: false })
+        if (!include_used) q = q.is('used_at', null)
+        const { data, error } = await q
+        if (error) return { content: [{ type: 'text', text: `오류: ${error.message}` }], isError: true }
+        let rows = data || []
+        if (query) {
+          const needle = query.toLowerCase()
+          rows = rows.filter(r => (r.keyword || '').toLowerCase().includes(needle) || (r.memo || '').toLowerCase().includes(needle))
+        }
+        if (!rows.length) return { content: [{ type: 'text', text: include_used ? '찜한 키워드 없음' : '미사용 찜 키워드 없음' }] }
+        const label = include_used ? '찜한 키워드 (사용 여부 포함)' : '⭐ 미사용 찜 키워드'
+        const lines = [`${label} (${rows.length}개):`]
+        rows.forEach(p => {
+          const usedNote = p.used_at ? ` · ✅ 사용됨(${p.used_at.slice(0, 10)}, ${p.used_in_title || p.used_in_slug || '글 정보 없음'})` : ''
+          lines.push(`- [${p.tool_id}] ${p.keyword} · 합계 ${fmt(p.total)} (PC ${fmt(p.pc)} / 모바일 ${fmt(p.mobile)})${p.competition ? ' · 경쟁도 ' + p.competition : ''}${p.memo ? ' · 메모: ' + p.memo : ''}${usedNote}`)
+        })
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      }
+    )
+
+    server.registerTool(
+      'mark_keyword_used',
+      {
+        title: '찜 키워드 사용 처리',
+        description: '찜해둔 키워드를 실제로 글에 썼을 때 사용 처리한다 — used_at(날짜)·used_in_title/slug(어느 글)을 기록.',
+        inputSchema: {
+          group: z.string().describe('찜할 때 썼던 그룹 이름 (tool_id)'),
+          keyword: z.string(),
+          used_in_title: z.string().optional(),
+          used_in_slug: z.string().optional(),
+        },
+      },
+      async ({ group, keyword, used_in_title, used_in_slug }) => {
+        const { data, error } = await supabase.from('keyword_picks')
+          .update({ used_at: nowKST(), used_in_title: used_in_title || null, used_in_slug: used_in_slug || null })
+          .eq('tool_id', group).eq('keyword', keyword).select().single()
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        if (!data) return { content: [{ type: 'text', text: `❌ [${group}] ${keyword} 찜 기록을 찾을 수 없음` }], isError: true }
+        return { content: [{ type: 'text', text: `✅ 사용 처리 완료: [${group}] ${keyword}` }] }
+      }
+    )
+
+    server.registerTool(
+      'add_publish_log',
+      {
+        title: '블로그 발행 기록 추가',
+        description:
+          '새로 작성한 블로그 글 1편을 발행 기록에 남긴다. create_blog_post 호출 직후 함께 호출해서 ' +
+          '같은 각도를 다음에 또 쓰지 않도록 한다. 이 글에서 pick_keyword로 찜해뒀던 키워드를 실제로 썼다면, ' +
+          'memo에 어떤 키워드를 어떻게 썼는지 짧게 남긴다.',
+        inputSchema: {
+          category: z.string().optional().describe('카테고리. create_blog_post에 실제로 사용한 category 값과 동일하게'),
+          angle: z.string().describe('글감 각도, 예: "전략 소개"'),
+          title: z.string(), slug: z.string(),
+          memo: z.string().optional(),
+          target_keyword: z.string().optional(),
+          search_pc: z.number().optional(), search_mobile: z.number().optional(), search_total: z.number().optional(),
+          competition: z.string().optional(),
+          google_indexing: z.string().optional(), index_now: z.string().optional(),
+        },
+        annotations: { destructiveHint: false, idempotentHint: false },
+      },
+      async ({ category, angle, title, slug, memo, target_keyword, search_pc, search_mobile, search_total, competition, google_indexing, index_now }) => {
+        const row = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+          category: category || null, angle, title, slug,
+          memo: memo || null, target_keyword: target_keyword || null,
+          search_pc: search_pc != null ? Number(search_pc) : null,
+          search_mobile: search_mobile != null ? Number(search_mobile) : null,
+          search_total: search_total != null ? Number(search_total) : null,
+          competition: competition || null,
+          google_indexing: google_indexing || null, index_now: index_now || null,
+          published_at: nowKST(), created_at: nowKST(),
+        }
+        const { data, error } = await supabase.from('publish_log').insert([row]).select().single()
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        return { content: [{ type: 'text', text: `✅ 기록 추가됨: ${category || '-'} / ${angle} / ${title}` }] }
+      }
+    )
+
+    server.registerTool(
+      'get_publish_log',
+      {
+        title: '블로그 발행 기록 조회',
+        description: '지금까지 발행한 블로그 글 기록(각도/제목/슬러그/발행일/메모)을 가져온다. 글감을 정하기 전 중복을 피하는 데 쓴다.',
+        inputSchema: {
+          category: z.string().optional().describe('특정 카테고리로만 필터링'),
+          limit: z.number().int().min(1).max(500).optional().describe('최대 개수 (기본 200)'),
+        },
+      },
+      async ({ category, limit }) => {
+        let q = supabase.from('publish_log').select('*').order('created_at', { ascending: false })
+        if (category) q = q.eq('category', category)
+        q = q.limit(limit || 200)
+        const { data, error } = await q
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        if (!data || !data.length) return { content: [{ type: 'text', text: '발행 기록: 없음 (처음 시작)' }] }
+        const lines = [`발행 기록 (${data.length}건, 최신순):`]
+        data.forEach(l => {
+          const dateStr = l.published_at || (l.created_at ? l.created_at.slice(0, 10) : '')
+          lines.push(`- 카테고리: ${l.category || '-'} / 각도: ${l.angle} / 제목: ${l.title} / 슬러그: ${l.slug}${dateStr ? ' / 날짜: ' + dateStr : ''}${l.memo ? ' / 메모: ' + l.memo : ''}`)
+        })
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
       }
     )
 
@@ -530,7 +824,9 @@ const baseHandler = createMcpHandler(
   {
     instructions:
       '매매 시스템(trader) 라이선스 관리 서버. 라이선스 신청 조회/발급/연장/취소 도구와 ' +
-      '블로그 글 관리 도구(list_blog_posts/create_blog_post/update_blog_post), ' +
+      '블로그 글 관리 도구(list_blog_posts/create_blog_post/update_blog_post/list_blog_categories), ' +
+      '블로그 키워드 리서치·발행기록 도구(naver_keyword_volume/search_keyword_data/pick_keyword/' +
+      'search_keyword_picks/mark_keyword_used/add_publish_log/get_publish_log), ' +
       'DB 직접 조회·수정 도구(list_tables/get_rows/upsert_row/delete_row/run_sql), ' +
       'GitHub 저장소(minssajang/trader) 파일 확인 도구(list_github_files/get_github_file)를 제공한다. ' +
       '입금 확인 후 issue_license로 키를 발급하고, 발급된 키는 반드시 신청자 이메일로 안내해야 한다.',
