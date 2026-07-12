@@ -30,6 +30,8 @@ header.site {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 0;
   margin-bottom: 32px;
 }
 
@@ -40,13 +42,24 @@ header.site .brand {
   margin: 0;
 }
 
+nav.site {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 nav.site a {
   color: var(--muted);
   text-decoration: none;
   margin-left: 16px;
   font-size: 14px;
+  white-space: nowrap;
 }
 nav.site a:hover { color: var(--text); }
+
+@media (max-width: 480px) {
+  nav.site a { margin-left: 0; margin-right: 14px; }
+}
 
 .card {
   background: var(--card);
@@ -343,11 +356,12 @@ footer.site {
 .cta-band p { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
 
 /* 좌/우 사이드 레일 광고 (넓은 화면에서만 노출) */
+/* landing-wrap 콘텐츠 폭(960px, 중심에서 480px)에서 20px 띄운 위치 = 500px, 레일 폭 160px을 더해 660px */
 .ad-rail {
   position: fixed; top: 120px; width: 160px; z-index: 50; display: none;
 }
-.ad-rail-left { left: calc(50% - 560px); }
-.ad-rail-right { right: calc(50% - 560px); }
-@media (min-width: 1180px) {
+.ad-rail-left { left: calc(50% - 660px); }
+.ad-rail-right { right: calc(50% - 660px); }
+@media (min-width: 1400px) {
   .ad-rail { display: block; }
 }
