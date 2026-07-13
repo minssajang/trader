@@ -39,7 +39,7 @@ function ShortcutCard() {
 }
 
 // ── 공용: 여러 개 추가되는 목록 카드 ─────────────────────────
-function RepeatableRow({ adminToken, item, isNew, apiPath, fields, onSaved, onDeleted, onCancelNew, renderPreview }) {
+function RepeatableRow({ adminToken, item, isNew, apiPath, fields, onSaved, onDeleted, onCancelNew, renderPreview, previewOnlyWhenOpen = false }) {
   const [form, setForm] = useState(item)
   const [saving, setSaving] = useState(false)
   const [open, setOpen] = useState(isNew)
@@ -100,7 +100,7 @@ function RepeatableRow({ adminToken, item, isNew, apiPath, fields, onSaved, onDe
         <span style={{ fontSize: 13, color: '#9aa0ab' }}>{open ? '▲' : '▼'}</span>
       </div>
 
-      {renderPreview && (form.widget_html || form.url) && (
+      {renderPreview && (form.widget_html || form.url) && (!previewOnlyWhenOpen || open) && (
         <div style={{
           marginTop: 10, padding: '10px 12px', background: '#0f1115',
           border: '1px dashed #2a2e38', borderRadius: 8, overflow: 'auto',
@@ -159,7 +159,7 @@ function RepeatableRow({ adminToken, item, isNew, apiPath, fields, onSaved, onDe
   )
 }
 
-export function RepeatableListCard({ adminToken, title, description, apiPath, empty, fields, addLabel, renderPreview, notice }) {
+export function RepeatableListCard({ adminToken, title, description, apiPath, empty, fields, addLabel, renderPreview, notice, previewOnlyWhenOpen = false }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [newDraft, setNewDraft] = useState(null)
@@ -203,12 +203,12 @@ export function RepeatableListCard({ adminToken, title, description, apiPath, em
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
           {items.map(it => (
             <RepeatableRow key={it.id} adminToken={adminToken} item={it} isNew={false}
-              apiPath={apiPath} fields={fields} renderPreview={renderPreview}
+              apiPath={apiPath} fields={fields} renderPreview={renderPreview} previewOnlyWhenOpen={previewOnlyWhenOpen}
               onSaved={onSavedExisting} onDeleted={onDeleted} />
           ))}
           {newDraft && (
             <RepeatableRow adminToken={adminToken} item={newDraft} isNew={true}
-              apiPath={apiPath} fields={fields} renderPreview={renderPreview}
+              apiPath={apiPath} fields={fields} renderPreview={renderPreview} previewOnlyWhenOpen={previewOnlyWhenOpen}
               onSaved={onSavedNew} onDeleted={() => {}} onCancelNew={() => setNewDraft(null)} />
           )}
           {items.length === 0 && !newDraft && (
