@@ -689,6 +689,75 @@ const baseHandler = createMcpHandler(
       }
     )
 
+    // ── 그래프·차트 스크린샷 캡처 (뉴스·공식 홈페이지의 통계 자료를 실제로 캡처해서 저장) ──
+    async function ensureScreenshotBucket() {
+      const { data: buckets } = await supabase.storage.listBuckets()
+      if (buckets?.some(b => b.name === 'blog-images')) return
+      await supabase.storage.createBucket('blog-images', { public: true, fileSizeLimit: '5MB' })
+    }
+
+    server.registerTool(
+      'capture_screenshot',
+      {
+        title: '웹페이지 그래프·차트 스크린샷 캡처 및 저장',
+        description:
+          '뉴스·공식 홈페이지(한국거래소, 금융감독원, 세이브로 등)에 있는 그래프·차트를 헤드리스 브라우저로 실제로 캡처해서 ' +
+          'Supabase Storage(blog-images 버킷)에 저장하고 공개 URL을 반환한다. selector를 주면 그 요소만 잘라서 캡처하고, ' +
+          '안 주면 뷰포트 전체를 캡처한다. 반환된 URL을 블로그 본문 <img> 태그에 쓰고, 바로 아래에 반드시 출처(사이트명 + 원본 링크)를 ' +
+          '캡션으로 명시할 것 — 저작권 있는 자료를 그대로 재게시하는 것이므로 출처 표기 없이 쓰지 않는다.',
+        inputSchema: {
+          url: z.string().describe('캡처할 페이지 URL'),
+          selector: z.string().optional().describe('캡처할 특정 요소의 CSS selector (예: "#chart-container", ".graph-wrap"). 안 주면 뷰포트 전체를 캡처'),
+          waitMs: z.number().int().min(0).max(8000).optional().describe('페이지 로드 후 추가로 기다릴 시간(ms). 자바스크립트로 그려지는 차트가 렌더링될 시간을 줄 때 사용. 기본 1500'),
+          width: z.number().int().min(320).max(1920).optional().describe('뷰포트 너비. 기본 1200'),
+        },
+        annotations: { destructiveHint: false },
+      },
+      async ({ url, selector, waitMs = 1500, width = 1200 }) => {
+        let browser
+        try {
+          const { default: chromium } = await import('@sparticuz/chromium-min')
+          const puppeteer = await import('puppeteer-core')
+          // ⚠️ 이 URL의 버전(v131.0.1)은 package.json의 @sparticuz/chromium-min 버전과 반드시 일치해야 한다.
+          // npm install 이후 버전이 다르면 https://github.com/Sparticuz/chromium/releases 에서 맞는 pack.tar로 교체할 것.
+          const executablePath = await chromium.executablePath(
+            'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'
+          )
+          browser = await puppeteer.default.launch({
+            args: chromium.args,
+            executablePath,
+            headless: true,
+            defaultViewport: { width, height: 900 },
+          })
+          const page = await browser.newPage()
+          await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 })
+          if (waitMs) await new Promise(r => setTimeout(r, waitMs))
+
+          let buffer
+          if (selector) {
+            const el = await page.$(selector)
+            if (!el) throw new Error(`selector "${selector}"에 해당하는 요소를 찾을 수 없음`)
+            buffer = await el.screenshot({ type: 'png' })
+          } else {
+            buffer = await page.screenshot({ type: 'png' })
+          }
+          await browser.close()
+          browser = null
+
+          await ensureScreenshotBucket()
+          const path = `captures/${Date.now()}-${randomUUID().slice(0, 8)}.png`
+          const { error: upErr } = await supabase.storage.from('blog-images').upload(path, buffer, { contentType: 'image/png', upsert: false })
+          if (upErr) return { content: [{ type: 'text', text: `❌ 업로드 실패: ${upErr.message}` }], isError: true }
+          const { data: pub } = supabase.storage.from('blog-images').getPublicUrl(path)
+
+          return { content: [{ type: 'text', text: `✅ 캡처 완료\nURL: ${pub.publicUrl}\n원본 페이지: ${url}\n⚠️ 본문에 쓸 때 반드시 출처(사이트명+원본 링크)를 캡션으로 함께 표기할 것.` }] }
+        } catch (e) {
+          if (browser) { try { await browser.close() } catch {} }
+          return { content: [{ type: 'text', text: `❌ 캡처 실패: ${e.message}` }], isError: true }
+        }
+      }
+    )
+
     server.registerTool(
       'list_blog_categories',
       {
@@ -919,6 +988,7 @@ const baseHandler = createMcpHandler(
       '블로그 글 관리 도구(list_blog_posts/create_blog_post/update_blog_post/list_blog_categories), ' +
       '블로그 키워드 리서치·발행기록 도구(naver_keyword_volume/search_keyword_data/pick_keyword/' +
       'search_keyword_picks/mark_keyword_used/add_publish_log/get_publish_log), ' +
+      '뉴스·공식 홈페이지의 그래프·차트를 실제로 캡처해서 저장하는 도구(capture_screenshot), ' +
       'Claude 시스템 프롬프트 도구(get_system_prompt/update_system_prompt), ' +
       'DB 직접 조회·수정 도구(list_tables/get_rows/upsert_row/delete_row/run_sql), ' +
       'GitHub 저장소(minssajang/trader) 파일 확인 도구(list_github_files/get_github_file)를 제공한다. ' +
