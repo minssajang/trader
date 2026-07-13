@@ -154,7 +154,7 @@ export default function Admin() {
             <div style={{ fontSize: 15, fontWeight: 700 }}>Admin Panel</div>
             <div style={{ fontSize: 11, color: '#9aa0ab', marginTop: 2 }}>EasyTrade</div>
           </div>
-          <nav style={{ flex: 1, padding: '12px 0' }}>
+          <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 0' }}>
             {Object.entries(TAB_LABELS).map(([id, label]) => (
               <button key={id} onClick={() => setActiveTab(id)} style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px',
