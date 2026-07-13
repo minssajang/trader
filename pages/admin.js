@@ -113,14 +113,23 @@ export default function Admin() {
   const [authed, setAuthed] = useState(false)
   const [adminToken, setAdminToken] = useState('')
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('licenses')
+  const [activeTab, setActiveTabState] = useState('licenses')
   const [toast, setToast] = useState('')
 
   const showToast = (msg) => setToast(msg)
 
+  // 새로고침해도 보고 있던 메뉴가 유지되도록 localStorage에 저장해둔다
+  // (예전엔 useState 기본값이라 새로고침하면 항상 "라이선스 관리"로 돌아갔음).
+  const setActiveTab = (id) => {
+    setActiveTabState(id)
+    localStorage.setItem('admin_active_tab', id)
+  }
+
   useEffect(() => {
     const token = sessionStorage.getItem('admin_token')
     if (token) { setAuthed(true); setAdminToken(token) }
+    const savedTab = localStorage.getItem('admin_active_tab')
+    if (savedTab && TAB_LABELS[savedTab]) setActiveTabState(savedTab)
     setLoading(false)
   }, [])
 
