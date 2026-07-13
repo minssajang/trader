@@ -118,7 +118,23 @@ export default function LicenseAdminPanel({ adminToken, showToast }) {
                       {STATUS_LABEL[r.status] || r.status}
                     </span>
                   </td>
-                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: '#4CAF50' }}>{r.license_key || '-'}</td>
+                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: '#4CAF50' }}>
+                    {r.license_key ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>{r.license_key}</span>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(r.license_key)
+                            showToast?.('✅ 키를 복사했습니다')
+                          }}
+                          title="키 복사"
+                          style={{ ...iconBtn('#9aa0ab'), padding: '2px 6px', fontSize: 11 }}
+                        >
+                          복사
+                        </button>
+                      </div>
+                    ) : '-'}
+                  </td>
                   <td style={td}>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       {r.status === 'pending' && (
