@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { S, ConfirmModal, Toggle } from './AdminUI'
+import { publicSupabase } from '../../lib/publicSupabase'
 
 const APP_LABEL = { ninja: 'NT8 (Ninja)', mt5: 'MT5' }
 
@@ -9,15 +10,6 @@ const iconBtn = (color) => ({
   background: 'none', border: `1px solid ${color}`, color, borderRadius: 6,
   padding: '4px 8px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
 })
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result.split(',')[1])
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
 
 export default function VersionAdminPanel({ adminToken, showToast }) {
   const [rows, setRows] = useState([])
@@ -47,17 +39,32 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
 
   const upload = async () => {
     if (!version.trim()) { showToast?.('❌ 버전을 입력하세요'); return }
-    if (!file) { showToast?.('❌ zip 파일을 선택하세요'); return }
+    if (!file) { showToast?.('❌ 파일을 선택하세요'); return }
     setUploading(true)
     try {
-      const fileBase64 = await fileToBase64(file)
+      // 설치 파일(exe)이 수십~수백MB라 우리 서버(API)를 거쳐서 올리면 요청 크기 제한에
+      // 걸린다. 그래서 (1) 서버에서 signed 업로드 URL만 발급받고, (2) 브라우저가 그
+      // URL로 Supabase Storage에 파일을 직접 올리고, (3) 끝나면 서버에 등록만 요청한다.
+      const urlRes = await fetch('/api/admin/versions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+        body: JSON.stringify({ action: 'get-upload-url', app, version: version.trim(), fileName: file.name }),
+      })
+      const urlData = await urlRes.json()
+      if (!urlRes.ok) throw new Error(urlData.error || '업로드 URL 발급 실패')
+
+      const { error: uploadErr } = await publicSupabase.storage
+        .from('app-updates')
+        .uploadToSignedUrl(urlData.path, urlData.token, file)
+      if (uploadErr) throw new Error(`업로드 실패: ${uploadErr.message}`)
+
       const res = await fetch('/api/admin/versions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
-        body: JSON.stringify({ app, version: version.trim(), changelog, fileBase64, fileName: file.name }),
+        body: JSON.stringify({ app, version: version.trim(), changelog, path: urlData.path }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || '업로드 실패')
+      if (!res.ok) throw new Error(data.error || '등록 실패')
       setVersion(''); setChangelog(''); setFile(null)
       await load()
       showToast?.('✅ 새 버전이 등록되었습니다')
@@ -122,8 +129,8 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
         </div>
         <label style={S.label}>변경 내용</label>
         <textarea value={changelog} onChange={e => setChangelog(e.target.value)} rows={3} style={{ ...S.textarea, marginBottom: 12 }} />
-        <label style={S.label}>업데이트 zip 파일</label>
-        <input type="file" accept=".zip" onChange={e => setFile(e.target.files?.[0] || null)}
+        <label style={S.label}>설치 파일 (Setup.exe)</label>
+        <input type="file" accept=".exe,.zip" onChange={e => setFile(e.target.files?.[0] || null)}
           style={{ color: '#e8eaed', fontSize: 13, marginBottom: 12, display: 'block' }} />
         <button onClick={upload} disabled={uploading} style={{ ...S.btn(), opacity: uploading ? 0.6 : 1 }}>
           {uploading ? '업로드 중...' : '⬆️ 새 버전 등록'}
