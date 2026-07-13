@@ -150,11 +150,11 @@ export default function Admin() {
       <Head><title>Admin — EasyTrade</title></Head>
       <div style={{ minHeight: '100vh', background: '#0f1115', fontFamily: '-apple-system, "Segoe UI", "Malgun Gothic", sans-serif', color: '#e8eaed', display: 'flex' }}>
         <aside style={{ width: 220, minWidth: 220, background: '#171a21', borderRight: '1px solid #2a2e38', display: 'flex', flexDirection: 'column', height: '100vh', position: 'sticky', top: 0 }}>
-          <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid #2a2e38' }}>
+          <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid #2a2e38', background: '#171a21', flexShrink: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 700 }}>Admin Panel</div>
             <div style={{ fontSize: 11, color: '#9aa0ab', marginTop: 2 }}>EasyTrade</div>
           </div>
-          <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 0' }}>
+          <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 0', background: '#171a21' }}>
             {Object.entries(TAB_LABELS).map(([id, label]) => (
               <button key={id} onClick={() => setActiveTab(id)} style={{
                 width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px',
@@ -166,7 +166,7 @@ export default function Admin() {
               }}>{label}</button>
             ))}
           </nav>
-          <div style={{ padding: '12px 20px', borderTop: '1px solid #2a2e38', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ padding: '12px 20px', borderTop: '1px solid #2a2e38', display: 'flex', flexDirection: 'column', gap: 6, background: '#171a21', flexShrink: 0, position: 'relative', zIndex: 1 }}>
             <a href="/" style={{ color: '#9aa0ab', fontSize: 13, textDecoration: 'none', padding: '6px 0' }}>← 사이트로</a>
             <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9aa0ab', fontSize: 14, padding: '6px 0', textAlign: 'left', fontFamily: 'inherit' }}>🚪 로그아웃</button>
           </div>
