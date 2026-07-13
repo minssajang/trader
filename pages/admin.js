@@ -11,6 +11,7 @@ import PopupPanel from '../components/admin/PopupPanel'
 import BoardAdminPanel from '../components/admin/BoardAdminPanel'
 import AdsensePanel from '../components/admin/AdsensePanel'
 import CoupangPanel from '../components/admin/CoupangPanel'
+import CoupangProductsPanel from '../components/admin/CoupangProductsPanel'
 import { S, MessageModal } from '../components/admin/AdminUI'
 
 const TAB_LABELS = {
@@ -24,6 +25,7 @@ const TAB_LABELS = {
   freeboard: '💬 자유게시판',
   adsense: '💰 광고 관리',
   coupang: '🛒 쿠팡 관리',
+  coupangproducts: '📦 쿠팡상품',
   systemprompt: '🤖 Claude 지침',
   popup: '📢 팝업관리',
   password: '🔒 비밀번호 변경',
@@ -187,6 +189,7 @@ export default function Admin() {
             {activeTab === 'freeboard' && <BoardAdminPanel adminToken={adminToken} />}
             {activeTab === 'adsense' && <AdsensePanel adminToken={adminToken} />}
             {activeTab === 'coupang' && <CoupangPanel adminToken={adminToken} />}
+            {activeTab === 'coupangproducts' && <CoupangProductsPanel adminToken={adminToken} />}
             {activeTab === 'systemprompt' && <SystemPromptPanel adminToken={adminToken} />}
             {activeTab === 'popup' && <PopupPanel adminToken={adminToken} />}
             {activeTab === 'password' && <PasswordPanel adminToken={adminToken} showToast={showToast} />}

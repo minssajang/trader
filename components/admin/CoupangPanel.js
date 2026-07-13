@@ -159,7 +159,7 @@ function RepeatableRow({ adminToken, item, isNew, apiPath, fields, onSaved, onDe
   )
 }
 
-function RepeatableListCard({ adminToken, title, description, apiPath, empty, fields, addLabel, renderPreview, notice }) {
+export function RepeatableListCard({ adminToken, title, description, apiPath, empty, fields, addLabel, renderPreview, notice }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [newDraft, setNewDraft] = useState(null)

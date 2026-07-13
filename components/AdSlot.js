@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SLOT_BANNER_SIZE } from '../lib/adSlotSizes'
 import { useCoupangWidgets, useAdsOn } from '../lib/AdSlotsContext'
 
@@ -21,12 +21,29 @@ function useInjectAdCode(containerRef, code, deps = []) {
   }, deps)
 }
 
-// 사이즈가 맞고 켜져있는 쿠팡 배너 중 하나를 무작위로 고른다
-function pickCoupangBanner(widgets, size) {
-  if (!size) return null
-  const matches = (Array.isArray(widgets) ? widgets : []).filter(w => w.enabled && w.widget_html && w.size === size)
-  if (matches.length === 0) return null
-  return matches[Math.floor(Math.random() * matches.length)]
+const COUPANG_ROTATE_MS = 30000
+
+// 사이즈가 맞고 켜져있는 쿠팡 배너 목록에서 하나를 고르되, 2개 이상이면 30초마다 무작위로 바꿔가며 보여준다
+function useRotatingCoupangBanner(widgets, size) {
+  const matches = useMemo(
+    () => (Array.isArray(widgets) ? widgets : []).filter(w => w.enabled && w.widget_html && w.size === size),
+    [widgets, size]
+  )
+  const [index, setIndex] = useState(0)
+
+  useEffect(() => {
+    setIndex(matches.length ? Math.floor(Math.random() * matches.length) : 0)
+  }, [matches.length, size])
+
+  useEffect(() => {
+    if (matches.length <= 1) return
+    const id = setInterval(() => {
+      setIndex(Math.floor(Math.random() * matches.length))
+    }, COUPANG_ROTATE_MS)
+    return () => clearInterval(id)
+  }, [matches.length])
+
+  return matches.length ? matches[index] : null
 }
 
 /**
@@ -37,7 +54,7 @@ function useResolvedAdContent(slotId, slot) {
   const coupangWidgets = useCoupangWidgets()
   const adsOn = useAdsOn()
   const size = SLOT_BANNER_SIZE[slotId]
-  const coupangBanner = useMemo(() => pickCoupangBanner(coupangWidgets, size), [coupangWidgets, size])
+  const coupangBanner = useRotatingCoupangBanner(coupangWidgets, size)
 
   const source = slot?.source || 'adsense'
   const hasAdsense = !!(slot?.active && slot?.code)
