@@ -198,24 +198,31 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
                     </tr>
                   )
                 }
+                // 편집 중엔 좁은 열로 쪼개져서 URL이 가로로 잘려 보이지 않도록,
+                // 한 줄 전체를 colSpan으로 합쳐 세로로 넓게 펼치는 폼으로 보여준다.
                 return (
                   <tr key={r.id}>
-                    <td style={td}>
-                      <input value={editVersion} onChange={e => setEditVersion(e.target.value)} style={{ ...S.input, width: 100 }} />
-                    </td>
-                    <td style={td}>
-                      <textarea value={editChangelog} onChange={e => setEditChangelog(e.target.value)} rows={3} style={{ ...S.textarea, minWidth: 220 }} />
-                    </td>
-                    <td style={td}>{new Date(r.created_at).toLocaleDateString('ko-KR')}</td>
-                    <td style={td}><Toggle value={r.is_active} onChange={() => toggleActive(r)} /></td>
-                    <td style={td}>
-                      <input value={editDownloadUrl} onChange={e => setEditDownloadUrl(e.target.value)} style={{ ...S.input, minWidth: 220 }} />
-                    </td>
-                    <td style={{ ...td, display: 'flex', gap: 6 }}>
-                      <button onClick={() => saveEdit(r.id)} disabled={saving} style={{ ...iconBtn('#4CAF50'), opacity: saving ? 0.6 : 1 }}>
-                        {saving ? '저장 중...' : '저장'}
-                      </button>
-                      <button onClick={cancelEdit} style={iconBtn('#9aa0ab')}>취소</button>
+                    <td colSpan={6} style={{ ...td, background: '#20242e' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 640 }}>
+                        <div>
+                          <label style={S.label}>버전</label>
+                          <input value={editVersion} onChange={e => setEditVersion(e.target.value)} style={{ ...S.input, width: 160 }} />
+                        </div>
+                        <div>
+                          <label style={S.label}>변경 내용</label>
+                          <textarea value={editChangelog} onChange={e => setEditChangelog(e.target.value)} rows={3} style={{ ...S.textarea, width: '100%' }} />
+                        </div>
+                        <div>
+                          <label style={S.label}>다운로드 URL</label>
+                          <input value={editDownloadUrl} onChange={e => setEditDownloadUrl(e.target.value)} style={{ ...S.input, width: '100%' }} />
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button onClick={() => saveEdit(r.id)} disabled={saving} style={{ ...iconBtn('#4CAF50'), opacity: saving ? 0.6 : 1 }}>
+                            {saving ? '저장 중...' : '저장'}
+                          </button>
+                          <button onClick={cancelEdit} style={iconBtn('#9aa0ab')}>취소</button>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 )
