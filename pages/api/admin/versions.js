@@ -36,11 +36,27 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { id, is_active } = req.body
+    const { id, is_active, version, changelog, download_url } = req.body
     if (!id) return res.status(400).json({ error: 'id 필수' })
+
+    // 넘어온 필드만 갱신한다 - 토글(is_active만 보냄)과 수정 폼(version/changelog/download_url)이
+    // 같은 PATCH를 같이 쓰기 때문에, 안 보낸 필드는 건드리지 않아야 한다.
+    const update = {}
+    if (is_active !== undefined) update.is_active = is_active
+    if (version !== undefined) {
+      if (!version.trim()) return res.status(400).json({ error: '버전을 입력하세요' })
+      update.version = version.trim()
+    }
+    if (changelog !== undefined) update.changelog = changelog
+    if (download_url !== undefined) {
+      if (!download_url.trim()) return res.status(400).json({ error: '다운로드 URL을 입력하세요' })
+      update.download_url = download_url.trim()
+    }
+    if (Object.keys(update).length === 0) return res.status(400).json({ error: '수정할 내용이 없습니다' })
+
     const { data, error } = await supabase
       .from('app_versions')
-      .update({ is_active })
+      .update(update)
       .eq('id', id)
       .select()
       .single()

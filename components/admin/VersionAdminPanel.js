@@ -22,6 +22,12 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
   const [changelog, setChangelog] = useState('')
   const [downloadUrl, setDownloadUrl] = useState('')
 
+  const [editingId, setEditingId] = useState(null)
+  const [editVersion, setEditVersion] = useState('')
+  const [editChangelog, setEditChangelog] = useState('')
+  const [editDownloadUrl, setEditDownloadUrl] = useState('')
+  const [saving, setSaving] = useState(false)
+
   const load = async () => {
     setLoading(true)
     try {
@@ -71,6 +77,41 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
     } catch {
       showToast?.('❌ 처리 실패')
     }
+  }
+
+  const startEdit = (row) => {
+    setEditingId(row.id)
+    setEditVersion(row.version)
+    setEditChangelog(row.changelog || '')
+    setEditDownloadUrl(row.download_url)
+  }
+
+  const cancelEdit = () => setEditingId(null)
+
+  const saveEdit = async (id) => {
+    if (!editVersion.trim()) { showToast?.('❌ 버전을 입력하세요'); return }
+    if (!editDownloadUrl.trim()) { showToast?.('❌ 다운로드 URL을 입력하세요'); return }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/admin/versions', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+        body: JSON.stringify({
+          id,
+          version: editVersion.trim(),
+          changelog: editChangelog,
+          download_url: editDownloadUrl.trim(),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || '수정 실패')
+      setEditingId(null)
+      await load()
+      showToast?.('✅ 수정되었습니다')
+    } catch (e) {
+      showToast?.(`❌ ${e.message || '수정 실패'}`)
+    }
+    setSaving(false)
   }
 
   const remove = async (id) => {
@@ -140,18 +181,45 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
               </tr>
             </thead>
             <tbody>
-              {appRows.map(r => (
-                <tr key={r.id}>
-                  <td style={td}>v{r.version}</td>
-                  <td style={{ ...td, maxWidth: 260, whiteSpace: 'pre-wrap', color: '#9aa0ab' }}>{r.changelog}</td>
-                  <td style={td}>{new Date(r.created_at).toLocaleDateString('ko-KR')}</td>
-                  <td style={td}><Toggle value={r.is_active} onChange={() => toggleActive(r)} /></td>
-                  <td style={td}><a href={r.download_url} target="_blank" rel="noreferrer" style={{ color: '#4CAF50' }}>파일 열기</a></td>
-                  <td style={td}>
-                    <button onClick={() => setConfirmTarget(r)} style={iconBtn('#F44336')}>삭제</button>
-                  </td>
-                </tr>
-              ))}
+              {appRows.map(r => {
+                const isEditing = editingId === r.id
+                if (!isEditing) {
+                  return (
+                    <tr key={r.id}>
+                      <td style={td}>v{r.version}</td>
+                      <td style={{ ...td, maxWidth: 260, whiteSpace: 'pre-wrap', color: '#9aa0ab' }}>{r.changelog}</td>
+                      <td style={td}>{new Date(r.created_at).toLocaleDateString('ko-KR')}</td>
+                      <td style={td}><Toggle value={r.is_active} onChange={() => toggleActive(r)} /></td>
+                      <td style={td}><a href={r.download_url} target="_blank" rel="noreferrer" style={{ color: '#4CAF50' }}>파일 열기</a></td>
+                      <td style={{ ...td, display: 'flex', gap: 6 }}>
+                        <button onClick={() => startEdit(r)} style={iconBtn('#4CAF50')}>수정</button>
+                        <button onClick={() => setConfirmTarget(r)} style={iconBtn('#F44336')}>삭제</button>
+                      </td>
+                    </tr>
+                  )
+                }
+                return (
+                  <tr key={r.id}>
+                    <td style={td}>
+                      <input value={editVersion} onChange={e => setEditVersion(e.target.value)} style={{ ...S.input, width: 100 }} />
+                    </td>
+                    <td style={td}>
+                      <textarea value={editChangelog} onChange={e => setEditChangelog(e.target.value)} rows={3} style={{ ...S.textarea, minWidth: 220 }} />
+                    </td>
+                    <td style={td}>{new Date(r.created_at).toLocaleDateString('ko-KR')}</td>
+                    <td style={td}><Toggle value={r.is_active} onChange={() => toggleActive(r)} /></td>
+                    <td style={td}>
+                      <input value={editDownloadUrl} onChange={e => setEditDownloadUrl(e.target.value)} style={{ ...S.input, minWidth: 220 }} />
+                    </td>
+                    <td style={{ ...td, display: 'flex', gap: 6 }}>
+                      <button onClick={() => saveEdit(r.id)} disabled={saving} style={{ ...iconBtn('#4CAF50'), opacity: saving ? 0.6 : 1 }}>
+                        {saving ? '저장 중...' : '저장'}
+                      </button>
+                      <button onClick={cancelEdit} style={iconBtn('#9aa0ab')}>취소</button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
