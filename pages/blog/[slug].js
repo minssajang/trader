@@ -97,6 +97,10 @@ export default function BlogPost({ post, html, allPosts }) {
           </div>
         ) : (
           <article>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+              이 블로그는 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.
+            </p>
+
             {adminExtra && (
               <div style={{ marginBottom: 20, padding: '12px 16px', background: 'rgba(255,193,7,0.08)', border: '1px dashed #FFC107', borderRadius: 10, fontSize: 12.5, color: '#FFC107' }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', fontWeight: 700, marginBottom: 10 }}>
