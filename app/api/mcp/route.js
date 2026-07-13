@@ -442,6 +442,59 @@ const baseHandler = createMcpHandler(
     )
 
     server.registerTool(
+      'suggest_feature',
+      {
+        title: '기존 도구에 기능 추가 제안 (검토 메모 기록)',
+        description:
+          '새 도구를 만드는 게 아니라 "기존 도구/카테고리에 기능을 추가하면 좋겠다"는 제안을 검토 메모와 함께 ' +
+          '기록한다(feature_ideas에 insert). 황금키워드를 발견했을 때 완전히 새로운 카테고리를 만들 정도는 ' +
+          '아니지만 기존 결과와 결이 비슷하면 여기에 기록해두고, admin "💡 아이디어 제안" 탭에서 사람이 검토한다.',
+        inputSchema: {
+          tool_id: z.string().describe('기능을 추가할 기존 도구/카테고리 코드'),
+          feature_name: z.string().describe('추가할 기능 이름'),
+          keyword: z.string().optional().describe('근거가 된 키워드'),
+          pc: z.number().optional(), mobile: z.number().optional(), total: z.number().optional(),
+          competition: z.string().optional(),
+          notes: z.string().describe('구현 가능성 검토 결과 (비용/약관/대안 등)'),
+        },
+        annotations: { destructiveHint: false, idempotentHint: false },
+      },
+      async ({ tool_id, feature_name, keyword, pc, mobile, total, competition, notes }) => {
+        const row = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+          tool_id, feature_name, keyword: keyword || null,
+          pc: pc ?? null, mobile: mobile ?? null, total: total ?? null,
+          competition: competition || null, notes, status: 'proposed',
+        }
+        const { error } = await supabase.from('feature_ideas').insert([row])
+        if (error) return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true }
+        return { content: [{ type: 'text', text: `💡 기능 제안 기록됨: [${tool_id}] ${feature_name}` }] }
+      }
+    )
+
+    server.registerTool(
+      'get_feature_ideas',
+      {
+        title: '기능 추가 제안 목록 조회',
+        description: 'suggest_feature로 기록해둔 기능 추가 제안 목록을 조회한다.',
+        inputSchema: {
+          tool_id: z.string().optional(),
+          status: z.string().optional().describe('proposed|building|done|rejected'),
+        },
+      },
+      async ({ tool_id, status }) => {
+        let q = supabase.from('feature_ideas').select('*').order('created_at', { ascending: false })
+        if (tool_id) q = q.eq('tool_id', tool_id)
+        if (status) q = q.eq('status', status)
+        const { data, error } = await q
+        if (error) return { content: [{ type: 'text', text: `오류: ${error.message}` }], isError: true }
+        if (!data || !data.length) return { content: [{ type: 'text', text: '기록된 기능 제안 없음' }] }
+        const lines = data.map(i => `- [${i.tool_id}] ${i.feature_name} (${i.status})${i.keyword ? ' · 키워드: ' + i.keyword : ''} — ${i.notes}`)
+        return { content: [{ type: 'text', text: lines.join('\n') }] }
+      }
+    )
+
+    server.registerTool(
       'add_publish_log',
       {
         title: '블로그 발행 기록 추가',

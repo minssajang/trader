@@ -4,6 +4,7 @@ import LicenseAdminPanel from '../components/admin/LicenseAdminPanel'
 import VersionAdminPanel from '../components/admin/VersionAdminPanel'
 import BlogAdminPanel from '../components/admin/BlogAdminPanel'
 import BlogMenuPanel from '../components/admin/BlogMenuPanel'
+import KeywordPanel from '../components/admin/KeywordPanel'
 import ContentLogPanel from '../components/admin/ContentLogPanel'
 import SystemPromptPanel from '../components/admin/SystemPromptPanel'
 import PopupPanel from '../components/admin/PopupPanel'
@@ -18,6 +19,7 @@ const TAB_LABELS = {
   blogwrite: '✍️ 블로그글쓰기',
   blogmanage: '📝 블로그관리',
   blogmenu: '📂 블로그메뉴관리',
+  keyword: '🔍 키워드 관리',
   contentlog: '📋 발행기록',
   freeboard: '💬 자유게시판',
   adsense: '💰 광고 관리',
@@ -180,6 +182,7 @@ export default function Admin() {
             {activeTab === 'blogwrite' && <BlogAdminPanel adminToken={adminToken} showToast={showToast} initialView="write" />}
             {activeTab === 'blogmanage' && <BlogAdminPanel adminToken={adminToken} showToast={showToast} initialView="list" />}
             {activeTab === 'blogmenu' && <BlogMenuPanel adminToken={adminToken} />}
+            {activeTab === 'keyword' && <KeywordPanel adminToken={adminToken} />}
             {activeTab === 'contentlog' && <ContentLogPanel adminToken={adminToken} />}
             {activeTab === 'freeboard' && <BoardAdminPanel adminToken={adminToken} />}
             {activeTab === 'adsense' && <AdsensePanel adminToken={adminToken} />}
