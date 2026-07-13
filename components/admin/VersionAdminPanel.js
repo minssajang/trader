@@ -102,7 +102,7 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
         {['ninja', 'mt5'].map(a => (
-          <button key={a} onClick={() => setApp(a)}
+          <button key={a} onClick={() => { setApp(a); setVersion(''); setChangelog(''); setFile(null) }}
             style={{
               ...S.btnGhost,
               padding: '6px 16px',
