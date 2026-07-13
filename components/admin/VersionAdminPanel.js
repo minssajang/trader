@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { S, ConfirmModal, Toggle } from './AdminUI'
-import { publicSupabase } from '../../lib/publicSupabase'
 
 const APP_LABEL = { ninja: 'NT8 (Ninja)', mt5: 'MT5' }
 
@@ -21,7 +20,7 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
   const appRows = rows.filter(r => r.app === app)
   const [version, setVersion] = useState('')
   const [changelog, setChangelog] = useState('')
-  const [file, setFile] = useState(null)
+  const [downloadUrl, setDownloadUrl] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -39,37 +38,23 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
 
   const upload = async () => {
     if (!version.trim()) { showToast?.('❌ 버전을 입력하세요'); return }
-    if (!file) { showToast?.('❌ 파일을 선택하세요'); return }
+    if (!downloadUrl.trim()) { showToast?.('❌ 다운로드 URL을 입력하세요'); return }
     setUploading(true)
     try {
-      // 설치 파일(exe)이 수십~수백MB라 우리 서버(API)를 거쳐서 올리면 요청 크기 제한에
-      // 걸린다. 그래서 (1) 서버에서 signed 업로드 URL만 발급받고, (2) 브라우저가 그
-      // URL로 Supabase Storage에 파일을 직접 올리고, (3) 끝나면 서버에 등록만 요청한다.
-      const urlRes = await fetch('/api/admin/versions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
-        body: JSON.stringify({ action: 'get-upload-url', app, version: version.trim(), fileName: file.name }),
-      })
-      const urlData = await urlRes.json()
-      if (!urlRes.ok) throw new Error(urlData.error || '업로드 URL 발급 실패')
-
-      const { error: uploadErr } = await publicSupabase.storage
-        .from('app-updates')
-        .uploadToSignedUrl(urlData.path, urlData.token, file)
-      if (uploadErr) throw new Error(`업로드 실패: ${uploadErr.message}`)
-
+      // 설치 파일(exe)이 수십~수백MB라 Supabase Storage(무료 플랜은 50MB 고정 한도)에
+      // 직접 올리는 대신, GitHub Releases 등에 올려둔 파일의 다운로드 URL만 등록한다.
       const res = await fetch('/api/admin/versions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
-        body: JSON.stringify({ app, version: version.trim(), changelog, path: urlData.path }),
+        body: JSON.stringify({ app, version: version.trim(), changelog, download_url: downloadUrl.trim() }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || '등록 실패')
-      setVersion(''); setChangelog(''); setFile(null)
+      setVersion(''); setChangelog(''); setDownloadUrl('')
       await load()
       showToast?.('✅ 새 버전이 등록되었습니다')
     } catch (e) {
-      showToast?.(`❌ ${e.message || '업로드 실패'}`)
+      showToast?.(`❌ ${e.message || '등록 실패'}`)
     }
     setUploading(false)
   }
@@ -109,7 +94,7 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
         {['ninja', 'mt5'].map(a => (
-          <button key={a} onClick={() => { setApp(a); setVersion(''); setChangelog(''); setFile(null) }}
+          <button key={a} onClick={() => { setApp(a); setVersion(''); setChangelog(''); setDownloadUrl('') }}
             style={{
               ...S.btnGhost,
               padding: '6px 16px',
@@ -129,11 +114,12 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
         </div>
         <label style={S.label}>변경 내용</label>
         <textarea value={changelog} onChange={e => setChangelog(e.target.value)} rows={3} style={{ ...S.textarea, marginBottom: 12 }} />
-        <label style={S.label}>설치 파일 (Setup.exe)</label>
-        <input type="file" accept=".exe,.zip" onChange={e => setFile(e.target.files?.[0] || null)}
-          style={{ color: '#e8eaed', fontSize: 13, marginBottom: 12, display: 'block' }} />
+        <label style={S.label}>다운로드 URL</label>
+        <input value={downloadUrl} onChange={e => setDownloadUrl(e.target.value)}
+          placeholder="GitHub Releases 등에 올린 Setup.exe의 다운로드 링크를 붙여넣으세요"
+          style={{ ...S.input, marginBottom: 12 }} />
         <button onClick={upload} disabled={uploading} style={{ ...S.btn(), opacity: uploading ? 0.6 : 1 }}>
-          {uploading ? '업로드 중...' : '⬆️ 새 버전 등록'}
+          {uploading ? '등록 중...' : '⬆️ 새 버전 등록'}
         </button>
       </div>
 
@@ -174,7 +160,7 @@ export default function VersionAdminPanel({ adminToken, showToast }) {
       <ConfirmModal
         open={!!confirmTarget}
         title="버전 삭제"
-        message={confirmTarget ? `v${confirmTarget.version}을(를) 삭제할까요? (업로드된 파일은 Storage에 남아있습니다)` : ''}
+        message={confirmTarget ? `v${confirmTarget.version}을(를) 삭제할까요? (GitHub에 올려둔 실제 파일은 안 지워집니다)` : ''}
         danger
         confirmLabel="삭제"
         onCancel={() => setConfirmTarget(null)}
