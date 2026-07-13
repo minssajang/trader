@@ -57,6 +57,28 @@ export function Toast({ msg }) {
   )
 }
 
+// 몇 초 만에 사라지는 Toast 대신, 직접 "확인" 눌러야 닫히는 안내 모달.
+// 에러 메시지가 다 읽기도 전에 사라지는 문제 때문에 admin.js 전역 알림을 이걸로 교체함.
+export function MessageModal({ msg, onClose }) {
+  if (!msg) return null
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#171a21', borderRadius: 14, padding: 24, width: '100%', maxWidth: 420,
+        border: '1px solid #2a2e38',
+      }}>
+        <div style={{ fontSize: 14, color: '#e8eaed', lineHeight: 1.6, marginBottom: 20, whiteSpace: 'pre-wrap' }}>{msg}</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={S.btn()}>확인</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ConfirmModal({ open, title, message, confirmLabel = '확인', cancelLabel = '취소', danger = false, onConfirm, onCancel }) {
   if (!open) return null
   return (

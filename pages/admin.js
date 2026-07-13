@@ -10,7 +10,7 @@ import PopupPanel from '../components/admin/PopupPanel'
 import BoardAdminPanel from '../components/admin/BoardAdminPanel'
 import AdsensePanel from '../components/admin/AdsensePanel'
 import CoupangPanel from '../components/admin/CoupangPanel'
-import { S, Toast } from '../components/admin/AdminUI'
+import { S, MessageModal } from '../components/admin/AdminUI'
 
 const TAB_LABELS = {
   licenses: '🔑 라이선스 관리',
@@ -116,7 +116,7 @@ export default function Admin() {
   const [activeTab, setActiveTab] = useState('licenses')
   const [toast, setToast] = useState('')
 
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
+  const showToast = (msg) => setToast(msg)
 
   useEffect(() => {
     const token = sessionStorage.getItem('admin_token')
@@ -181,7 +181,7 @@ export default function Admin() {
           </div>
         </main>
       </div>
-      <Toast msg={toast} />
+      <MessageModal msg={toast} onClose={() => setToast('')} />
     </>
   )
 }
