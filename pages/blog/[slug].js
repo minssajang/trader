@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { parseMarkdown } from '../../lib/parseMarkdown'
 import { AdSlot } from '../../components/AdSlot'
 import { useAdSlot } from '../../lib/AdSlotsContext'
+import BrandLogo from '../../components/BrandLogo'
 
 // ── 관련도 점수 계산: 같은 카테고리(+3), 태그(+2/개), 제목 키워드 겹침(+1/개)
 function scoreRelated(post, allPosts) {
@@ -36,7 +37,7 @@ export default function BlogPost({ post, html, allPosts }) {
   useEffect(() => {
     if (!post?.slug) return
     let adminToken = ''
-    try { adminToken = sessionStorage.getItem('admin_token') || '' } catch {}
+    try { adminToken = localStorage.getItem('admin_token') || '' } catch {}
     if (!adminToken) return
     fetch(`/api/blog/posts?slug=${post.slug}`, { headers: { 'x-admin-token': adminToken } })
       .then(r => r.ok ? r.json() : null)
@@ -81,7 +82,7 @@ export default function BlogPost({ post, html, allPosts }) {
       </Head>
       <div className="wrap">
         <header className="site">
-          <h1>블로그</h1>
+          <BrandLogo label="블로그" />
           <nav className="site">
             <Link href="/">소개</Link>
             <Link href="/board">자유게시판</Link>

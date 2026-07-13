@@ -42,23 +42,60 @@ header.site .brand {
   margin: 0;
 }
 
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--text);
+}
+.brand-logo-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  flex-shrink: 0;
+}
+.brand-logo-text {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.brand-logo-word {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+.brand-logo-sub {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 nav.site {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 2px;
 }
 
 nav.site a {
   color: var(--muted);
   text-decoration: none;
-  margin-left: 16px;
   font-size: 14px;
   white-space: nowrap;
+  padding: 7px 13px;
+  border-radius: 999px;
+  transition: background 0.15s, color 0.15s;
 }
-nav.site a:hover { color: var(--text); }
+nav.site a:hover { color: var(--text); background: rgba(255,255,255,0.06); }
 
 @media (max-width: 480px) {
-  nav.site a { margin-left: 0; margin-right: 14px; }
+  nav.site a { padding: 6px 10px; }
 }
 
 .card {
@@ -363,6 +400,99 @@ footer.site .admin-link:hover { opacity: 0.9; }
 }
 .cta-band h2 { font-size: 22px; margin: 0 0 10px; }
 .cta-band p { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
+
+/* ── 화면 미리보기 목업 (EasyTrade For Ninja) ── */
+.mk-shell {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+  max-width: 700px;
+  margin: 0 auto;
+}
+.mk-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: #12141a;
+  border-bottom: 1px solid var(--border);
+}
+.mk-dot { width: 10px; height: 10px; border-radius: 50%; }
+.mk-dot.red { background: #F44336; }
+.mk-dot.yellow { background: #FFC107; }
+.mk-dot.green { background: #4CAF50; }
+.mk-titletext { margin-left: 8px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+
+.mk-tabbar {
+  display: flex;
+  gap: 2px;
+  padding: 0 10px;
+  background: #12141a;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.mk-tab {
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: inherit;
+}
+.mk-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.mk-tab:hover { color: var(--text); }
+
+.mk-body { padding: 18px; display: flex; flex-direction: column; gap: 14px; min-height: 360px; }
+
+.mk-group { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: #1b1f28; }
+.mk-group-title { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 10px; letter-spacing: 0.2px; }
+.mk-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12.5px; }
+.mk-row:last-child { margin-bottom: 0; }
+.mk-row label { color: var(--muted); min-width: 88px; flex-shrink: 0; }
+.mk-field { flex: 1; background: #0f1115; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 12.5px; }
+.mk-field.placeholder { color: #5a6070; }
+.mk-desc { font-size: 12px; color: var(--muted); line-height: 1.7; margin: 0; }
+
+.mk-btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.mk-chip { padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; background: #232833; color: var(--text); border: 1px solid var(--border); }
+.mk-chip.accent { background: rgba(76,175,80,0.15); color: var(--accent); border-color: rgba(76,175,80,0.3); }
+.mk-chip.buy { background: rgba(76,175,80,0.9); color: #fff; }
+.mk-chip.sell { background: rgba(244,67,54,0.9); color: #fff; }
+.mk-chip.danger { background: rgba(244,67,54,0.15); color: var(--danger); border-color: rgba(244,67,54,0.3); }
+
+.mk-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.mk-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.mk-status .dot.off { background: var(--danger); }
+
+.mk-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); }
+.mk-check .box { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border); background: #0f1115; flex-shrink: 0; }
+.mk-check .box.checked { background: var(--accent); border-color: var(--accent); }
+
+.mk-tf-row { display: flex; align-items: center; gap: 14px; padding: 5px 0; font-size: 12px; }
+.mk-tf-status { color: var(--danger); font-weight: 700; font-size: 11.5px; }
+.mk-tf-signal { color: var(--muted); font-size: 11.5px; }
+
+.mk-log { background: #0f1115; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: "Consolas", monospace; font-size: 11px; color: #8fbf8f; line-height: 1.8; max-height: 110px; overflow: hidden; }
+.mk-log-empty { color: #4a5060; text-align: center; display: flex; align-items: center; justify-content: center; }
+
+.mk-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .mk-grid2 { grid-template-columns: 1fr; } }
+
+.mk-calendar { background: #0f1115; border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-top: 10px; }
+.mk-calendar-head { font-size: 12px; font-weight: 700; color: var(--text); text-align: center; margin-bottom: 8px; }
+.mk-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.mk-cal-dow { font-size: 10px; color: var(--muted); text-align: center; }
+.mk-cal-day { font-size: 10.5px; color: var(--text); text-align: center; padding: 3px 0; border-radius: 4px; }
+.mk-cal-day.today { background: var(--accent); color: #fff; font-weight: 700; }
+
+.mk-disclaimer { text-align: center; font-size: 11.5px; color: var(--muted); margin-top: 14px; }
 
 /* 좌/우 사이드 레일 광고 (넓은 화면에서만 노출) */
 /* landing-wrap 콘텐츠 폭(960px, 중심에서 480px)에서 20px 띄운 위치 = 500px, 레일 폭 160px을 더해 660px */

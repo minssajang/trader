@@ -47,7 +47,7 @@ function LoginScreen({ onLogin }) {
       })
       const data = await res.json()
       if (!res.ok) { setErr(data.error || '비밀번호가 틀렸습니다'); setTimeout(() => setErr(''), 2500) }
-      else { sessionStorage.setItem('admin_token', data.token); onLogin(data.token) }
+      else { localStorage.setItem('admin_token', data.token); onLogin(data.token) }
     } catch { setErr('서버 연결 실패') }
     setLoading(false)
   }
@@ -130,7 +130,7 @@ export default function Admin() {
   }
 
   useEffect(() => {
-    const token = sessionStorage.getItem('admin_token')
+    const token = localStorage.getItem('admin_token')
     if (token) { setAuthed(true); setAdminToken(token) }
     const savedTab = localStorage.getItem('admin_active_tab')
     if (savedTab && TAB_LABELS[savedTab]) setActiveTabState(savedTab)
@@ -138,7 +138,7 @@ export default function Admin() {
   }, [])
 
   const handleLogout = () => {
-    sessionStorage.removeItem('admin_token')
+    localStorage.removeItem('admin_token')
     setAuthed(false)
   }
 

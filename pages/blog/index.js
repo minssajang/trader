@@ -3,6 +3,7 @@ import Head from 'next/head'
 import Link from 'next/link'
 import { AdSlot } from '../../components/AdSlot'
 import { useAdSlot } from '../../lib/AdSlotsContext'
+import BrandLogo from '../../components/BrandLogo'
 
 export default function BlogIndex() {
   const [posts, setPosts] = useState([])
@@ -45,7 +46,7 @@ export default function BlogIndex() {
       </Head>
       <div className="wrap">
         <header className="site">
-          <h1>블로그</h1>
+          <BrandLogo label="블로그" />
           <nav className="site">
             <Link href="/">소개</Link>
             <Link href="/board">자유게시판</Link>
