@@ -91,25 +91,20 @@ export default function BlogIndex() {
         <div className="blog-grid">
           {filtered.map(post => (
             <Link key={post.id} href={`/blog/${post.slug}`} className="card"
-              style={{ display: 'flex', flexDirection: 'column', textDecoration: 'none', color: 'inherit', padding: 0, margin: 0, overflow: 'hidden' }}>
+              style={{ display: 'flex', flexDirection: 'column', aspectRatio: '1 / 1', textDecoration: 'none', color: 'inherit', padding: 0, margin: 0, overflow: 'hidden' }}>
               {post.cover_image && (
                 <img src={post.cover_image} alt={post.title} referrerPolicy="no-referrer"
-                  style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', flexShrink: 0 }} />
+                  style={{ width: '100%', flex: '0 0 50%', minHeight: 0, objectFit: 'cover' }} />
               )}
-              <div style={{ minWidth: 0, flex: 1, padding: 16 }}>
+              <div style={{ minWidth: 0, minHeight: 0, flex: 1, padding: 12, display: 'flex', flexDirection: 'column' }}>
                 {post.category && (
-                  <span className="badge active" style={{ marginBottom: 8, display: 'inline-block' }}>{catIcon(post.category)} {post.category}</span>
+                  <span className="badge active" style={{ marginBottom: 6, display: 'inline-block', width: 'fit-content', fontSize: 11 }}>{catIcon(post.category)} {post.category}</span>
                 )}
-                <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 8px' }}>{post.title}</h2>
-                {post.summary && <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>{post.summary}</p>}
-                {Array.isArray(post.tags) && post.tags.length > 0 && (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                    {post.tags.slice(0, 5).map((t, i) => (
-                      <span key={i} style={{ fontSize: 11, color: 'var(--accent)', background: 'rgba(76,175,80,0.1)', borderRadius: 999, padding: '2px 8px' }}>#{t}</span>
-                    ))}
-                  </div>
-                )}
-                <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10, marginBottom: 0 }}>
+                <h2 style={{
+                  fontSize: 14, fontWeight: 700, margin: 0,
+                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                }}>{post.title}</h2>
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 'auto', marginBottom: 0, paddingTop: 6 }}>
                   {(post.published_at || post.created_at || '').slice(0, 10)}
                 </p>
               </div>
