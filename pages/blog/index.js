@@ -88,15 +88,15 @@ export default function BlogIndex() {
           <div className="card"><p style={{ color: 'var(--muted)', margin: 0 }}>{search ? `"${search}"에 대한 검색 결과가 없어요.` : '아직 글이 없습니다.'}</p></div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="blog-grid">
           {filtered.map(post => (
             <Link key={post.id} href={`/blog/${post.slug}`} className="card"
-              style={{ display: 'flex', gap: 16, textDecoration: 'none', color: 'inherit', padding: post.cover_image ? 16 : 24 }}>
+              style={{ display: 'flex', flexDirection: 'column', textDecoration: 'none', color: 'inherit', padding: 0, margin: 0, overflow: 'hidden' }}>
               {post.cover_image && (
                 <img src={post.cover_image} alt={post.title} referrerPolicy="no-referrer"
-                  style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                  style={{ width: '100%', height: 160, objectFit: 'cover', flexShrink: 0 }} />
               )}
-              <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ minWidth: 0, flex: 1, padding: 16 }}>
                 {post.category && (
                   <span className="badge active" style={{ marginBottom: 8, display: 'inline-block' }}>{catIcon(post.category)} {post.category}</span>
                 )}
