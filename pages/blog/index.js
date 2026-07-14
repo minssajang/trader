@@ -94,7 +94,7 @@ export default function BlogIndex() {
               style={{ display: 'flex', flexDirection: 'column', textDecoration: 'none', color: 'inherit', padding: 0, margin: 0, overflow: 'hidden' }}>
               {post.cover_image && (
                 <img src={post.cover_image} alt={post.title} referrerPolicy="no-referrer"
-                  style={{ width: '100%', height: 160, objectFit: 'cover', flexShrink: 0 }} />
+                  style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', flexShrink: 0 }} />
               )}
               <div style={{ minWidth: 0, flex: 1, padding: 16 }}>
                 {post.category && (
