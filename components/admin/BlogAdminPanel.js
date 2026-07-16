@@ -26,6 +26,28 @@ async function uploadBlogImage(file, adminToken) {
   return data.url
 }
 
+async function uploadBlogVideo(file, adminToken, title) {
+  if (!file.type.startsWith('video/')) throw new Error('동영상 파일만 업로드할 수 있습니다.')
+  if (file.size > 500 * 1024 * 1024) throw new Error('500MB 이하 파일만 업로드할 수 있습니다.')
+
+  const initRes = await fetch('/api/admin/youtube-upload-init', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+    body: JSON.stringify({ title, contentType: file.type, fileSize: file.size }),
+  })
+  const initData = await initRes.json()
+  if (!initRes.ok) throw new Error(initData.error || '업로드 세션 생성 실패')
+
+  const putRes = await fetch(initData.uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type },
+    body: file,
+  })
+  const putData = await putRes.json()
+  if (!putRes.ok || !putData.id) throw new Error(putData.error?.message || '유튜브 업로드 실패')
+  return `https://www.youtube.com/embed/${putData.id}`
+}
+
 function nowKST() {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00')
 }
@@ -233,6 +255,7 @@ export default function BlogAdminPanel({ adminToken, showToast, initialView }) {
   const [form, setForm] = useState(emptyForm)
   const [uploadingCover, setUploadingCover] = useState(false)
   const [uploadingContent, setUploadingContent] = useState(false)
+  const [uploadingVideo, setUploadingVideo] = useState(false)
 
   const handleCoverUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -256,6 +279,19 @@ export default function BlogAdminPanel({ adminToken, showToast, initialView }) {
       setForm(v => ({ ...v, content: v.content ? `${v.content}\n\n![](${url})\n` : `![](${url})\n` }))
     } catch (err) { alert('업로드 실패: ' + err.message) }
     setUploadingContent(false)
+  }
+
+  const handleContentVideoUpload = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setUploadingVideo(true)
+    try {
+      const embedUrl = await uploadBlogVideo(file, adminToken, form.title)
+      const iframe = `<iframe width="100%" height="400" src="${embedUrl}" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`
+      setForm(v => ({ ...v, content: v.content ? `${v.content}\n\n${iframe}\n` : `${iframe}\n` }))
+    } catch (err) { alert('업로드 실패: ' + err.message) }
+    setUploadingVideo(false)
   }
 
   useEffect(() => { loadPosts(); loadCategories(); loadChecklist() }, [])
@@ -485,10 +521,16 @@ export default function BlogAdminPanel({ adminToken, showToast, initialView }) {
             <div>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                 <label style={S.label}>본문 (마크다운)</label>
-                <label style={{ padding:'5px 10px', borderRadius:'6px', border:'1.5px solid #2a2e38', background: uploadingContent ? '#0f1115' : 'transparent', color:'#9aa0ab', fontSize:'12px', fontWeight:600, cursor: uploadingContent ? 'default' : 'pointer' }}>
-                  {uploadingContent ? '업로드 중...' : '🖼 이미지 삽입'}
-                  <input type="file" accept="image/*" onChange={handleContentImageUpload} disabled={uploadingContent} style={{ display:'none' }} />
-                </label>
+                <div style={{ display:'flex', gap:'6px' }}>
+                  <label style={{ padding:'5px 10px', borderRadius:'6px', border:'1.5px solid #2a2e38', background: uploadingContent ? '#0f1115' : 'transparent', color:'#9aa0ab', fontSize:'12px', fontWeight:600, cursor: uploadingContent ? 'default' : 'pointer' }}>
+                    {uploadingContent ? '업로드 중...' : '🖼 이미지 삽입'}
+                    <input type="file" accept="image/*" onChange={handleContentImageUpload} disabled={uploadingContent} style={{ display:'none' }} />
+                  </label>
+                  <label style={{ padding:'5px 10px', borderRadius:'6px', border:'1.5px solid #2a2e38', background: uploadingVideo ? '#0f1115' : 'transparent', color:'#9aa0ab', fontSize:'12px', fontWeight:600, cursor: uploadingVideo ? 'default' : 'pointer' }}>
+                    {uploadingVideo ? '업로드 중...' : '🎬 영상 삽입'}
+                    <input type="file" accept="video/*" onChange={handleContentVideoUpload} disabled={uploadingVideo} style={{ display:'none' }} />
+                  </label>
+                </div>
               </div>
               <textarea value={form.content} onChange={e => setForm(v => ({ ...v, content: e.target.value }))}
                 rows={22} placeholder={'# 제목\n\n본문을 마크다운으로 작성하세요.\n\n## 소제목\n\n- 항목 1\n- 항목 2\n\n**굵게** *기울임* `코드`'}

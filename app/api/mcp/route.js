@@ -15,7 +15,8 @@
 //   NAVER_AD_API_KEY / NAVER_AD_SECRET_KEY / NAVER_AD_CUSTOMER_ID (선택)
 //                                - naver_keyword_volume 툴의 네이버 검색광고 키워드도구 API
 //   NAVER_CLIENT_ID / NAVER_CLIENT_SECRET (선택)
-//                                - naver_keyword_volume이 네이버 블로그 문서수(docCount)도 함께 반환하게 함
+//                                - naver_keyword_volume이 네이버 블로그 문서수(docCount)도 함께 반환하게 함.
+//                                  naver_news_search 툴(네이버 뉴스 검색 오픈API)도 동일한 자격증명을 재사용함
 //   GOOGLE_SERVICE_ACCOUNT_JSON / INDEXNOW_KEY (선택)
 //                                - 블로그 발행 시 Google Indexing API / IndexNow 자동 색인 요청
 //
@@ -327,6 +328,55 @@ const baseHandler = createMcpHandler(
           return { content: [{ type: 'text', text: JSON.stringify({ query: keywords, saved: results.length, results }, null, 2) }] }
         } catch (err) {
           return { content: [{ type: 'text', text: `오류: ${err.message || '키워드 조회 중 오류가 발생했습니다.'}` }], isError: true }
+        }
+      }
+    )
+
+    server.registerTool(
+      'naver_news_search',
+      {
+        title: '네이버 뉴스 검색',
+        description:
+          '네이버 뉴스 검색 오픈API로 기사 제목·링크·발행일·요약을 가져온다. 블로그 글의 통계·근거 ' +
+          '인용이나 최신 이슈 벤치마킹 단계에서 web_search 대신 우선 사용한다(더 빠르고 토큰도 절약됨). ' +
+          'NAVER_CLIENT_ID/SECRET 환경변수가 필요하며, naver_keyword_volume과 같은 자격증명을 쓴다.',
+        inputSchema: {
+          query: z.string().describe('검색어. 예: "자동매매 규제"'),
+          display: z.number().int().min(1).max(100).optional().describe('가져올 기사 개수 (기본 10, 최대 100)'),
+          sort: z.enum(['sim', 'date']).optional().describe('정렬 방식: sim=정확도순(기본), date=최신순'),
+        },
+      },
+      async ({ query, display, sort }) => {
+        const clientId = process.env.NAVER_CLIENT_ID
+        const clientSecret = process.env.NAVER_CLIENT_SECRET
+        if (!clientId || !clientSecret) {
+          return { content: [{ type: 'text', text: 'NAVER_CLIENT_ID/SECRET 환경변수가 설정되어 있지 않습니다.' }], isError: true }
+        }
+        try {
+          const params = new URLSearchParams({
+            query,
+            display: String(display || 10),
+            sort: sort || 'sim',
+          })
+          const res = await fetch(`https://openapi.naver.com/v1/search/news.json?${params.toString()}`, {
+            headers: { 'X-Naver-Client-Id': clientId, 'X-Naver-Client-Secret': clientSecret },
+            signal: AbortSignal.timeout(5000),
+          })
+          if (!res.ok) {
+            const text = await res.text().catch(() => '')
+            return { content: [{ type: 'text', text: `네이버 뉴스 API 오류 (${res.status}): ${text}` }], isError: true }
+          }
+          const data = await res.json()
+          const items = (data.items || []).map(it => ({
+            title: it.title.replace(/<\/?b>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&'),
+            link: it.originallink || it.link,
+            pubDate: it.pubDate,
+            description: it.description.replace(/<\/?b>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&'),
+          }))
+          if (!items.length) return { content: [{ type: 'text', text: `"${query}" 검색 결과 없음` }] }
+          return { content: [{ type: 'text', text: JSON.stringify({ query, total: data.total, items }, null, 2) }] }
+        } catch (err) {
+          return { content: [{ type: 'text', text: `오류: ${err.message || '뉴스 검색 중 오류가 발생했습니다.'}` }], isError: true }
         }
       }
     )
@@ -986,7 +1036,7 @@ const baseHandler = createMcpHandler(
     instructions:
       '매매 시스템(trader) 라이선스 관리 서버. 라이선스 신청 조회/발급/연장/취소 도구와 ' +
       '블로그 글 관리 도구(list_blog_posts/create_blog_post/update_blog_post/list_blog_categories), ' +
-      '블로그 키워드 리서치·발행기록 도구(naver_keyword_volume/search_keyword_data/pick_keyword/' +
+      '블로그 키워드 리서치·발행기록 도구(naver_keyword_volume/naver_news_search/search_keyword_data/pick_keyword/' +
       'search_keyword_picks/mark_keyword_used/add_publish_log/get_publish_log), ' +
       '뉴스·공식 홈페이지의 그래프·차트를 실제로 캡처해서 저장하는 도구(capture_screenshot), ' +
       'Claude 시스템 프롬프트 도구(get_system_prompt/update_system_prompt), ' +
