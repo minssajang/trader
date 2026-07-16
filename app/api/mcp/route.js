@@ -862,6 +862,38 @@ const baseHandler = createMcpHandler(
       }
     )
 
+    server.registerTool(
+      'append_system_prompt',
+      {
+        title: 'Claude 시스템 프롬프트(지침) 맨 아래에 추가',
+        description:
+          'admin에 저장된 Claude 프로젝트 지침의 특정 탭 맨 아래에 새 내용을 이어붙인다. ' +
+          'update_system_prompt처럼 전체 내용을 다시 불러와서 통째로 다시 보낼 필요 없이, ' +
+          '추가할 내용만 전달하면 서버가 기존 내용 뒤에 이어붙여 저장한다. ' +
+          'main2(작업 메모장)처럼 계속 누적되는 로그 성격 문서에 새 기록 한 건을 추가할 때 update_system_prompt 대신 우선 사용한다. ' +
+          '문서 중간에 있는 특정 섹션에 끼워 넣어야 하거나 기존 내용을 수정·삭제해야 할 때는 이 툴로는 안 되니 ' +
+          'get_system_prompt로 전체를 불러온 뒤 update_system_prompt를 쓴다.',
+        inputSchema: {
+          id: z.enum(SYSTEM_PROMPT_IDS).describe('추가할 탭. claude/main/main2/month 중 main2(작업 메모장)에 주로 사용'),
+          content: z.string().describe('맨 아래에 추가할 내용 (마크다운). 앞뒤 구분용 빈 줄은 자동으로 들어가므로 따로 넣지 않아도 됨'),
+        },
+        annotations: { destructiveHint: false, idempotentHint: false },
+      },
+      async ({ id, content }) => {
+        const { data: existing, error: readErr } = await supabase.from('system_prompts').select('content').eq('id', id).single()
+        if (readErr || !existing) {
+          return { content: [{ type: 'text', text: `❌ [${id}] 기존 지침을 불러오지 못했습니다: ${readErr?.message || '문서 없음'}` }], isError: true }
+        }
+        const nowIso2 = nowKST()
+        const newContent = (existing.content || '').replace(/\n+$/, '') + '\n\n' + content.trim() + '\n'
+        const { error: writeErr } = await supabase.from('system_prompts').upsert({ id, content: newContent, updated_at: nowIso2 }, { onConflict: 'id' })
+        if (writeErr) {
+          return { content: [{ type: 'text', text: `❌ 저장 실패: ${writeErr.message}` }], isError: true }
+        }
+        return { content: [{ type: 'text', text: `✅ "${id}" 맨 아래에 추가 완료 (${nowIso2})\n\n추가된 글자수: ${content.trim().length.toLocaleString()}자 / 총 글자수: ${newContent.length.toLocaleString()}자` }] }
+      }
+    )
+
     // ── GitHub 저장소 확인 툴 ────────────────────────────────────────────
     // trader 저장소(minssajang/trader)에 실제로 어떤 파일이 올라가 있는지 확인할 때 쓴다.
     // 공개 저장소라 토큰 없이도 동작하지만(시간당 60회 제한), GITHUB_TOKEN 환경변수를
