@@ -13,6 +13,21 @@ function daysSince(iso) {
 
 function fmt(n) { return (n || 0).toLocaleString() }
 
+// 찜(별) 아이콘 — 이전엔 유니코드 ☆/⭐ 글자를 그대로 썼는데, 폰트/플랫폼에 따라
+// 흰별(☆)이 제대로 안 그려지거나 다른 글자와 겹쳐 보이는 문제가 있어 SVG로 교체.
+// 색상: 찜한 상태 = 금색 채움, 안 한 상태 = 회색 테두리만 (항상 눈에 보이도록 명시적 색 지정).
+function StarIcon({ filled, size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24"
+      fill={filled ? '#facc15' : 'none'}
+      stroke={filled ? '#eab308' : '#9ca3af'}
+      strokeWidth="1.6" strokeLinejoin="round"
+      style={{ display: 'block' }}>
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  )
+}
+
 
 function FeatureIdeasTab({ adminToken, showToast }) {
   const [ideas, setIdeas] = useState([])
@@ -534,7 +549,7 @@ export default function KeywordPanel({ adminToken }) {
     } catch (e) { showToast(`❌ 오류: ${e.message}`) }
   }
 
-  const allRows = [...hintList].sort((a, b) => new Date(b.collected_at) - new Date(a.collected_at))
+  const allRows = [...hintList].sort((a, b) => a.hint.localeCompare(b.hint, 'ko'))
 
   const pendingPicks = picks.filter(p => !p.used_at)
   const usedPicks = picks.filter(p => p.used_at)
@@ -993,7 +1008,7 @@ export default function KeywordPanel({ adminToken }) {
                                 <button onClick={e => { e.stopPropagation(); handlePick(row.hint, item) }} style={{
                                   background: 'none', border: 'none', cursor: 'pointer', fontSize: 18,
                                 }}>
-                                  {item.picked ? '⭐' : '☆'}
+                                  <StarIcon filled={item.picked} />
                                 </button>
                               </td>
                             </tr>
@@ -1060,7 +1075,7 @@ export default function KeywordPanel({ adminToken }) {
                         <button onClick={() => handlePick(item.hint, { ...item, picked: isPicked })} style={{
                           background: 'none', border: 'none', cursor: 'pointer', fontSize: 18,
                         }}>
-                          {isPicked ? '⭐' : '☆'}
+                          <StarIcon filled={isPicked} />
                         </button>
                       </td>
                     </tr>
@@ -1131,7 +1146,7 @@ export default function KeywordPanel({ adminToken }) {
                         <button onClick={() => handlePick(item.hint, { ...item, picked: isPicked })} style={{
                           background: 'none', border: 'none', cursor: 'pointer', fontSize: 18,
                         }}>
-                          {isPicked ? '⭐' : '☆'}
+                          <StarIcon filled={isPicked} />
                         </button>
                       </td>
                     </tr>
@@ -1188,7 +1203,7 @@ export default function KeywordPanel({ adminToken }) {
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <button onClick={() => handleUnpick(item.tool_id, item.keyword)} style={{
                         background: 'none', border: 'none', cursor: 'pointer', fontSize: 16,
-                      }}>⭐</button>
+                      }}><StarIcon filled /></button>
                     </td>
                   </tr>
                 ))}
@@ -1254,7 +1269,7 @@ export default function KeywordPanel({ adminToken }) {
                             <td style={{ ...S.td, textAlign: 'center', position: 'sticky', right: 0, background: item.picked ? '#1a1a00' : '#f5f9f5' }}>
                               <button onClick={() => handlePick(item.hint, { ...item, picked: item.picked })} style={{
                                 background: 'none', border: 'none', cursor: 'pointer', fontSize: 18,
-                              }}>{item.picked ? '⭐' : '☆'}</button>
+                              }}><StarIcon filled={item.picked} /></button>
                             </td>
                           </tr>
                         ))}
