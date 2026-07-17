@@ -965,6 +965,7 @@ export default function KeywordPanel({ adminToken }) {
                     {topLoading[row.hint] ? (
                       <div style={{ padding: 20, color: '#71717a', fontSize: 13, textAlign: 'center' }}>로딩 중...</div>
                     ) : (
+                      <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr>
@@ -975,7 +976,7 @@ export default function KeywordPanel({ adminToken }) {
                             <th style={{ ...S.th, textAlign: 'right' }}>합계</th>
                             <th style={S.th}>경쟁</th>
                             <th style={{ ...S.th, textAlign: 'right' }}>문서수</th>
-                            <th style={{ ...S.th, textAlign: 'center' }}>찜</th>
+                            <th style={{ ...S.th, textAlign: 'center', position: 'sticky', right: 0, background: '#fff' }}>찜</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -988,7 +989,7 @@ export default function KeywordPanel({ adminToken }) {
                               <td style={{ ...S.tdNum, color: '#16a34a' }}>{fmt(item.total)}</td>
                               <td style={{ ...S.td, fontSize: 12 }}>{item.competition || '-'}</td>
                               <td style={{ ...S.tdNum, fontSize: 12, color: '#71717a' }}>{item.doc_count != null ? fmt(item.doc_count) : '-'}</td>
-                              <td style={{ ...S.td, textAlign: 'center' }}>
+                              <td style={{ ...S.td, textAlign: 'center', position: 'sticky', right: 0, background: item.picked ? '#1a1a00' : '#fff' }}>
                                 <button onClick={e => { e.stopPropagation(); handlePick(row.hint, item) }} style={{
                                   background: 'none', border: 'none', cursor: 'pointer', fontSize: 18,
                                 }}>
@@ -999,6 +1000,7 @@ export default function KeywordPanel({ adminToken }) {
                           ))}
                         </tbody>
                       </table>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1026,7 +1028,8 @@ export default function KeywordPanel({ adminToken }) {
           {allKwLoading ? (
             <div style={{ color: '#71717a', fontSize: 13, padding: 20, textAlign: 'center' }}>로딩 중...</div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 10, overflow: 'hidden', border: '1px solid #d1e8d1' }}>
+            <div style={{ overflowX: 'auto', borderRadius: 10, border: '1px solid #d1e8d1' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', overflow: 'hidden' }}>
               <thead>
                 <tr>
                   <th style={S.th}>순위</th>
@@ -1037,7 +1040,7 @@ export default function KeywordPanel({ adminToken }) {
                   <th style={{ ...S.th, textAlign: 'right' }}>합계</th>
                   <th style={S.th}>경쟁</th>
                   <th style={{ ...S.th, textAlign: 'right' }}>문서수</th>
-                  <th style={{ ...S.th, textAlign: 'center' }}>찜</th>
+                  <th style={{ ...S.th, textAlign: 'center', position: 'sticky', right: 0, background: '#fff' }}>찜</th>
                 </tr>
               </thead>
               <tbody>
@@ -1053,7 +1056,7 @@ export default function KeywordPanel({ adminToken }) {
                       <td style={{ ...S.tdNum, color: '#16a34a' }}>{fmt(item.total)}</td>
                       <td style={{ ...S.td, fontSize: 12 }}>{item.competition || '-'}</td>
                       <td style={{ ...S.tdNum, fontSize: 12, color: '#71717a' }}>{item.doc_count != null ? fmt(item.doc_count) : '-'}</td>
-                      <td style={{ ...S.td, textAlign: 'center' }}>
+                      <td style={{ ...S.td, textAlign: 'center', position: 'sticky', right: 0, background: isPicked ? '#1a1a00' : '#fff' }}>
                         <button onClick={() => handlePick(item.hint, { ...item, picked: isPicked })} style={{
                           background: 'none', border: 'none', cursor: 'pointer', fontSize: 18,
                         }}>
@@ -1065,6 +1068,7 @@ export default function KeywordPanel({ adminToken }) {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -1095,7 +1099,8 @@ export default function KeywordPanel({ adminToken }) {
               이 경쟁도에 해당하는 키워드가 없어요.
             </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 10, overflow: 'hidden', border: '1px solid #d1e8d1' }}>
+            <div style={{ overflowX: 'auto', borderRadius: 10, border: '1px solid #d1e8d1' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', overflow: 'hidden' }}>
               <thead>
                 <tr>
                   <th style={S.th}>순위</th>
@@ -1106,7 +1111,7 @@ export default function KeywordPanel({ adminToken }) {
                   <th style={{ ...S.th, textAlign: 'right' }}>합계</th>
                   <th style={S.th}>경쟁</th>
                   <th style={{ ...S.th, textAlign: 'right' }}>문서수</th>
-                  <th style={{ ...S.th, textAlign: 'center' }}>찜</th>
+                  <th style={{ ...S.th, textAlign: 'center', position: 'sticky', right: 0, background: '#fff' }}>찜</th>
                 </tr>
               </thead>
               <tbody>
@@ -1122,7 +1127,7 @@ export default function KeywordPanel({ adminToken }) {
                       <td style={{ ...S.tdNum, color: '#16a34a' }}>{fmt(item.total)}</td>
                       <td style={{ ...S.td, fontSize: 12 }}>{item.competition || '-'}</td>
                       <td style={{ ...S.tdNum, fontSize: 12, color: '#71717a' }}>{item.doc_count != null ? fmt(item.doc_count) : '-'}</td>
-                      <td style={{ ...S.td, textAlign: 'center' }}>
+                      <td style={{ ...S.td, textAlign: 'center', position: 'sticky', right: 0, background: isPicked ? '#1a1a00' : '#fff' }}>
                         <button onClick={() => handlePick(item.hint, { ...item, picked: isPicked })} style={{
                           background: 'none', border: 'none', cursor: 'pointer', fontSize: 18,
                         }}>
@@ -1134,6 +1139,7 @@ export default function KeywordPanel({ adminToken }) {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -1226,6 +1232,7 @@ export default function KeywordPanel({ adminToken }) {
                       <span style={{ fontSize: 14, fontWeight: 800, color: '#16a34a' }}>🔍 {hint}</span>
                       <span style={{ fontSize: 12, color: '#4b6e4b' }}>연관 키워드 {rows.length}개</span>
                     </div>
+                    <div style={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead><tr>
                         <th style={S.th}>순위</th><th style={S.th}>키워드</th>
@@ -1233,7 +1240,7 @@ export default function KeywordPanel({ adminToken }) {
                         <th style={{ ...S.th, textAlign: 'right' }}>모바일</th>
                         <th style={{ ...S.th, textAlign: 'right' }}>합계</th>
                         <th style={S.th}>경쟁</th>
-                        <th style={{ ...S.th, textAlign: 'center' }}>찜</th>
+                        <th style={{ ...S.th, textAlign: 'center', position: 'sticky', right: 0, background: '#f5f9f5' }}>찜</th>
                       </tr></thead>
                       <tbody>
                         {rows.map((item, i) => (
@@ -1244,7 +1251,7 @@ export default function KeywordPanel({ adminToken }) {
                             <td style={S.tdNum}>{fmt(item.mobile)}</td>
                             <td style={{ ...S.tdNum, color: '#16a34a' }}>{fmt(item.total)}</td>
                             <td style={{ ...S.td, fontSize: 12 }}>{item.competition || '-'}</td>
-                            <td style={{ ...S.td, textAlign: 'center' }}>
+                            <td style={{ ...S.td, textAlign: 'center', position: 'sticky', right: 0, background: item.picked ? '#1a1a00' : '#f5f9f5' }}>
                               <button onClick={() => handlePick(item.hint, { ...item, picked: item.picked })} style={{
                                 background: 'none', border: 'none', cursor: 'pointer', fontSize: 18,
                               }}>{item.picked ? '⭐' : '☆'}</button>
@@ -1253,6 +1260,7 @@ export default function KeywordPanel({ adminToken }) {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 ))}
               </div>
