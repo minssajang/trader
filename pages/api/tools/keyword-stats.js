@@ -37,26 +37,13 @@ export default async function handler(req, res) {
     }
   }
 
-  // 그룹(hint)별 요약 — Postgres 함수 없이 직접 집계 (count / collected_at / null_doc_count / doc_count_filled)
+  // 그룹(hint)별 요약 — DB의 keyword_stats_summary() 함수로 집계한다.
+  // (예전엔 keyword_stats 전체 행을 select해서 JS로 그룹핑했는데, Supabase 기본 응답
+  //  상한이 1,000행이라 테이블이 1,000행을 넘어가면 뒤쪽 그룹이 누락됐다. sql/009_keyword_stats_summary.sql 참고.)
   try {
-    const { data, error } = await supabase
-      .from('keyword_stats')
-      .select('hint, created_at, doc_count')
+    const { data, error } = await supabase.rpc('keyword_stats_summary')
     if (error) throw new Error(error.message)
-
-    const grouped = {}
-    ;(data || []).forEach(r => {
-      if (!grouped[r.hint]) {
-        grouped[r.hint] = { hint: r.hint, count: 0, collected_at: r.created_at, null_doc_count: 0, doc_count_filled: 0 }
-      }
-      const g = grouped[r.hint]
-      g.count += 1
-      if (r.doc_count == null) g.null_doc_count += 1
-      else g.doc_count_filled += 1
-      if (new Date(r.created_at) > new Date(g.collected_at)) g.collected_at = r.created_at
-    })
-    const rows = Object.values(grouped).sort((a, b) => new Date(b.collected_at) - new Date(a.collected_at))
-    return res.status(200).json(rows)
+    return res.status(200).json(data || [])
   } catch (err) {
     return res.status(500).json({ error: err.message })
   }

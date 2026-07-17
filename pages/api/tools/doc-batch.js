@@ -94,35 +94,20 @@ async function fetchBatch(keywords, concurrency = 8) {
   return results
 }
 
+// hint별 미수집 현황 + 우선순위 정렬 — DB의 keyword_doc_null_summary() 함수로 집계한다.
+// (예전엔 doc_count=null 행 전체와 전체 행(hint만)을 각각 select()로 통째로 가져와 JS로
+//  그룹핑했는데, 둘 다 .limit()이 없어서 Supabase 기본 응답 상한(1,000행)에 걸렸다.
+//  sql/010_keyword_doc_null_summary.sql 참고.)
 async function getNullSummary(priority = 'search_volume') {
-  const { data: rows, error } = await supabase
-    .from('keyword_stats')
-    .select('hint, keyword, total')
-    .is('doc_count', null)
-    .order('total', { ascending: false })
+  const { data, error } = await supabase.rpc('keyword_doc_null_summary')
+  if (error || !data) return []
 
-  if (error || !rows) return []
-
-  const map = {}
-  for (const r of rows) {
-    if (!map[r.hint]) map[r.hint] = { hint: r.hint, nullCount: 0, topTotal: 0 }
-    map[r.hint].nullCount++
-    if (map[r.hint].nullCount <= 10) map[r.hint].topTotal += (r.total || 0)
-  }
-
-  const { data: allRows } = await supabase
-    .from('keyword_stats')
-    .select('hint')
-
-  const totalMap = {}
-  for (const r of (allRows || [])) {
-    totalMap[r.hint] = (totalMap[r.hint] || 0) + 1
-  }
-
-  const summary = Object.values(map).map(h => ({
-    ...h,
-    totalCount: totalMap[h.hint] || h.nullCount,
-    nullRatio: h.nullCount / (totalMap[h.hint] || 1),
+  const summary = data.map(r => ({
+    hint: r.hint,
+    nullCount: r.null_count,
+    topTotal: r.top_total,
+    totalCount: r.total_count,
+    nullRatio: r.null_count / (r.total_count || 1),
   }))
 
   if (priority === 'null_ratio') {
