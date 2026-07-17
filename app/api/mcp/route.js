@@ -809,6 +809,47 @@ const baseHandler = createMcpHandler(
     )
 
     server.registerTool(
+      'upload_image',
+      {
+        title: '로컬 이미지 파일 업로드 (Supabase Storage)',
+        description:
+          '로컬 이미지 파일 내용(base64)을 Supabase Storage(blog-images 버킷, capture_screenshot과 동일 버킷)에 ' +
+          '업로드하고 공개 URL을 반환한다. 사용자가 로컬 파일(실제 스크린샷, 자료 사진 등)을 블로그 본문·커버 ' +
+          '이미지로 쓰고 싶을 때, admin 화면을 거치지 않고 이 툴로 바로 업로드해서 URL을 얻는다. ' +
+          '별도 관리자 토큰이 필요 없다 — 이 서버가 이미 갖고 있는 Supabase 서비스롤 키로 처리한다. ' +
+          'jpg/png/gif/webp만 허용, 10MB 이하.',
+        inputSchema: {
+          base64: z.string().describe('이미지 파일의 base64 인코딩 내용 (data URI 접두사 "data:image/...;base64," 없이 순수 base64만)'),
+          contentType: z.string().describe('MIME 타입. 예: image/jpeg, image/png, image/webp, image/gif'),
+          filename: z.string().optional().describe('원본 파일명 (응답 메시지 표시용, 저장 경로에는 안 쓰임)'),
+        },
+        annotations: { destructiveHint: false, idempotentHint: false },
+      },
+      async ({ base64, contentType, filename }) => {
+        const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+        if (!ALLOWED_TYPES.includes(contentType)) {
+          return { content: [{ type: 'text', text: '❌ 이미지 파일(jpg/png/gif/webp)만 업로드할 수 있습니다.' }], isError: true }
+        }
+        const buffer = Buffer.from(base64, 'base64')
+        const MAX_MB = 10
+        if (buffer.length > MAX_MB * 1024 * 1024) {
+          return { content: [{ type: 'text', text: `❌ ${MAX_MB}MB 이하 파일만 업로드할 수 있습니다.` }], isError: true }
+        }
+        try {
+          await ensureScreenshotBucket()
+          const ext = (contentType.split('/')[1] || 'jpg').replace(/[^a-z0-9]/g, '') || 'jpg'
+          const path = `uploads/${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.${ext}`
+          const { error: upErr } = await supabase.storage.from('blog-images').upload(path, buffer, { contentType, upsert: false })
+          if (upErr) return { content: [{ type: 'text', text: `❌ 업로드 실패: ${upErr.message}` }], isError: true }
+          const { data: pub } = supabase.storage.from('blog-images').getPublicUrl(path)
+          return { content: [{ type: 'text', text: `✅ 업로드 완료${filename ? ` (${filename})` : ''}\nURL: ${pub.publicUrl}` }] }
+        } catch (e) {
+          return { content: [{ type: 'text', text: `❌ 업로드 실패: ${e.message}` }], isError: true }
+        }
+      }
+    )
+
+    server.registerTool(
       'list_blog_categories',
       {
         title: '블로그 카테고리 목록 조회',
@@ -1071,6 +1112,7 @@ const baseHandler = createMcpHandler(
       '블로그 키워드 리서치·발행기록 도구(naver_keyword_volume/naver_news_search/search_keyword_data/pick_keyword/' +
       'search_keyword_picks/mark_keyword_used/add_publish_log/get_publish_log), ' +
       '뉴스·공식 홈페이지의 그래프·차트를 실제로 캡처해서 저장하는 도구(capture_screenshot), ' +
+      '로컬 이미지 파일을 base64로 받아 Storage에 업로드하는 도구(upload_image), ' +
       'Claude 시스템 프롬프트 도구(get_system_prompt/update_system_prompt), ' +
       'DB 직접 조회·수정 도구(list_tables/get_rows/upsert_row/delete_row/run_sql), ' +
       'GitHub 저장소(minssajang/trader) 파일 확인 도구(list_github_files/get_github_file)를 제공한다. ' +
