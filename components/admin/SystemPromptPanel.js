@@ -5,6 +5,8 @@ const TABS = [
   { id: 'claude', label: '1️⃣ 클로드 실행지침', desc: 'Claude 전체 행동 지침 — 대화 시작 시 가장 먼저 불러오는 메인 시스템 프롬프트예요.' },
   { id: 'main', label: '2-1️⃣ 블로그 글작성지침', desc: '"오늘 블로그 글 써줘" 할 때 사용하는 지침 — 글 1편 작성·발행 절차예요.' },
   { id: 'main2', label: '2-2️⃣ 블로그 글작성지침', desc: '2-1과 별도로 관리하는 블로그 글작성 지침이에요.' },
+  { id: 'reference', label: '3️⃣ 글쓰기 참고자료', desc: '규칙이 아니라 참고용 스와이프 파일이에요 — 다른 사이트 글쓰기·설득 기법 예시를 모아두고 가끔 살펴보는 용도예요. Claude가 매 대화 자동으로 불러오진 않아요.' },
+  { id: 'rss_sources', label: '4️⃣ 정보 소스(RSS)', desc: '실제 검증된 언론사 RSS 주소 목록이에요 — 글감 아이디어를 찾거나 근거자료를 확인할 때 Claude가 참고해요.' },
 ]
 
 export default function SystemPromptPanel({ adminToken }) {
@@ -170,8 +172,9 @@ export default function SystemPromptPanel({ adminToken }) {
           <code style={{ display: 'block', background: '#0f1115', border: '1px solid #4CAF5044', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#4CAF50', marginTop: 4, marginBottom: 4, lineHeight: 1.6 }}>
             대화를 시작하면 즉시 get_system_prompt 툴을 호출해서 전체 지침을 로드하고, 그 지침대로만 행동하세요.
           </code>
-          <span>③ MCP <code style={{ background: '#0f1115', padding: '1px 6px', borderRadius: 4, fontSize: 12, color: '#4CAF50' }}>get_system_prompt</code> 툴에 id(claude/main/main2)를 넘기면 해당 탭만 불러와요.</span>
+          <span>③ MCP <code style={{ background: '#0f1115', padding: '1px 6px', borderRadius: 4, fontSize: 12, color: '#4CAF50' }}>get_system_prompt</code> 툴에 id(claude/main/main2/reference)를 넘기면 해당 탭만 불러와요.</span>
           <span>④ <b style={{ color: '#e8eaed' }}>📋 전체 복사</b>로 복사해서 직접 붙여넣는 것도 가능해요.</span>
+          <span>⑤ <b style={{ color: '#e8eaed' }}>3️⃣ 글쓰기 참고자료</b> 탭은 "지켜야 할 규칙"이 아니라 "가끔 열어보는 예시 모음"이에요 — Claude에게 명시적으로 요청했을 때만 불러오도록 안내할 것을 권장해요(매 대화 자동 로드 X).</span>
         </div>
       </div>
     </div>

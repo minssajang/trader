@@ -824,7 +824,7 @@ const baseHandler = createMcpHandler(
     )
 
     // ── Claude 시스템 프롬프트 툴 (fresh-season 이식) ─────────────────────────
-    const SYSTEM_PROMPT_IDS = ['claude', 'main', 'main2', 'month']
+    const SYSTEM_PROMPT_IDS = ['claude', 'main', 'main2', 'month', 'reference', 'rss_sources']
 
     server.registerTool(
       'get_system_prompt',
