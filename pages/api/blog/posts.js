@@ -15,11 +15,16 @@ export default async function handler(req, res) {
   const isAdmin = auth(req)
 
   // 예약 발행 자동 전환
-  try {
-    const now = nowKST()
-    await supabase.from('blog_posts').update({ status: 'published', published_at: now })
-      .eq('status', 'scheduled').lte('scheduled_at', now)
-  } catch {}
+  // 관련 글 추천용 목록 조회([slug].js가 마운트 후 클라이언트에서 부르는 호출)는
+  // 같은 페이지 진입 시 본문 조회에서 이미 이 체크를 한 번 했으므로 ?skipPublishCheck=1로
+  // 중복 UPDATE 왕복을 건너뛴다.
+  if (req.query.skipPublishCheck !== '1') {
+    try {
+      const now = nowKST()
+      await supabase.from('blog_posts').update({ status: 'published', published_at: now })
+        .eq('status', 'scheduled').lte('scheduled_at', now)
+    } catch {}
+  }
 
   // 제목 점수·SEO 점수·네이버 요약글·인스타 카드뉴스는 관리자 내부 참고용 —
   // 일반 방문자(비로그인) 응답에는 절대 포함하지 않는다.

@@ -28,7 +28,19 @@ function scoreRelated(post, allPosts) {
 
 const SITE_URL = 'https://trader-beta-liard.vercel.app'
 
-export default function BlogPost({ post, html, allPosts }) {
+export default function BlogPost({ post, html }) {
+  // 관련 글 추천용 전체 글 목록 — SSR을 막지 않도록 마운트 후 백그라운드로 채운다.
+  // (예전엔 getServerSideProps가 본문 조회 다음에 이 목록(최대 100개, 본문 포함)까지
+  // 순서대로 기다렸다가 응답해서 목록 클릭 → 상세 진입이 느렸다.)
+  const [allPosts, setAllPosts] = useState([])
+  useEffect(() => {
+    if (!post?.slug) return
+    fetch('/api/blog/posts?limit=50&skipPublishCheck=1')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setAllPosts(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [post?.slug])
+
   const relatedPool = post ? scoreRelated(post, allPosts).slice(0, 3) : []
   const middleSlot = useAdSlot('blog_middle')
 
@@ -239,25 +251,23 @@ export default function BlogPost({ post, html, allPosts }) {
   )
 }
 
+// ── SSR: 크롤러가 OG태그·본문을 바로 읽을 수 있도록 서버에서 글 데이터 + 마크다운 HTML을 미리 렌더링.
+// 예전엔 여기서 관련 글 추천용 전체 글 목록(최대 100개)까지 이어서 기다렸다가 응답해서
+// 목록 클릭 → 상세 진입이 느렸다. 지금은 본문 조회 1번만 하고, 관련 글 목록은 컴포넌트가
+// 마운트된 뒤 클라이언트에서 채운다.
 export async function getServerSideProps(context) {
   const { slug } = context.params
   try {
     const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || `http://${context.req.headers.host}`
     const res = await fetch(`${baseUrl}/api/blog/posts?slug=${encodeURIComponent(slug)}`)
-    if (!res.ok) return { props: { post: null, html: '', allPosts: [] } }
+    if (!res.ok) return { props: { post: null, html: '' } }
     const post = await res.json()
-    if (!post) return { props: { post: null, html: '', allPosts: [] } }
+    if (!post) return { props: { post: null, html: '' } }
     const html = parseMarkdown(post.content || '')
 
-    let allPosts = []
-    try {
-      const listRes = await fetch(`${baseUrl}/api/blog/posts?limit=100`)
-      if (listRes.ok) allPosts = await listRes.json()
-    } catch {}
-
-    return { props: { post, html, allPosts: Array.isArray(allPosts) ? allPosts : [] } }
+    return { props: { post, html } }
   } catch (error) {
     console.error('블로그 상세 SSR 에러:', error)
-    return { props: { post: null, html: '', allPosts: [] } }
+    return { props: { post: null, html: '' } }
   }
 }
