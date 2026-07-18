@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { S } from './AdminUI'
 
 function fileToBase64(file) {
@@ -18,6 +18,9 @@ function extractStoragePath(url) {
 }
 
 const ALLOWED = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+// 새로고침해도 업로드 목록이 사라지지 않도록 완료된 항목만 localStorage에 저장한다
+// (업로드 중이거나 실패한 항목은 새로고침 시점엔 이미 의미가 없어져서 제외).
+const STORAGE_KEY = 'trader_blog_image_uploads'
 
 // 특정 글에 종속되지 않는 독립 이미지 업로드함 — 외부 자료 스크린샷 등을 미리 올려서
 // URL만 받아두고, 어느 글의 어디에 쓸지는 나중에(채팅으로 Claude에게 "N번" 식으로 전달해서) 정한다.
@@ -31,6 +34,27 @@ export default function BlogImagePanel({ adminToken, showToast }) {
   // (배열 index로 매기면 앞의 항목을 지웠을 때 뒤 항목 번호가 밀려서, 채팅에서 이미
   // 말해둔 "3번"이 다른 사진을 가리키게 되는 문제가 생긴다).
   const seqRef = useRef(0)
+
+  // 마운트 시 이전에 저장해둔 완료 항목을 복원한다 (새로고침 대비).
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+      if (Array.isArray(saved) && saved.length > 0) {
+        setItems(saved)
+        seqRef.current = saved.reduce((max, it) => Math.max(max, it.seq || 0), 0)
+      }
+    } catch {}
+  }, [])
+
+  // 완료된 항목만 골라 localStorage에 저장 — 업로드/삭제/새 항목 추가마다 자동 반영.
+  useEffect(() => {
+    try {
+      const persistable = items
+        .filter(it => it.status === 'done')
+        .map(({ id, seq, filename, url, path }) => ({ id, seq, filename, url, path, status: 'done' }))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable))
+    } catch {}
+  }, [items])
 
   const uploadOne = async (file) => {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
@@ -90,7 +114,7 @@ export default function BlogImagePanel({ adminToken, showToast }) {
         })
       } catch {}
     }
-    try { URL.revokeObjectURL(item.previewUrl) } catch {}
+    try { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl) } catch {}
     setItems(prev => prev.filter(it => it.id !== item.id))
     showToast?.('🗑️ 삭제됨')
   }
@@ -101,7 +125,7 @@ export default function BlogImagePanel({ adminToken, showToast }) {
       <p style={{ fontSize: 13, color: '#9aa0ab', marginBottom: 16, lineHeight: 1.6 }}>
         외부 자료 스크린샷 등 이미지를 여기서 올리면 바로 URL이 생성됩니다. 어느 글에 쓸지는
         정해두지 않아도 되고, 앞의 번호와 함께 URL을 복사해서 Claude 채팅에 "N번 사진이에요"처럼
-        붙여넣으면 원하는 글의 원하는 위치에 삽입해드립니다.
+        붙여넣으면 원하는 글의 원하는 위치에 삽입해드립니다. 완료된 목록은 새로고침해도 유지됩니다.
       </p>
 
       <div
@@ -138,7 +162,7 @@ export default function BlogImagePanel({ adminToken, showToast }) {
               border: '1px solid #2a2e38', display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 12, fontWeight: 800, color: '#4CAF50',
             }}>{it.seq}</div>
-            <img src={it.previewUrl} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, flexShrink: 0, background: '#000' }} />
+            <img src={it.previewUrl || it.url} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, flexShrink: 0, background: '#000' }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, color: '#e8eaed', fontWeight: 600, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {it.seq}번 · {it.filename}
