@@ -29,6 +29,7 @@ const STORAGE_KEY = 'trader_blog_image_uploads'
 export default function BlogImagePanel({ adminToken, showToast }) {
   const [items, setItems] = useState([]) // { id, seq, filename, previewUrl, url, path, status, error }
   const [copiedId, setCopiedId] = useState('')
+  const [previewItem, setPreviewItem] = useState(null) // 썸네일 클릭 시 크게 보여줄 항목
   const fileInputRef = useRef(null)
   // 업로드 순서를 가리키는 번호는 삭제해도 재배치되지 않도록 별도 카운터로 관리한다
   // (배열 index로 매기면 앞의 항목을 지웠을 때 뒤 항목 번호가 밀려서, 채팅에서 이미
@@ -94,13 +95,13 @@ export default function BlogImagePanel({ adminToken, showToast }) {
     handleFiles(e.dataTransfer.files)
   }
 
-  const copyUrl = (id, url) => {
+  const copyUrl = (id, seq, url) => {
     if (!url) return
     try {
-      navigator.clipboard.writeText(url)
+      navigator.clipboard.writeText(`${seq}번 ${url}`)
       setCopiedId(id)
       setTimeout(() => setCopiedId(''), 1500)
-      showToast?.('✅ 링크가 복사됐습니다')
+      showToast?.('✅ 번호와 함께 복사됐습니다')
     } catch {}
   }
 
@@ -162,7 +163,12 @@ export default function BlogImagePanel({ adminToken, showToast }) {
               border: '1px solid #2a2e38', display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 12, fontWeight: 800, color: '#4CAF50',
             }}>{it.seq}</div>
-            <img src={it.previewUrl || it.url} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, flexShrink: 0, background: '#000' }} />
+            <img
+              src={it.previewUrl || it.url}
+              alt=""
+              onClick={() => (it.previewUrl || it.url) && setPreviewItem(it)}
+              style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8, flexShrink: 0, background: '#000', cursor: (it.previewUrl || it.url) ? 'zoom-in' : 'default' }}
+            />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, color: '#e8eaed', fontWeight: 600, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {it.seq}번 · {it.filename}
@@ -172,7 +178,7 @@ export default function BlogImagePanel({ adminToken, showToast }) {
               {it.status === 'done' && (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input readOnly value={it.url} onFocus={e => e.target.select()} style={{ ...S.input, fontSize: 12, padding: '6px 10px' }} />
-                  <button onClick={() => copyUrl(it.id, it.url)} style={{ ...S.btn(copiedId === it.id ? '#2a2e38' : '#4CAF50'), flexShrink: 0, padding: '6px 14px', fontSize: 12 }}>
+                  <button onClick={() => copyUrl(it.id, it.seq, it.url)} style={{ ...S.btn(copiedId === it.id ? '#2a2e38' : '#4CAF50'), flexShrink: 0, padding: '6px 14px', fontSize: 12 }}>
                     {copiedId === it.id ? '복사됨!' : '복사'}
                   </button>
                 </div>
@@ -185,6 +191,28 @@ export default function BlogImagePanel({ adminToken, showToast }) {
           </div>
         ))}
       </div>
+
+      {previewItem && (
+        <div
+          onClick={() => setPreviewItem(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, cursor: 'zoom-out',
+          }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
+            <img
+              src={previewItem.previewUrl || previewItem.url}
+              alt=""
+              style={{ maxWidth: '90vw', maxHeight: '80vh', borderRadius: 10, display: 'block', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: '#e8eaed', fontSize: 13 }}>
+              <span style={{ fontWeight: 700 }}>{previewItem.seq}번 · {previewItem.filename}</span>
+              <button onClick={() => setPreviewItem(null)} style={S.btnGhost}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
