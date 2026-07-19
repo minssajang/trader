@@ -5,11 +5,11 @@
  * GET  → 현재 저장된 지침 반환 (인증 불필요 — MCP에서 호출)
  * POST → 지침 덮어쓰기 저장   (admin 인증 필요)
  *
- * id 파라미터로 탭(5종) 구분: claude / main / main2 / month / reference. 없거나 5개가 아니면 'main'.
+ * id 파라미터로 탭(6종) 구분: claude / main / main2 / month / reference / rss_sources / todo. 없거나 7개가 아니면 'main'.
  */
 import { supabase } from '../../../lib/supabase'
 
-const VALID_IDS = ['claude', 'main', 'main2', 'month', 'reference', 'rss_sources']
+const VALID_IDS = ['claude', 'main', 'main2', 'month', 'reference', 'rss_sources', 'todo']
 
 function nowKST() {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00')
