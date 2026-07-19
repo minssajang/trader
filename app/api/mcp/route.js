@@ -873,7 +873,7 @@ const baseHandler = createMcpHandler(
         title: 'Claude 시스템 프롬프트 조회',
         description: 'admin의 "Claude 지침" 탭에 저장해둔 지침을 불러온다. id를 안 주면 main 탭을 반환한다.',
         inputSchema: {
-          id: z.enum(SYSTEM_PROMPT_IDS).optional().describe('claude(클로드 실행지침)/main(블로그 글작성지침)/main2(블로그 글작성지침 보조)/month(글감관리 월기획지침). 기본: main'),
+          id: z.enum(SYSTEM_PROMPT_IDS).optional().describe('claude(클로드 실행지침)/main(블로그 글작성지침)/main2(블로그 글작성지침 보조)/month(글감관리 월기획지침)/reference(참고자료)/rss_sources(RSS 소스)/todo(할일메모). 기본: main'),
         },
       },
       async ({ id }) => {
@@ -890,7 +890,7 @@ const baseHandler = createMcpHandler(
         title: 'Claude 시스템 프롬프트 갱신',
         description: 'admin의 "Claude 지침" 탭 내용을 덮어쓴다. 사용자가 대화 중 직접 지침 변경을 요청했을 때만 호출한다.',
         inputSchema: {
-          id: z.enum(SYSTEM_PROMPT_IDS).describe('claude/main/main2/month 중 어느 탭을 갱신할지'),
+          id: z.enum(SYSTEM_PROMPT_IDS).describe('claude/main/main2/month/reference/rss_sources/todo 중 어느 탭을 갱신할지'),
           content: z.string().describe('새 지침 전체 내용 (마크다운)'),
         },
         annotations: { destructiveHint: true },
@@ -915,7 +915,7 @@ const baseHandler = createMcpHandler(
           '문서 중간에 있는 특정 섹션에 끼워 넣어야 하거나 기존 내용을 수정·삭제해야 할 때는 이 툴로는 안 되니 ' +
           'get_system_prompt로 전체를 불러온 뒤 update_system_prompt를 쓴다.',
         inputSchema: {
-          id: z.enum(SYSTEM_PROMPT_IDS).describe('추가할 탭. claude/main/main2/month 중 main2(작업 메모장)에 주로 사용'),
+          id: z.enum(SYSTEM_PROMPT_IDS).describe('추가할 탭. claude/main/main2/month/reference/rss_sources/todo 중 main2(작업 메모장)에 주로 사용'),
           content: z.string().describe('맨 아래에 추가할 내용 (마크다운). 앞뒤 구분용 빈 줄은 자동으로 들어가므로 따로 넣지 않아도 됨'),
         },
         annotations: { destructiveHint: false, idempotentHint: false },
