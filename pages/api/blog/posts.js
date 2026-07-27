@@ -72,11 +72,14 @@ export default async function handler(req, res) {
       title, slug, content, category, author, status = 'published', scheduled_at,
       summary, tags, cover_image,
       title_score, seo_score, title_score_detail, seo_score_detail, naver_summary, instagram_cards,
+      content_format,
     } = req.body
     if (!title || !slug || !content) return res.status(400).json({ error: '필수 항목 누락' })
     const nowIso = nowKST()
     const { data, error } = await supabase.from('blog_posts').insert([{
       id: randomUUID(), title, slug, content, category: category || '',
+      // 'markdown'(기본) | 'html' — html이면 렌더링 시 마크다운 변환 없이 원본 그대로 사용
+      content_format: content_format === 'html' ? 'html' : 'markdown',
       summary: summary || '', tags: Array.isArray(tags) ? tags : [], cover_image: cover_image || '',
       author_name: (author && String(author).trim()) || '트레이더 편집팀',
       status, post_type: 'blog',

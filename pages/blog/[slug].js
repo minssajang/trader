@@ -263,7 +263,9 @@ export async function getServerSideProps(context) {
     if (!res.ok) return { props: { post: null, html: '' } }
     const post = await res.json()
     if (!post) return { props: { post: null, html: '' } }
-    const html = parseMarkdown(post.content || '')
+
+    // content_format이 'html'이면 마크다운 변환(및 그에 따른 태그 이스케이프) 없이 원본 그대로 사용
+    const html = post.content_format === 'html' ? (post.content || '') : parseMarkdown(post.content || '')
 
     return { props: { post, html } }
   } catch (error) {
