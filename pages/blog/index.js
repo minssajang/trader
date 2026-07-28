@@ -1,14 +1,18 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import { AdSlot } from '../../components/AdSlot'
 import { useAdSlot } from '../../lib/AdSlotsContext'
 import BrandLogo from '../../components/BrandLogo'
 
+const PAGE_SIZE = 30
+
 export default function BlogIndex() {
   const [posts, setPosts] = useState([])
   const [customCategories, setCustomCategories] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
   const [category, setCategory] = useState('')
   const [search, setSearch] = useState('')
   const topSlot = useAdSlot('blog_top')
@@ -20,21 +24,33 @@ export default function BlogIndex() {
       .catch(() => setCustomCategories([]))
   }, [])
 
-  useEffect(() => {
-    fetch('/api/blog/posts?limit=100')
-      .then(r => r.json())
-      .then(d => setPosts(Array.isArray(d) ? d : []))
-      .catch(() => setPosts([]))
-      .finally(() => setLoading(false))
+  const fetchPosts = useCallback(async (cat, offset, append) => {
+    if (append) setLoadingMore(true); else setLoading(true)
+    try {
+      const params = new URLSearchParams({ limit: PAGE_SIZE, offset })
+      if (cat) params.set('category', cat)
+      const res = await fetch(`/api/blog/posts?${params}`)
+      const data = await res.json()
+      const list = Array.isArray(data) ? data : []
+      setPosts(prev => append ? [...prev, ...list] : list)
+      setHasMore(list.length === PAGE_SIZE)
+    } catch {
+      if (!append) setPosts([])
+      setHasMore(false)
+    }
+    if (append) setLoadingMore(false); else setLoading(false)
   }, [])
+
+  useEffect(() => { fetchPosts(category, 0, false) }, [category, fetchPosts])
+
+  const handleLoadMore = () => fetchPosts(category, posts.length, true)
 
   const filtered = useMemo(() => {
     return posts.filter(p => {
-      if (category && p.category !== category) return false
       if (search && !(p.title.includes(search) || (p.summary || '').includes(search))) return false
       return true
     })
-  }, [posts, category, search])
+  }, [posts, search])
 
   const catIcon = (label) => customCategories.find(c => c.label === label)?.icon || '📁'
 
@@ -111,6 +127,19 @@ export default function BlogIndex() {
             </Link>
           ))}
         </div>
+
+        {!loading && !search && hasMore && posts.length > 0 && (
+          <div style={{ textAlign: 'center', marginTop: 24 }}>
+            <button onClick={handleLoadMore} disabled={loadingMore}
+              style={{
+                padding: '10px 28px', borderRadius: 999, border: '1.5px solid var(--border)',
+                background: 'transparent', color: 'var(--muted)', fontSize: 14, fontWeight: 600,
+                cursor: loadingMore ? 'default' : 'pointer', opacity: loadingMore ? 0.6 : 1,
+              }}>
+              {loadingMore ? '불러오는 중...' : '더 보기'}
+            </button>
+          </div>
+        )}
 
         <AdSlot slot={footerSlot} label="하단 배너" style={{ marginTop: 20 }} />
         <footer className="site">
