@@ -36,7 +36,7 @@ export default function BacktestChart() {
   const [loadingCsv, setLoadingCsv] = useState(false)
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState(5)
+  const [speed, setSpeed] = useState(1)
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
   const [enabledBands, setEnabledBands] = useState({})
