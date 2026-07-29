@@ -61,7 +61,9 @@ export function CollapsibleCard({ title, defaultOpen = true, maxWidth = 170, chi
 
 // onSelect를 안 넘기면 클릭 불가능한 읽기 전용 달력(admin의 "빈 날짜 확인용")으로 동작한다.
 // bare=true면 카드 껍데기(배경/테두리/패딩) 없이 내용만 렌더링 - CollapsibleCard 안에 넣을 때 씀.
-export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDate, onSelect, maxWidth = 340, bare = false }) {
+// selectedDateTo를 같이 넘기면 selectedDate~selectedDateTo 구간 전체를 옅게 하이라이트한다(범위 선택 표시용).
+// onSelect는 (dateStr, shiftKey)로 호출된다 - Shift+클릭인지 호출하는 쪽에서 구분해서 범위 선택에 쓸 수 있게.
+export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDate, selectedDateTo, onSelect, maxWidth = 340, bare = false }) {
   const year = viewDate.getFullYear()
   const month = viewDate.getMonth()
   const startWeekday = new Date(year, month, 1).getDay()
@@ -78,6 +80,10 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
 
   const wrapperStyle = bare ? {} : { background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, maxWidth }
 
+  // 범위 하이라이트 - selectedDateTo가 없으면(단일 선택) rangeFrom===rangeTo===selectedDate라 아무 날짜도 "구간 내부"로 안 잡힘
+  const rangeFrom = selectedDateTo ? (selectedDate <= selectedDateTo ? selectedDate : selectedDateTo) : selectedDate
+  const rangeTo = selectedDateTo ? (selectedDate <= selectedDateTo ? selectedDateTo : selectedDate) : selectedDate
+
   return (
     <div style={wrapperStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -93,20 +99,22 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
           if (d == null) return <div key={i} />
           const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
           const has = availableDates.has(dateStr)
-          const isSelected = dateStr === selectedDate
+          const isEndpoint = dateStr === selectedDate || dateStr === selectedDateTo
+          const inRange = !!selectedDateTo && dateStr > rangeFrom && dateStr < rangeTo
           const clickable = has && !!onSelect
           return (
             <button
               type="button"
               key={i}
               disabled={!clickable}
-              onClick={clickable ? () => onSelect(dateStr) : undefined}
+              onClick={clickable ? (e) => onSelect(dateStr, e.shiftKey) : undefined}
+              title={clickable ? 'Shift+클릭하면 지금까지 선택된 날짜부터 여기까지 이어서 불러옵니다' : undefined}
               style={{
                 padding: '8px 0', borderRadius: 6, fontSize: 12,
                 cursor: clickable ? 'pointer' : 'default',
-                border: isSelected ? '1px solid #4CAF50' : '1px solid transparent',
-                background: isSelected ? '#4CAF50' : has ? 'rgba(76,175,80,0.15)' : 'transparent',
-                color: isSelected ? '#fff' : has ? '#e8eaed' : '#3a3f4a',
+                border: isEndpoint ? '1px solid #4CAF50' : '1px solid transparent',
+                background: isEndpoint ? '#4CAF50' : inRange ? 'rgba(76,175,80,0.4)' : has ? 'rgba(76,175,80,0.15)' : 'transparent',
+                color: isEndpoint ? '#fff' : has ? '#e8eaed' : '#3a3f4a',
                 fontWeight: has ? 700 : 400,
               }}
             >{d}</button>

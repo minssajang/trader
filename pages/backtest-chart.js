@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Head from 'next/head'
 import { createChart, CrosshairMode } from 'lightweight-charts'
@@ -165,6 +164,12 @@ export default function BacktestChart() {
 
   // 심볼 바뀌면 그 심볼의 데이터셋 목록을 불러온다
   useEffect(() => {
+    // 심볼을 빠르게 연속 전환하면(예: 골드→나스닥) 두 fetch가 동시에 날아가고, 먼저 보낸
+    // 쪽(골드)의 응답이 네트워크 지연으로 나스닥 응답보다 "나중에" 도착할 수 있다.
+    // ignore 플래그 없이 그대로 setDatasets를 부르면, 이미 나스닥으로 전환된 화면에
+    // 뒤늦게 도착한 골드 목록이 덮어써서 "나스닥을 선택해도 반영이 안 되는" 것처럼 보이는
+    // 버그가 생긴다. cleanup에서 ignore를 true로 만들어 그 시점 이후의 setState를 막는다.
+    let ignore = false
     stopPlayback()
     setSelectedDate('')
     setError('')
@@ -188,6 +193,7 @@ export default function BacktestChart() {
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
       .then(d => {
+        if (ignore) return
         const rows = d.rows || []
         setDatasets(rows)
         // 데이터가 있는 가장 최근 달을 기본으로 보여준다
@@ -197,7 +203,8 @@ export default function BacktestChart() {
           setViewDate(new Date(y, m - 1, 1))
         }
       })
-      .catch(() => setDatasets([]))
+      .catch(() => { if (!ignore) setDatasets([]) })
+    return () => { ignore = true }
   }, [symbol])
 
   // 차트 인스턴스는 한 번만 생성
