@@ -1,4 +1,3 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Head from 'next/head'
 import { createChart, CrosshairMode } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
@@ -11,7 +10,7 @@ const BUCKET = 'backtest-data'
 
 const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 // x1 = 실제 1분봉 그대로(캔들 1개 = 60초). 다른 배속은 전부 이 기준의 배수.
-const SPEEDS = [0.25, 0.5, 1, 2, 3, 5, 20, 60, 300]
+const SPEEDS = [0.25, 0.5, 1, 2, 3, 5, 20, 60, 100, 200, 300]
 const REALTIME_MS = 60000
 const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
 const MA_WIDTHS = [1, 2, 3, 4]
@@ -72,6 +71,8 @@ export default function BacktestChart() {
   const [datasets, setDatasets] = useState([])
   const [viewDate, setViewDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState('')
+  const [selectedDateTo, setSelectedDateTo] = useState('') // 여러 날 선택 모드에서 범위의 끝 날짜 (단일 선택이면 '')
+  const [multiSelectMode, setMultiSelectMode] = useState(false) // 켜면 달력 클릭 두 번으로 범위(여러 날)를 이어서 불러온다
   const [loadingCsv, setLoadingCsv] = useState(false)
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
@@ -159,6 +160,7 @@ export default function BacktestChart() {
   const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
   const doubleBSignalPointsRef = useRef([]) // 더블비 신호(표시용) 전체 [{idx, time, side}]
   const bollInnerSignalPointsRef = useRef([]) // 볼린저 눌림 신호(표시용) 전체 [{idx, time, side}]
+  const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
@@ -172,6 +174,8 @@ export default function BacktestChart() {
     let ignore = false
     stopPlayback()
     setSelectedDate('')
+    setSelectedDateTo('')
+    rangeAnchorRef.current = ''
     setError('')
     rowsRef.current = []
     indexRef.current = 0
@@ -373,16 +377,20 @@ export default function BacktestChart() {
     setPlayIndex(to)
   }
 
-  const loadDate = async (dateStr) => {
+  // fromStr === toStr이면 하루, fromStr < toStr이면 그 사이 여러 날을 이어서 하나의 재생 구간으로 불러온다
+  // (여러 날 선택 모드에서 두 번째 클릭 시 씀). 단일 날짜 클릭(loadDate)도 내부적으로 이 함수를 그대로 쓴다.
+  const loadRange = async (fromStr, toStr) => {
     stopPlayback()
     setError('')
-    setSelectedDate(dateStr)
+    setSelectedDate(fromStr)
+    setSelectedDateTo(fromStr === toStr ? '' : toStr)
 
     // symbol 전환 직후엔 datasets state가 아직 이전 심볼 목록일 수 있다(비동기 fetch가 덜 끝난 사이 클릭한 경우) -
     // d.symbol 체크 없이 날짜 범위만 보면 그 사이에 이전 심볼(예: GOLD) 파일을 잘못 불러오는 버그가 있었다.
-    const ds = datasets.find(d => d.symbol === symbol && d.date_from <= dateStr && dateStr <= d.date_to)
+    // 범위 선택도 같은 이유로, 시작~끝 날짜가 전부 같은 데이터 파일 안에 있어야 한다.
+    const ds = datasets.find(d => d.symbol === symbol && d.date_from <= fromStr && toStr <= d.date_to)
     if (!ds) {
-      setError('해당 날짜의 데이터를 찾을 수 없습니다')
+      setError(fromStr === toStr ? '해당 날짜의 데이터를 찾을 수 없습니다' : '선택한 범위가 같은 데이터 파일 안에 있지 않습니다 (더 좁게 선택해보세요)')
       return
     }
 
@@ -399,7 +407,7 @@ export default function BacktestChart() {
     doubleBSignalPointsRef.current = []
     bollInnerSignalPointsRef.current = []
     markerSeriesRef.current?.setMarkers([])
-    setPositions([]) // 새 날짜를 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
+    setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
     setPlayIndex(0)
     try {
@@ -412,18 +420,18 @@ export default function BacktestChart() {
         datasetCacheRef.current[ds.id] = fullRows
       }
 
-      let startIdx = fullRows.findIndex(r => toLocalDateStr(r.time) === dateStr)
+      let startIdx = fullRows.findIndex(r => toLocalDateStr(r.time) === fromStr)
       let endIdx = startIdx
       if (startIdx >= 0) {
         endIdx = startIdx
-        while (endIdx < fullRows.length && toLocalDateStr(fullRows[endIdx].time) === dateStr) endIdx++
+        while (endIdx < fullRows.length && toLocalDateStr(fullRows[endIdx].time) <= toStr) endIdx++
       }
       const dayRows = startIdx >= 0 ? fullRows.slice(startIdx, endIdx) : []
       rowsRef.current = dayRows
       setTotal(dayRows.length)
 
-      // 볼린저는 그날 데이터만으론 워밍업이 부족하니(예: 1시간봉 SMA1200 = 20시간 분량)
-      // 같은 파일 안의 이전 날짜들까지 포함해서 계산한 뒤, 표시 구간만 그날로 잘라낸다.
+      // 볼린저는 그 구간 데이터만으론 워밍업이 부족하니(예: 1시간봉 SMA1200 = 20시간 분량)
+      // 같은 파일 안의 이전 날짜들까지 포함해서 계산한 뒤, 표시 구간만 잘라낸다.
       if (dayRows.length > 0) {
         const closes = fullRows.map(r => r.close)
         const newBandData = {}
@@ -466,6 +474,31 @@ export default function BacktestChart() {
     setLoadingCsv(false)
   }
 
+  const loadDate = (dateStr) => loadRange(dateStr, dateStr)
+
+  // 달력 클릭 처리 - 여러 날 선택 모드가 꺼져있으면 예전처럼 클릭한 날 하루만 바로 불러온다.
+  // 켜져있으면 첫 클릭은 범위 시작점만 표시해두고, 두 번째 클릭에서 시작~끝을 이어서 불러온다
+  // (Shift+클릭도 같은 방식으로 동작 - MonthCalendar가 이미 shiftKey를 넘겨주고 있었음).
+  const handleCalendarSelect = (dateStr, shiftKey) => {
+    if (!multiSelectMode && !shiftKey) {
+      rangeAnchorRef.current = ''
+      loadDate(dateStr)
+      return
+    }
+    if (!rangeAnchorRef.current) {
+      rangeAnchorRef.current = dateStr
+      setSelectedDate(dateStr)
+      setSelectedDateTo('')
+      setError('')
+      return
+    }
+    const anchor = rangeAnchorRef.current
+    rangeAnchorRef.current = ''
+    const from = anchor <= dateStr ? anchor : dateStr
+    const to = anchor <= dateStr ? dateStr : anchor
+    loadRange(from, to)
+  }
+
   const toggleSummerTime = () => setSummerTime(prev => !prev)
 
   // 서머타임 상태가 바뀌면 캐시된 rows엔 예전 오프셋이 이미 반영돼 있어서 그대로 두면 안 바뀐다.
@@ -473,7 +506,7 @@ export default function BacktestChart() {
   // (setSummerTime 콜백 안에서 바로 loadDate를 부르면 summerTime이 아직 안 바뀐 값이라 한 번 밀리므로 effect로 분리)
   useEffect(() => {
     datasetCacheRef.current = {}
-    if (selectedDate) loadDate(selectedDate)
+    if (selectedDate) loadRange(selectedDate, selectedDateTo || selectedDate)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summerTime])
 
@@ -1118,12 +1151,25 @@ export default function BacktestChart() {
               </div>
 
               <CollapsibleCard title="달력" maxWidth={170}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', marginBottom: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={multiSelectMode}
+                    onChange={() => {
+                      setMultiSelectMode(m => !m)
+                      rangeAnchorRef.current = ''
+                    }}
+                    style={{ width: 13, height: 13, margin: 0, flexShrink: 0 }}
+                  />
+                  <span>여러 날 선택</span>
+                </label>
                 <MonthCalendar
                   viewDate={viewDate}
                   onNavigate={navigateMonth}
                   availableDates={availableDates}
                   selectedDate={selectedDate}
-                  onSelect={loadDate}
+                  selectedDateTo={selectedDateTo}
+                  onSelect={handleCalendarSelect}
                   maxWidth={170}
                   bare
                 />
@@ -1350,7 +1396,14 @@ export default function BacktestChart() {
             <div style={{ flex: 1, minWidth: 280 }}>
               <div style={{ display: 'flex', alignItems: 'center', minHeight: 38 }}>
                 {!selectedDate && <div style={{ color: '#9aa0ab', fontSize: 13 }}>왼쪽 달력에서 초록색으로 표시된 날짜를 눌러보세요.</div>}
-                {selectedDate && <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 700 }}>{selectedDate}</div>}
+                {selectedDate && (
+                  <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 700 }}>
+                    {selectedDateTo ? `${selectedDate} ~ ${selectedDateTo}` : selectedDate}
+                    {multiSelectMode && !selectedDateTo && rangeAnchorRef.current && (
+                      <span style={{ color: '#9aa0ab', fontWeight: 400, fontSize: 12, marginLeft: 8 }}>끝 날짜를 눌러주세요</span>
+                    )}
+                  </div>
+                )}
                 {error && <div style={{ color: '#F44336', fontSize: 13, marginLeft: 12 }}>❌ {error}</div>}
                 {loadingCsv && <div style={{ color: '#9aa0ab', fontSize: 13, marginLeft: 12 }}>불러오는 중...</div>}
                 <button

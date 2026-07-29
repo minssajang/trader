@@ -1,3 +1,4 @@
+
 import { useState } from 'react'
 
 // 골드/나스닥 백테스팅 데이터의 "어느 날짜에 데이터가 있는지" 보여주는 달력.
@@ -75,7 +76,8 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
 
   const navBtn = {
     background: 'none', border: '1px solid #2a2e38', color: '#9aa0ab', borderRadius: 8,
-    width: 30, height: 30, cursor: 'pointer', fontSize: 14,
+    width: 30, height: 30, cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   }
 
   const wrapperStyle = bare ? {} : { background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, maxWidth }
