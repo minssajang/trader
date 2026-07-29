@@ -33,8 +33,9 @@ const DEFAULT_DEAD_COLOR = '#FF1744'
 // - NAS100(Cash): 계약크기 1, 틱당 가치 USD $1. 수수료/스프레드는 계산하지 않음.
 const POINT_VALUE_PER_LOT = { GOLD: 100, NASDAQ: 1 }
 const DEFAULT_STARTING_BALANCE = 10000
-// 볼린저 타임프레임(period)과 짝이 되는 H(HMA) 이평선을 찾기 위한 매핑 - "볼린저+H이평선" 조건에서 씀
-const HMA_BY_PERIOD = Object.fromEntries(MOVING_AVERAGES.filter(m => m.type === 'hma').map(m => [m.period, m.id]))
+// "볼린저 눌림" 조건 고정 페어 - 5분 볼린저가 15분 볼린저 안쪽으로 눌려 들어온 상태를 본다
+const BOLL_INNER_SHORT_ID = 'sma100' // 5분
+const BOLL_INNER_LONG_ID = 'sma300'  // 15분
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
@@ -67,22 +68,34 @@ export default function BacktestChart() {
   const [deadShape, setDeadShapeState] = useState('arrowDown')
   const [deadColor, setDeadColorState] = useState(DEFAULT_DEAD_COLOR)
   const [deadSize, setDeadSizeState] = useState(1)
-  // 더블비 신호(왼쪽 표시용) - 반자동진입의 더블비 조건(autoDoubleBEnabled)과는 별개
-  const [doubleBSignalEnabled, setDoubleBSignalEnabled] = useState({}) // bollingerId -> bool
-  const [doubleBShape, setDoubleBShapeState] = useState('square')
-  const [doubleBColor, setDoubleBColorState] = useState('#00BCD4')
-  const [doubleBSize, setDoubleBSizeState] = useState(1)
+  // 더블비 신호(왼쪽 표시용) - 반자동진입의 더블비 조건(autoDoubleBEnabled)과 켜고 끄는 체크는 따로 관리하지만,
+  // 계산 함수(computeDoubleBLineTouches)는 공유한다. 그래서 양쪽에 같은 라인을 체크하면 마커가 뜨는
+  // 캔들과 실제 진입되는 캔들이 정확히 같아진다 - "별개"는 체크 상태만이고, 판정 로직 자체는 같다.
+  const [doubleBSignalEnabled, setDoubleBSignalEnabled] = useState({}) // `${bandId}:${upper|middle|lower}` -> bool
+  // 더블비 신호 모양/색상/크기 - 매수(롱)/매도(숏) 방향별로 따로 저장하고, 드롭다운으로 지금 편집 중인 방향만 전환해서 보여준다
+  const [doubleBEditSide, setDoubleBEditSideState] = useState('long')
+  const [doubleBShapeLong, setDoubleBShapeLongState] = useState('square')
+  const [doubleBColorLong, setDoubleBColorLongState] = useState('#00BCD4')
+  const [doubleBSizeLong, setDoubleBSizeLongState] = useState(1)
+  const [doubleBShapeShort, setDoubleBShapeShortState] = useState('square')
+  const [doubleBColorShort, setDoubleBColorShortState] = useState('#FF6D00')
+  const [doubleBSizeShort, setDoubleBSizeShortState] = useState(1)
   // 매매 연습 - 헤징 허용(바이/셀 동시 보유 가능), 수수료/스프레드는 계산 안 함
   const [startingBalance, setStartingBalanceState] = useState(DEFAULT_STARTING_BALANCE)
   const [balance, setBalance] = useState(DEFAULT_STARTING_BALANCE)
   const [lotSize, setLotSize] = useState(0.01)
   const [positions, setPositions] = useState([]) // { id, side:'buy'|'sell', symbol, lot, entryPrice, entryTime }
   const [pnlDisplay, setPnlDisplay] = useState('dollar') // 'dollar' | 'point'
-  // 반자동진입 - 왼쪽 "크로스" 표시(crossEnabled)와는 완전히 별개의 체크 상태
+  // 반자동진입 - 왼쪽 표시 체크(crossEnabled/doubleBSignalEnabled)와 켜고 끄는 체크 상태는 따로 관리한다
+  // (화면엔 여러 개 띄워두고 그중 일부만 실전 진입 조건으로 쓸 수 있게). 단, 계산 로직 자체는
+  // 왼쪽 표시와 완전히 같은 함수(findMACrosses / computeDoubleBLineTouches)를 쓰므로,
+  // 왼쪽과 여기에 "같은 항목"을 체크하면 마커 표시 캔들 = 실제 진입 캔들이 항상 일치한다.
   const [semiAutoEnabled, setSemiAutoEnabled] = useState(false)
   const [autoCrossEnabled, setAutoCrossEnabled] = useState({})   // maId -> bool
-  const [autoDoubleBEnabled, setAutoDoubleBEnabled] = useState({}) // bollingerId -> bool
-  const [autoBollHEnabled, setAutoBollHEnabled] = useState({})   // bollingerId -> bool
+  const [autoDoubleBEnabled, setAutoDoubleBEnabled] = useState({}) // `${bandId}:${upper|middle|lower}` -> bool
+  // "볼린저 눌림"(5분↔15분 고정) - 상단/하단 조건을 따로 켜고 끌 수 있다
+  const [autoBollInnerSellEnabled, setAutoBollInnerSellEnabled] = useState(false) // 5분 상단선이 15분 상단선 안(아래)일 때 매도
+  const [autoBollInnerBuyEnabled, setAutoBollInnerBuyEnabled] = useState(false)   // 5분 하단선이 15분 하단선 안(위)일 때 매수
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -214,9 +227,12 @@ export default function BacktestChart() {
     const dShape = overrides.deadShape ?? deadShape
     const dColor = overrides.deadColor ?? deadColor
     const dSize = overrides.deadSize ?? deadSize
-    const bShape = overrides.doubleBShape ?? doubleBShape
-    const bColor = overrides.doubleBColor ?? doubleBColor
-    const bSize = overrides.doubleBSize ?? doubleBSize
+    const bShapeLong = overrides.doubleBShapeLong ?? doubleBShapeLong
+    const bColorLong = overrides.doubleBColorLong ?? doubleBColorLong
+    const bSizeLong = overrides.doubleBSizeLong ?? doubleBSizeLong
+    const bShapeShort = overrides.doubleBShapeShort ?? doubleBShapeShort
+    const bColorShort = overrides.doubleBColorShort ?? doubleBColorShort
+    const bSizeShort = overrides.doubleBSizeShort ?? doubleBSizeShort
 
     const crossMarkers = crossPointsRef.current
       .filter(p => p.idx < idx)
@@ -224,9 +240,12 @@ export default function BacktestChart() {
         ? { time: p.time, position: 'belowBar', color: gColor, shape: gShape, size: gSize, text: '' }
         : { time: p.time, position: 'aboveBar', color: dColor, shape: dShape, size: dSize, text: '' })
 
+    // 더블비 신호는 매수(롱)/매도(숏) 방향에 따라 서로 다른 모양·색상·크기로 그린다
     const doubleBMarkers = doubleBSignalPointsRef.current
       .filter(p => p.idx < idx)
-      .map(p => ({ time: p.time, position: 'inBar', color: bColor, shape: bShape, size: bSize, text: '' }))
+      .map(p => p.side === 'buy'
+        ? { time: p.time, position: 'inBar', color: bColorLong, shape: bShapeLong, size: bSizeLong, text: '' }
+        : { time: p.time, position: 'inBar', color: bColorShort, shape: bShapeShort, size: bSizeShort, text: '' })
 
     markerSeriesRef.current.setMarkers([...crossMarkers, ...doubleBMarkers].sort((a, b) => a.time - b.time))
   }
@@ -541,26 +560,32 @@ export default function BacktestChart() {
     applyAllMarkers(indexRef.current)
   }
 
-  // "더블비" - 체크한 볼린저 밴드들 중 두 개씩 짝지어, 두 밴드의 범위가 겹치는 구간을
-  // 그 캔들의 고가/저가가 동시에 건드렸는지 확인한다. 겹친 구간이 두 밴드 중심선 평균보다
-  // 위면 매도(과열/저항), 아래면 매수(과매도/지지) 신호로 본다.
-  const computeDoubleBTouches = (bandIds) => {
+  // "더블비" - 체크한 라인(윗선/중심/아래선) 중 서로 다른 두 개를 골라(다른 밴드끼리도 조합 가능),
+  // 그 두 라인 값 사이 구간을 캔들이 동시에 건드렸는지 확인한다. 겹친 구간이 두 밴드 중심선
+  // 평균보다 위면 매도(과열/저항), 아래면 매수(과매도/지지) 신호로 본다.
+  // 왼쪽 "더블비 신호" 표시(doubleBSignalEnabled)와 반자동진입 조건(autoDoubleBEnabled)이 둘 다 이 함수를 쓴다.
+  const computeDoubleBLineTouches = (lineKeys) => {
     const rows = rowsRef.current
     const points = []
-    for (let a = 0; a < bandIds.length; a++) {
-      for (let b = a + 1; b < bandIds.length; b++) {
-        const A = bandDataRef.current[bandIds[a]]
-        const B = bandDataRef.current[bandIds[b]]
-        if (!A || !B) continue
+    const lines = lineKeys.map(k => {
+      const sep = k.lastIndexOf(':')
+      return { bandId: k.slice(0, sep), which: k.slice(sep + 1) }
+    })
+    for (let a = 0; a < lines.length; a++) {
+      for (let b = a + 1; b < lines.length; b++) {
+        const A = lines[a], B = lines[b]
+        if (A.bandId === B.bandId && A.which === B.which) continue
+        const Aband = bandDataRef.current[A.bandId]
+        const Bband = bandDataRef.current[B.bandId]
+        if (!Aband || !Bband) continue
         for (let i = 0; i < rows.length; i++) {
-          const au = A.upper[i], al = A.lower[i], am = A.middle[i]
-          const bu = B.upper[i], bl = B.lower[i], bm = B.middle[i]
-          if (!au || !al || !am || !bu || !bl || !bm) continue
-          const lowVal = Math.max(al.value, bl.value)
-          const highVal = Math.min(au.value, bu.value)
-          if (lowVal > highVal) continue // 두 밴드가 안 겹침
+          const av = Aband[A.which]?.[i], bv = Bband[B.which]?.[i]
+          const am = Aband.middle[i], bm = Bband.middle[i]
+          if (!av || !bv || !am || !bm) continue
+          const lowVal = Math.min(av.value, bv.value)
+          const highVal = Math.max(av.value, bv.value)
           const candle = rows[i]
-          if (candle.low > highVal || candle.high < lowVal) continue // 캔들이 겹친 구간을 안 건드림
+          if (candle.low > highVal || candle.high < lowVal) continue
           const overlapMid = (lowVal + highVal) / 2
           const avgMid = (am.value + bm.value) / 2
           points.push({ idx: i, time: candle.time, side: overlapMid > avgMid ? 'sell' : 'buy' })
@@ -570,24 +595,21 @@ export default function BacktestChart() {
     return points
   }
 
-  // "볼린저+H이평선" - 체크한 각 타임프레임에서, 종가가 같은 타임프레임의 H(HMA) 이평선을
-  // 아래로 뚫으면 매도, 위로 뚫으면 매수. (예: 5분 타임프레임 체크 시 종가 vs "5분 H" 교차 감지)
-  const computeBollHCrosses = (bollingerIds) => {
+  // "볼린저 눌림"(5분↔15분 고정) - 5분 볼린저가 15분 볼린저 안쪽으로 눌려 들어온 상태가
+  // 유지되는 모든 캔들마다 신호로 본다(더블비와 같은 방식 - 상태가 풀릴 때까지 매 캔들 계속 신호).
+  // 5분 상단선이 15분 상단선보다 아래에 있으면 매도, 5분 하단선이 15분 하단선보다 위에 있으면 매수.
+  const computeBollInnerTouches = () => {
     const rows = rowsRef.current
     const points = []
-    for (const bid of bollingerIds) {
-      const band = BOLLINGER_BANDS.find(b => b.id === bid)
-      const hmaId = HMA_BY_PERIOD[band?.period]
-      const H = maDataRef.current[hmaId]
-      if (!H) continue
-      for (let i = 1; i < rows.length; i++) {
-        const h0 = H[i - 1], h1 = H[i]
-        if (!h0 || !h1) continue
-        const d0 = rows[i - 1].close - h0.value
-        const d1 = rows[i].close - h1.value
-        if (d0 === 0 || (d0 > 0) === (d1 > 0)) continue
-        points.push({ idx: i, time: rows[i].time, side: d1 > 0 ? 'buy' : 'sell' })
-      }
+    const short = bandDataRef.current[BOLL_INNER_SHORT_ID]
+    const long = bandDataRef.current[BOLL_INNER_LONG_ID]
+    if (!short || !long) return points
+    for (let i = 0; i < rows.length; i++) {
+      const candle = rows[i]
+      const su = short.upper[i], sl = short.lower[i]
+      const lu = long.upper[i], ll = long.lower[i]
+      if (su && lu && su.value < lu.value) points.push({ idx: i, time: candle.time, side: 'sell' })
+      if (sl && ll && sl.value > ll.value) points.push({ idx: i, time: candle.time, side: 'buy' })
     }
     return points
   }
@@ -596,42 +618,52 @@ export default function BacktestChart() {
   const refreshAutoEvents = (
     crossMap = autoCrossEnabled,
     doubleBMap = autoDoubleBEnabled,
-    bollHMap = autoBollHEnabled,
+    bollInnerSell = autoBollInnerSellEnabled,
+    bollInnerBuy = autoBollInnerBuyEnabled,
   ) => {
     const crossIds = MOVING_AVERAGES.map(m => m.id).filter(id => crossMap[id])
     const crossEvents = findMACrosses(crossIds).map(p => ({
       idx: p.idx, time: p.time, side: p.type === 'golden' ? 'buy' : 'sell', source: 'cross',
     }))
 
-    const doubleBIds = BOLLINGER_BANDS.map(b => b.id).filter(id => doubleBMap[id])
-    const doubleBEvents = computeDoubleBTouches(doubleBIds).map(p => ({ ...p, source: 'doubleB' }))
+    const doubleBIds = Object.keys(doubleBMap).filter(k => doubleBMap[k])
+    const doubleBEvents = computeDoubleBLineTouches(doubleBIds).map(p => ({ ...p, source: 'doubleB' }))
 
-    const bollHIds = BOLLINGER_BANDS.map(b => b.id).filter(id => bollHMap[id])
-    const bollHEvents = computeBollHCrosses(bollHIds).map(p => ({ ...p, source: 'bollH' }))
+    const bollInnerEvents = computeBollInnerTouches()
+      .filter(p => (p.side === 'sell' && bollInnerSell) || (p.side === 'buy' && bollInnerBuy))
+      .map(p => ({ ...p, source: 'bollInner' }))
 
-    autoEventsRef.current = [...crossEvents, ...doubleBEvents, ...bollHEvents].sort((a, b) => a.idx - b.idx)
+    autoEventsRef.current = [...crossEvents, ...doubleBEvents, ...bollInnerEvents].sort((a, b) => a.idx - b.idx)
   }
 
   const toggleAutoCross = (maId) => {
     setAutoCrossEnabled(prev => {
       const next = { ...prev, [maId]: !prev[maId] }
-      refreshAutoEvents(next, autoDoubleBEnabled, autoBollHEnabled)
+      refreshAutoEvents(next, autoDoubleBEnabled, autoBollInnerSellEnabled, autoBollInnerBuyEnabled)
       return next
     })
   }
 
-  const toggleAutoDoubleB = (bandId) => {
+  const toggleAutoDoubleB = (lineKey) => {
     setAutoDoubleBEnabled(prev => {
-      const next = { ...prev, [bandId]: !prev[bandId] }
-      refreshAutoEvents(autoCrossEnabled, next, autoBollHEnabled)
+      const next = { ...prev, [lineKey]: !prev[lineKey] }
+      refreshAutoEvents(autoCrossEnabled, next, autoBollInnerSellEnabled, autoBollInnerBuyEnabled)
       return next
     })
   }
 
-  const toggleAutoBollH = (bandId) => {
-    setAutoBollHEnabled(prev => {
-      const next = { ...prev, [bandId]: !prev[bandId] }
-      refreshAutoEvents(autoCrossEnabled, autoDoubleBEnabled, next)
+  const toggleAutoBollInnerSell = () => {
+    setAutoBollInnerSellEnabled(prev => {
+      const next = !prev
+      refreshAutoEvents(autoCrossEnabled, autoDoubleBEnabled, next, autoBollInnerBuyEnabled)
+      return next
+    })
+  }
+
+  const toggleAutoBollInnerBuy = () => {
+    setAutoBollInnerBuyEnabled(prev => {
+      const next = !prev
+      refreshAutoEvents(autoCrossEnabled, autoDoubleBEnabled, autoBollInnerSellEnabled, next)
       return next
     })
   }
@@ -650,19 +682,23 @@ export default function BacktestChart() {
   const setDeadShape = (v) => { setDeadShapeState(v); applyAllMarkers(indexRef.current, { deadShape: v }) }
   const setDeadColor = (v) => { setDeadColorState(v); applyAllMarkers(indexRef.current, { deadColor: v }) }
   const setDeadSize = (v) => { setDeadSizeState(v); applyAllMarkers(indexRef.current, { deadSize: v }) }
-  const setDoubleBShape = (v) => { setDoubleBShapeState(v); applyAllMarkers(indexRef.current, { doubleBShape: v }) }
-  const setDoubleBColor = (v) => { setDoubleBColorState(v); applyAllMarkers(indexRef.current, { doubleBColor: v }) }
-  const setDoubleBSize = (v) => { setDoubleBSizeState(v); applyAllMarkers(indexRef.current, { doubleBSize: v }) }
+  const setDoubleBEditSide = (v) => setDoubleBEditSideState(v)
+  const setDoubleBShapeLong = (v) => { setDoubleBShapeLongState(v); applyAllMarkers(indexRef.current, { doubleBShapeLong: v }) }
+  const setDoubleBColorLong = (v) => { setDoubleBColorLongState(v); applyAllMarkers(indexRef.current, { doubleBColorLong: v }) }
+  const setDoubleBSizeLong = (v) => { setDoubleBSizeLongState(v); applyAllMarkers(indexRef.current, { doubleBSizeLong: v }) }
+  const setDoubleBShapeShort = (v) => { setDoubleBShapeShortState(v); applyAllMarkers(indexRef.current, { doubleBShapeShort: v }) }
+  const setDoubleBColorShort = (v) => { setDoubleBColorShortState(v); applyAllMarkers(indexRef.current, { doubleBColorShort: v }) }
+  const setDoubleBSizeShort = (v) => { setDoubleBSizeShortState(v); applyAllMarkers(indexRef.current, { doubleBSizeShort: v }) }
 
   const refreshDoubleBSignal = (enabledMap = doubleBSignalEnabled) => {
-    const ids = BOLLINGER_BANDS.map(b => b.id).filter(id => enabledMap[id])
-    doubleBSignalPointsRef.current = computeDoubleBTouches(ids).sort((p, q) => p.idx - q.idx)
+    const lineKeys = Object.keys(enabledMap).filter(k => enabledMap[k])
+    doubleBSignalPointsRef.current = computeDoubleBLineTouches(lineKeys).sort((p, q) => p.idx - q.idx)
     applyAllMarkers(indexRef.current)
   }
 
-  const toggleDoubleBSignal = (bandId) => {
+  const toggleDoubleBSignal = (lineKey) => {
     setDoubleBSignalEnabled(prev => {
-      const next = { ...prev, [bandId]: !prev[bandId] }
+      const next = { ...prev, [lineKey]: !prev[lineKey] }
       refreshDoubleBSignal(next)
       return next
     })
@@ -760,9 +796,12 @@ export default function BacktestChart() {
     </label>
   )
 
-  const renderCrossRow = (title, shape, setShape, color, setColor, size, setSize) => (
+  const renderCrossRow = (title, shape, setShape, color, setColor, size, setSize, extra) => (
     <div style={{ marginBottom: 10 }}>
-      <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 4 }}>{title}</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <div style={{ fontSize: 10, color: '#9aa0ab' }}>{title}</div>
+        {extra}
+      </div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
         {CROSS_SHAPES.map(s => (
           <button
@@ -1024,18 +1063,47 @@ export default function BacktestChart() {
                 </div>
 
                 <div style={{ borderTop: '1px solid #2a2e38', marginTop: 10, paddingTop: 10 }}>
-                  {renderCrossRow('더블비 신호', doubleBShape, setDoubleBShape, doubleBColor, setDoubleBColor, doubleBSize, setDoubleBSize)}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px 6px' }}>
+                  {renderCrossRow(
+                    '더블비 신호',
+                    doubleBEditSide === 'long' ? doubleBShapeLong : doubleBShapeShort,
+                    doubleBEditSide === 'long' ? setDoubleBShapeLong : setDoubleBShapeShort,
+                    doubleBEditSide === 'long' ? doubleBColorLong : doubleBColorShort,
+                    doubleBEditSide === 'long' ? setDoubleBColorLong : setDoubleBColorShort,
+                    doubleBEditSide === 'long' ? doubleBSizeLong : doubleBSizeShort,
+                    doubleBEditSide === 'long' ? setDoubleBSizeLong : setDoubleBSizeShort,
+                    <select
+                      value={doubleBEditSide}
+                      onChange={e => setDoubleBEditSide(e.target.value)}
+                      title="지금 편집 중인 방향 (모양·색상·크기는 롱/숏 따로 저장됨)"
+                      style={{ fontSize: 10, background: '#0f1115', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 4px', cursor: 'pointer' }}
+                    >
+                      <option value="long">롱(매수)</option>
+                      <option value="short">숏(매도)</option>
+                    </select>
+                  )}
+                  {/* 시간대별로 윗선/중심/아래선을 각각 따로 켜고 끌 수 있게 - 다른 시간대 라인끼리도 짝지어 겹침을 본다 */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {BOLLINGER_BANDS.map(b => (
-                      <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#e8eaed', cursor: 'pointer', padding: '1px 0', minWidth: 0 }}>
-                        <input
-                          type="checkbox"
-                          checked={!!doubleBSignalEnabled[b.id]}
-                          onChange={() => toggleDoubleBSignal(b.id)}
-                          style={{ width: 12, height: 12, margin: 0, accentColor: b.color, flexShrink: 0 }}
-                        />
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.label}</span>
-                      </label>
+                      <div key={b.id}>
+                        <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.label}</div>
+                        <div style={{ display: 'flex', gap: 10, marginLeft: 2 }}>
+                          {[['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
+                            const lineKey = `${b.id}:${which}`
+                            const on = !!doubleBSignalEnabled[lineKey]
+                            return (
+                              <label key={which} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: on ? b.color : '#9aa0ab', cursor: 'pointer' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={on}
+                                  onChange={() => toggleDoubleBSignal(lineKey)}
+                                  style={{ width: 12, height: 12, margin: 0, accentColor: b.color, flexShrink: 0 }}
+                                />
+                                {wlabel}
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -1194,7 +1262,7 @@ export default function BacktestChart() {
 
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                    조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (왼쪽 "크로스" 표시와 별개로 동작)
+                    조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (왼쪽 "크로스" 표시와는 체크 목록이 따로지만, 같은 항목을 체크하면 마커가 뜨는 캔들에 그대로 진입됩니다)
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                     {MOVING_AVERAGES.map(ma => renderChip(ma.id, ma.label, !!autoCrossEnabled[ma.id], () => toggleAutoCross(ma.id), ma.color))}
@@ -1203,19 +1271,23 @@ export default function BacktestChart() {
 
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                    조건: 더블비 — 체크한 볼린저 2개가 겹친 구간을 캔들이 동시에 터치 (겹친 구간이 상단쪽이면 매도, 하단쪽이면 매수)
+                    조건: 더블비 — 체크한 라인 2개가 겹친 구간을 캔들이 동시에 터치 (겹친 구간이 상단쪽이면 매도, 하단쪽이면 매수 / 왼쪽 "더블비 신호" 표시와는 체크 목록이 따로지만, 같은 항목을 체크하면 마커가 뜨는 캔들에 그대로 진입됩니다)
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {BOLLINGER_BANDS.map(b => renderChip(b.id, b.label, !!autoDoubleBEnabled[b.id], () => toggleAutoDoubleB(b.id), b.color))}
+                    {BOLLINGER_BANDS.flatMap(b => [['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
+                      const lineKey = `${b.id}:${which}`
+                      return renderChip(lineKey, `${b.label} ${wlabel}`, !!autoDoubleBEnabled[lineKey], () => toggleAutoDoubleB(lineKey), b.color)
+                    }))}
                   </div>
                 </div>
 
                 <div>
                   <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                    조건: 볼린저+H이평선 — 같은 타임프레임에서 종가가 H이평선을 아래로 뚫으면 매도, 위로 뚫으면 매수
+                    조건: 볼린저 눌림(5분↔15분 고정) — 5분 상단선이 15분 상단선 안(아래)이면 매도, 5분 하단선이 15분 하단선 안(위)이면 매수. 유지되는 동안 매 캔들 계속 신호
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {BOLLINGER_BANDS.map(b => renderChip(b.id, b.label, !!autoBollHEnabled[b.id], () => toggleAutoBollH(b.id), b.color))}
+                    {renderChip('bollInnerSell', '5분 상단 눌림 → 매도', autoBollInnerSellEnabled, toggleAutoBollInnerSell, '#ef5350')}
+                    {renderChip('bollInnerBuy', '5분 하단 눌림 → 매수', autoBollInnerBuyEnabled, toggleAutoBollInnerBuy, '#26a69a')}
                   </div>
                 </div>
               </div>
