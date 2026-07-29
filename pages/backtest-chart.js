@@ -14,7 +14,7 @@ const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 const SPEEDS = [1, 5, 20, 60]
 const TICK_MS = 200
 const DEFAULT_UP_COLOR = '#38BDF8'   // 상승 기본색 - 스카이블루
-const DEFAULT_DOWN_COLOR = '#9D174D' // 하락 기본색 - 자주색
+const DEFAULT_DOWN_COLOR = '#FF69B4' // 하락 기본색 - 밝은 핑크
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
