@@ -66,6 +66,7 @@ export default function BlogIndex() {
           <nav className="site">
             <Link href="/">소개</Link>
             <Link href="/board">자유게시판</Link>
+            <Link href="/backtest-chart">📊 백테스팅</Link>
             <Link href="/apply">신청</Link>
             <Link href="/check">내 정보 조회</Link>
           </nav>

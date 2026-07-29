@@ -8,9 +8,15 @@ const MAX_MB = 80
 // versions.js(exe)와 같은 이유로, signed URL만 여기서 발급하고 실제 업로드는
 // 브라우저가 Supabase Storage로 직접 하게 한다 (lib/publicSupabase.js의 uploadToSignedUrl).
 async function ensureBucket() {
-  const { data: buckets } = await supabase.storage.listBuckets()
+  const { data: buckets, error: listErr } = await supabase.storage.listBuckets()
+  if (listErr) throw new Error(`버킷 목록 조회 실패: ${listErr.message}`)
   if (buckets?.some(b => b.name === BUCKET)) return
-  await supabase.storage.createBucket(BUCKET, { public: true, fileSizeLimit: `${MAX_MB}MB` })
+
+  const { error: createErr } = await supabase.storage.createBucket(BUCKET, { public: true, fileSizeLimit: `${MAX_MB}MB` })
+  // 동시에 두 요청이 먼저 만들려고 경합하는 경우(이미 존재함 에러)는 무시해도 된다
+  if (createErr && !/already exists/i.test(createErr.message || '')) {
+    throw new Error(`버킷 생성 실패: ${createErr.message}`)
+  }
 }
 
 export default async function handler(req, res) {
