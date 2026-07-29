@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 // 골드/나스닥 백테스팅 데이터의 "어느 날짜에 데이터가 있는지" 보여주는 달력.
 // 라이브 재생 페이지(backtest-chart.js)와 admin 업로드 패널(BacktestDataPanel.js)이 같이 쓴다.
 const WEEKDAY_LABEL = ['일', '월', '화', '수', '목', '금', '토']
@@ -35,8 +37,31 @@ export function latestMonth(datasets) {
   return new Date(y, m - 1, 1)
 }
 
+// 달력/볼린저 리스트처럼 왼쪽 컬럼에 세로로 쌓이는 카드들을 접었다 펼 수 있게 하는 공용 껍데기.
+export function CollapsibleCard({ title, defaultOpen = true, maxWidth = 170, children }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: open ? 12 : '10px 12px', maxWidth }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background: 'none', border: 'none', color: '#9aa0ab', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: 0,
+          fontSize: 11, fontWeight: 700, marginBottom: open ? 8 : 0,
+        }}
+      >
+        <span>{title}</span>
+        <span style={{ fontSize: 10 }}>{open ? '▾' : '▸'}</span>
+      </button>
+      {open && children}
+    </div>
+  )
+}
+
 // onSelect를 안 넘기면 클릭 불가능한 읽기 전용 달력(admin의 "빈 날짜 확인용")으로 동작한다.
-export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDate, onSelect, maxWidth = 340 }) {
+// bare=true면 카드 껍데기(배경/테두리/패딩) 없이 내용만 렌더링 - CollapsibleCard 안에 넣을 때 씀.
+export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDate, onSelect, maxWidth = 340, bare = false }) {
   const year = viewDate.getFullYear()
   const month = viewDate.getMonth()
   const startWeekday = new Date(year, month, 1).getDay()
@@ -51,8 +76,10 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
     width: 30, height: 30, cursor: 'pointer', fontSize: 14,
   }
 
+  const wrapperStyle = bare ? {} : { background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, maxWidth }
+
   return (
-    <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, maxWidth }}>
+    <div style={wrapperStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <button type="button" onClick={() => onNavigate(-1)} style={navBtn}>‹</button>
         <div style={{ fontWeight: 700, fontSize: 14 }}>{year}년 {month + 1}월</div>

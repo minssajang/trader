@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Head from 'next/head'
 import { createChart, CrosshairMode } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
-import { MonthCalendar, buildAvailableDates } from '../components/BacktestCalendar'
+import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr } from '../lib/candleCsv'
 import { BOLLINGER_BANDS, rollingBollinger } from '../lib/indicators'
 
@@ -29,6 +29,8 @@ export default function BacktestChart() {
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
   const [enabledBands, setEnabledBands] = useState({})
+  const [lineVisibility, setLineVisibility] = useState({}) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true)
+  const [bandColors, setBandColors] = useState({}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -200,6 +202,42 @@ export default function BacktestChart() {
     setLoadingCsv(false)
   }
 
+  // 위/중심/아래 각 줄을 따로 숨길 수도 있게 - 기본은 다 보임(true)
+  const isLineVisible = (bandId, which) => lineVisibility[`${bandId}:${which}`] !== false
+
+  const toggleLine = (bandId, which) => {
+    const nextVisible = !isLineVisible(bandId, which)
+    setLineVisibility(prev => ({ ...prev, [`${bandId}:${which}`]: nextVisible }))
+    bandSeriesRef.current[bandId]?.[which].applyOptions({ visible: nextVisible })
+  }
+
+  // 커스텀 색을 안 골랐으면 BOLLINGER_BANDS에 정의된 기본색 그대로
+  const getBandColor = (band) => bandColors[band.id] || band.color
+
+  const setBandColor = (bandId, color) => {
+    setBandColors(prev => ({ ...prev, [bandId]: color }))
+    const s = bandSeriesRef.current[bandId]
+    if (s) {
+      s.upper.applyOptions({ color })
+      s.middle.applyOptions({ color })
+      s.lower.applyOptions({ color })
+    }
+  }
+
+  const resetBandColor = (band) => {
+    setBandColors(prev => {
+      const next = { ...prev }
+      delete next[band.id]
+      return next
+    })
+    const s = bandSeriesRef.current[band.id]
+    if (s) {
+      s.upper.applyOptions({ color: band.color })
+      s.middle.applyOptions({ color: band.color })
+      s.lower.applyOptions({ color: band.color })
+    }
+  }
+
   const toggleBand = (bandId) => {
     const turningOn = !enabledBands[bandId]
     setEnabledBands(prev => ({ ...prev, [bandId]: turningOn }))
@@ -207,10 +245,11 @@ export default function BacktestChart() {
     if (turningOn) {
       if (!bandSeriesRef.current[bandId] && chartRef.current) {
         const band = BOLLINGER_BANDS.find(b => b.id === bandId)
+        const color = getBandColor(band)
         bandSeriesRef.current[bandId] = {
-          upper: chartRef.current.addLineSeries({ color: band.color, lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false }),
-          middle: chartRef.current.addLineSeries({ color: band.color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }),
-          lower: chartRef.current.addLineSeries({ color: band.color, lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false }),
+          upper: chartRef.current.addLineSeries({ color, lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'upper') }),
+          middle: chartRef.current.addLineSeries({ color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'middle') }),
+          lower: chartRef.current.addLineSeries({ color, lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'lower') }),
         }
       }
       applyBandIndex(bandId, indexRef.current)
@@ -273,34 +312,108 @@ export default function BacktestChart() {
           <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>캔들 시뮬레이션 차트</h1>
           <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>달력에서 데이터가 있는 날짜를 골라서, 그날 시세를 순서대로 재생해볼 수 있어요.</p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '170px 1fr', gap: 20, alignItems: 'start' }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
-                <button key={sym} onClick={() => setSymbol(sym)} style={{
-                  flex: 1, background: symbol === sym ? '#4CAF50' : 'none', color: symbol === sym ? '#fff' : '#9aa0ab',
-                  border: `1px solid ${symbol === sym ? '#4CAF50' : '#2a2e38'}`, borderRadius: 9,
-                  padding: '8px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-                }}>{label}</button>
-              ))}
+          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            {/* 왼쪽 컬럼: 심볼버튼 / 달력 / 볼린저 리스트가 서로 붙어서 쌓인다 (오른쪽 차트 높이랑 무관하게) */}
+            <div style={{ width: 170, display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
+                  <button key={sym} onClick={() => setSymbol(sym)} style={{
+                    flex: 1, background: symbol === sym ? '#4CAF50' : 'none', color: symbol === sym ? '#fff' : '#9aa0ab',
+                    border: `1px solid ${symbol === sym ? '#4CAF50' : '#2a2e38'}`, borderRadius: 9,
+                    padding: '8px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                  }}>{label}</button>
+                ))}
+              </div>
+
+              <CollapsibleCard title="달력" maxWidth={170}>
+                <MonthCalendar
+                  viewDate={viewDate}
+                  onNavigate={navigateMonth}
+                  availableDates={availableDates}
+                  selectedDate={selectedDate}
+                  onSelect={loadDate}
+                  maxWidth={170}
+                  bare
+                />
+              </CollapsibleCard>
+
+              <CollapsibleCard title="볼린저 / 이평선" maxWidth={170}>
+                {BOLLINGER_BANDS.map(band => {
+                  const on = !!enabledBands[band.id]
+                  const color = getBandColor(band)
+                  const isCustom = !!bandColors[band.id]
+                  return (
+                    <div key={band.id} style={{ padding: '3px 0' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() => toggleBand(band.id)}
+                          style={{ width: 13, height: 13, margin: 0, accentColor: color, flexShrink: 0 }}
+                        />
+                        {/* 위/중심/아래 3줄이 그려진다는 걸 보여주는 미니 아이콘 (사각형 1개 대신) */}
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 14, flexShrink: 0 }}>
+                          <span style={{ height: 2, borderRadius: 1, background: color, opacity: 0.55 }} />
+                          <span style={{ height: 2, borderRadius: 1, background: color }} />
+                          <span style={{ height: 2, borderRadius: 1, background: color, opacity: 0.55 }} />
+                        </span>
+                        <span style={{ flex: 1 }}>{band.label}</span>
+                        {/* 네모를 누르면 브라우저 기본 색상선택기가 뜬다 - 기본값은 BOLLINGER_BANDS의 원래 색 */}
+                        <input
+                          type="color"
+                          value={color}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => setBandColor(band.id, e.target.value)}
+                          title="색상 바꾸기"
+                          style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                        />
+                      </label>
+
+                      {/* 체크한 밴드에 한해 위/중심/아래를 따로 켜고 끌 수 있게 + 색상 기본값 복원 */}
+                      {on && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3 }}>
+                          {[['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
+                            const vis = isLineVisible(band.id, which)
+                            return (
+                              <button
+                                key={which}
+                                type="button"
+                                onClick={() => toggleLine(band.id, which)}
+                                style={{
+                                  fontSize: 10, padding: '2px 6px', borderRadius: 5,
+                                  border: `1px solid ${vis ? color : '#2a2e38'}`,
+                                  background: vis ? `${color}22` : 'none',
+                                  color: vis ? color : '#5a5f6a',
+                                  cursor: 'pointer',
+                                }}
+                              >{wlabel}</button>
+                            )
+                          })}
+                          {isCustom && (
+                            <button
+                              type="button"
+                              onClick={() => resetBandColor(band)}
+                              title="기본 색상으로"
+                              style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer', marginLeft: 2 }}
+                            >↺</button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </CollapsibleCard>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', minHeight: 38 }}>
-              {!selectedDate && <div style={{ color: '#9aa0ab', fontSize: 13 }}>왼쪽 달력에서 초록색으로 표시된 날짜를 눌러보세요.</div>}
-              {selectedDate && <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 700 }}>{selectedDate}</div>}
-              {error && <div style={{ color: '#F44336', fontSize: 13, marginLeft: 12 }}>❌ {error}</div>}
-              {loadingCsv && <div style={{ color: '#9aa0ab', fontSize: 13, marginLeft: 12 }}>불러오는 중...</div>}
-            </div>
+            {/* 오른쪽 컬럼: 상태줄 / 차트 / 컨트롤 */}
+            <div style={{ flex: 1, minWidth: 280 }}>
+              <div style={{ display: 'flex', alignItems: 'center', minHeight: 38 }}>
+                {!selectedDate && <div style={{ color: '#9aa0ab', fontSize: 13 }}>왼쪽 달력에서 초록색으로 표시된 날짜를 눌러보세요.</div>}
+                {selectedDate && <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 700 }}>{selectedDate}</div>}
+                {error && <div style={{ color: '#F44336', fontSize: 13, marginLeft: 12 }}>❌ {error}</div>}
+                {loadingCsv && <div style={{ color: '#9aa0ab', fontSize: 13, marginLeft: 12 }}>불러오는 중...</div>}
+              </div>
 
-            <MonthCalendar
-              viewDate={viewDate}
-              onNavigate={navigateMonth}
-              availableDates={availableDates}
-              selectedDate={selectedDate}
-              onSelect={loadDate}
-              maxWidth={170}
-            />
-
-            <div>
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16 }}>
                 <div ref={containerRef} style={{ width: '100%', height: 480 }} />
               </div>
@@ -332,22 +445,6 @@ export default function BacktestChart() {
                 disabled={!total}
                 style={{ width: '100%', marginTop: 10 }}
               />
-            </div>
-
-            <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 12, maxWidth: 170 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa0ab', marginBottom: 8 }}>볼린저 / 이평선</div>
-              {BOLLINGER_BANDS.map(band => (
-                <label key={band.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={!!enabledBands[band.id]}
-                    onChange={() => toggleBand(band.id)}
-                    style={{ width: 13, height: 13, margin: 0, accentColor: band.color, flexShrink: 0 }}
-                  />
-                  <span style={{ width: 9, height: 9, borderRadius: 2, background: band.color, display: 'inline-block', flexShrink: 0 }} />
-                  <span>{band.label}</span>
-                </label>
-              ))}
             </div>
           </div>
         </main>
