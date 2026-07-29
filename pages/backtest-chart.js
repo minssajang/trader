@@ -263,7 +263,12 @@ export default function BacktestChart() {
   return (
     <>
       <Head><title>백테스팅 차트 시뮬레이션 — EasyTrade</title></Head>
-      <div style={{ minHeight: '100vh', background: '#0f1115', color: '#e8eaed', fontFamily: '-apple-system, "Segoe UI", "Malgun Gothic", sans-serif' }}>
+      <div className="bt-page" style={{ minHeight: '100vh', background: '#0f1115', color: '#e8eaed', fontFamily: '-apple-system, "Segoe UI", "Malgun Gothic", sans-serif' }}>
+        <style>{`
+          /* styles/site.css의 전역 button { width:100%; margin-top:20px }이
+             재생/속도 버튼들을 세로로 늘려버리는 문제를 이 페이지 안에서만 되돌린다. */
+          .bt-page button { width: auto; margin-top: 0; }
+        `}</style>
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 28px', borderBottom: '1px solid #2a2e38' }}>
           <BrandLogo label="백테스팅" />
         </header>
