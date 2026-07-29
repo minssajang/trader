@@ -15,7 +15,6 @@ const SPEEDS = [1, 5, 20, 60]
 const TICK_MS = 200
 const DEFAULT_UP_COLOR = '#38BDF8'   // 상승 기본색 - 스카이블루
 const DEFAULT_DOWN_COLOR = '#FF69B4' // 하락 기본색 - 밝은 핑크
-const CROSS_COLOR = '#FFD600'
 // lightweight-charts 마커가 네이티브로 지원하는 모양만 사용(삼각형은 화살표로 표현)
 const CROSS_SHAPES = [
   { id: 'circle', label: '●' },
@@ -23,6 +22,9 @@ const CROSS_SHAPES = [
   { id: 'arrowUp', label: '▲' },
   { id: 'arrowDown', label: '▼' },
 ]
+const CROSS_SIZES = [1, 2, 3]
+const DEFAULT_GOLDEN_COLOR = '#00E676'
+const DEFAULT_DEAD_COLOR = '#FF1744'
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
@@ -47,7 +49,13 @@ export default function BacktestChart() {
   const [upColor, setUpColorState] = useState(DEFAULT_UP_COLOR)
   const [downColor, setDownColorState] = useState(DEFAULT_DOWN_COLOR)
   const [crossEnabled, setCrossEnabled] = useState({}) // maId -> 크로스 감지 대상 포함 여부
-  const [crossShape, setCrossShape] = useState('circle')
+  // 골든크로스(단기선이 장기선을 아래에서 위로 돌파)/데드크로스(그 반대) 표시를 따로 설정
+  const [goldenShape, setGoldenShapeState] = useState('arrowUp')
+  const [goldenColor, setGoldenColorState] = useState(DEFAULT_GOLDEN_COLOR)
+  const [goldenSize, setGoldenSizeState] = useState(1)
+  const [deadShape, setDeadShapeState] = useState('arrowDown')
+  const [deadColor, setDeadColorState] = useState(DEFAULT_DEAD_COLOR)
+  const [deadSize, setDeadSizeState] = useState(1)
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -60,7 +68,7 @@ export default function BacktestChart() {
   const bandSeriesRef = useRef({})   // bandId -> { upper, middle, lower } lightweight-charts 라인 시리즈
   const maDataRef = useRef({})       // maId -> [{time,value}|null] - 선택한 날짜분, 워밍업 포함해서 계산됨
   const maSeriesRef = useRef({})     // maId -> lightweight-charts 라인 시리즈 (밴드와 달리 선 1개)
-  const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time}] - 그날 데이터 기준
+  const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
@@ -157,11 +165,21 @@ export default function BacktestChart() {
 
   // 크로스 마커도 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 교차점 중
   // 아직 재생 안 지난 구간은 걸러서 캔들 시리즈에 마커로 얹는다.
-  const applyCrossMarkers = (idx, shape = crossShape) => {
+  // overrides로 넘긴 값만 즉시 반영하고 나머지는 현재 state를 그대로 씀
+  // (setState 직후 같은 틱에 호출될 때 클로저가 stale해지는 걸 피하기 위함)
+  const applyCrossMarkers = (idx, overrides = {}) => {
     if (!seriesRef.current) return
+    const gShape = overrides.goldenShape ?? goldenShape
+    const gColor = overrides.goldenColor ?? goldenColor
+    const gSize = overrides.goldenSize ?? goldenSize
+    const dShape = overrides.deadShape ?? deadShape
+    const dColor = overrides.deadColor ?? deadColor
+    const dSize = overrides.deadSize ?? deadSize
     const markers = crossPointsRef.current
       .filter(p => p.idx < idx)
-      .map(p => ({ time: p.time, position: 'aboveBar', color: CROSS_COLOR, shape, text: '' }))
+      .map(p => p.type === 'golden'
+        ? { time: p.time, position: 'belowBar', color: gColor, shape: gShape, size: gSize, text: '' }
+        : { time: p.time, position: 'aboveBar', color: dColor, shape: dShape, size: dSize, text: '' })
     seriesRef.current.setMarkers(markers)
   }
 
@@ -384,43 +402,49 @@ export default function BacktestChart() {
     }
   }
 
-  // 체크한 이평선들 서로간의 교차점을 그날 데이터 전체에서 미리 찾아둔다
-  // (재생 위치 필터링은 applyCrossMarkers가 담당)
-  const refreshCross = (enabledMap = crossEnabled, shape = crossShape) => {
+  // 체크한 이평선들 중 기간이 짧은 쪽을 단기선, 긴 쪽을 장기선으로 보고
+  // 단기선이 장기선을 아래→위로 뚫으면 골든크로스, 위→아래면 데드크로스로 분류해
+  // 그날 데이터 전체에서 미리 찾아둔다 (재생 위치 필터링은 applyCrossMarkers가 담당)
+  const refreshCross = (enabledMap = crossEnabled) => {
     const ids = MOVING_AVERAGES.map(m => m.id).filter(id => enabledMap[id])
+    const maById = Object.fromEntries(MOVING_AVERAGES.map(m => [m.id, m]))
     const points = []
     for (let a = 0; a < ids.length; a++) {
       for (let b = a + 1; b < ids.length; b++) {
-        const A = maDataRef.current[ids[a]]
-        const B = maDataRef.current[ids[b]]
-        if (!A || !B) continue
-        for (let i = 1; i < A.length; i++) {
-          const a0 = A[i - 1], a1 = A[i], b0 = B[i - 1], b1 = B[i]
-          if (!a0 || !a1 || !b0 || !b1) continue
-          const d0 = a0.value - b0.value
-          const d1 = a1.value - b1.value
+        const maA = maById[ids[a]], maB = maById[ids[b]]
+        const [fastId, slowId] = maA.period <= maB.period ? [ids[a], ids[b]] : [ids[b], ids[a]]
+        const F = maDataRef.current[fastId]
+        const S = maDataRef.current[slowId]
+        if (!F || !S) continue
+        for (let i = 1; i < F.length; i++) {
+          const f0 = F[i - 1], f1 = F[i], s0 = S[i - 1], s1 = S[i]
+          if (!f0 || !f1 || !s0 || !s1) continue
+          const d0 = f0.value - s0.value
+          const d1 = f1.value - s1.value
           if (d0 === 0 || (d0 > 0) === (d1 > 0)) continue
-          points.push({ idx: i, time: a1.time })
+          points.push({ idx: i, time: f1.time, type: d1 > 0 ? 'golden' : 'dead' })
         }
       }
     }
     points.sort((p, q) => p.idx - q.idx)
     crossPointsRef.current = points
-    applyCrossMarkers(indexRef.current, shape)
+    applyCrossMarkers(indexRef.current)
   }
 
   const toggleCross = (maId) => {
     setCrossEnabled(prev => {
       const next = { ...prev, [maId]: !prev[maId] }
-      refreshCross(next, crossShape)
+      refreshCross(next)
       return next
     })
   }
 
-  const selectCrossShape = (shape) => {
-    setCrossShape(shape)
-    refreshCross(crossEnabled, shape)
-  }
+  const setGoldenShape = (v) => { setGoldenShapeState(v); applyCrossMarkers(indexRef.current, { goldenShape: v }) }
+  const setGoldenColor = (v) => { setGoldenColorState(v); applyCrossMarkers(indexRef.current, { goldenColor: v }) }
+  const setGoldenSize = (v) => { setGoldenSizeState(v); applyCrossMarkers(indexRef.current, { goldenSize: v }) }
+  const setDeadShape = (v) => { setDeadShapeState(v); applyCrossMarkers(indexRef.current, { deadShape: v }) }
+  const setDeadColor = (v) => { setDeadColorState(v); applyCrossMarkers(indexRef.current, { deadColor: v }) }
+  const setDeadSize = (v) => { setDeadSizeState(v); applyCrossMarkers(indexRef.current, { deadSize: v }) }
 
   const play = () => {
     if (!rowsRef.current.length) return
@@ -452,6 +476,56 @@ export default function BacktestChart() {
   const navigateMonth = (delta) => {
     setViewDate(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
   }
+
+  // 골든/데드크로스 설정 행 하나를 그리는 헬퍼(둘 다 같은 구조라 중복 방지)
+  const renderCrossRow = (title, shape, setShape, color, setColor, size, setSize) => (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 4 }}>{title}</div>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+        {CROSS_SHAPES.map(s => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => setShape(s.id)}
+            title={s.id}
+            style={{
+              flex: 1, fontSize: 13, padding: '3px 0', borderRadius: 6,
+              border: `1px solid ${shape === s.id ? color : '#2a2e38'}`,
+              background: shape === s.id ? `${color}22` : 'none',
+              color: shape === s.id ? color : '#9aa0ab',
+              cursor: 'pointer',
+            }}
+          >{s.label}</button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input
+          type="color"
+          value={color}
+          onChange={e => setColor(e.target.value)}
+          title="색상변경 가능"
+          style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+        />
+        <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+          {CROSS_SIZES.map(sz => (
+            <button
+              key={sz}
+              type="button"
+              onClick={() => setSize(sz)}
+              title={`크기 ${sz}`}
+              style={{
+                flex: 1, fontSize: 10, padding: '2px 0', borderRadius: 5,
+                border: `1px solid ${size === sz ? color : '#2a2e38'}`,
+                background: size === sz ? `${color}22` : 'none',
+                color: size === sz ? color : '#5a5f6a',
+                cursor: 'pointer',
+              }}
+            >{sz}</button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <>
@@ -624,23 +698,8 @@ export default function BacktestChart() {
               </CollapsibleCard>
 
               <CollapsibleCard title="크로스" maxWidth={170}>
-                <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-                  {CROSS_SHAPES.map(s => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => selectCrossShape(s.id)}
-                      title={s.id}
-                      style={{
-                        flex: 1, fontSize: 13, padding: '4px 0', borderRadius: 6,
-                        border: `1px solid ${crossShape === s.id ? CROSS_COLOR : '#2a2e38'}`,
-                        background: crossShape === s.id ? `${CROSS_COLOR}22` : 'none',
-                        color: crossShape === s.id ? CROSS_COLOR : '#9aa0ab',
-                        cursor: 'pointer',
-                      }}
-                    >{s.label}</button>
-                  ))}
-                </div>
+                {renderCrossRow('골든크로스', goldenShape, setGoldenShape, goldenColor, setGoldenColor, goldenSize, setGoldenSize)}
+                {renderCrossRow('데드크로스', deadShape, setDeadShape, deadColor, setDeadColor, deadSize, setDeadSize)}
                 {MOVING_AVERAGES.map(ma => (
                   <label key={ma.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', padding: '1px 0' }}>
                     <input
