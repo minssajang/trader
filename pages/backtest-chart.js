@@ -590,7 +590,7 @@ export default function BacktestChart() {
                   const color = getMAColor(ma)
                   const isCustom = !!maColors[ma.id]
                   return (
-                    <div key={ma.id} style={{ padding: '3px 0' }}>
+                    <div key={ma.id} style={{ padding: '1px 0' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                         <input
                           type="checkbox"
@@ -642,7 +642,7 @@ export default function BacktestChart() {
                   ))}
                 </div>
                 {MOVING_AVERAGES.map(ma => (
-                  <label key={ma.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', padding: '2px 0' }}>
+                  <label key={ma.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', padding: '1px 0' }}>
                     <input
                       type="checkbox"
                       checked={!!crossEnabled[ma.id]}
