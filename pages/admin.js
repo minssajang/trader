@@ -13,11 +13,14 @@ import BoardAdminPanel from '../components/admin/BoardAdminPanel'
 import AdsensePanel from '../components/admin/AdsensePanel'
 import CoupangPanel from '../components/admin/CoupangPanel'
 import CoupangProductsPanel from '../components/admin/CoupangProductsPanel'
+import BacktestDataPanel from '../components/admin/BacktestDataPanel'
 import { S, MessageModal } from '../components/admin/AdminUI'
 
 const TAB_LABELS = {
   licenses: '🔑 라이선스 관리',
   versions: '📦 버전 관리',
+  backtestgold: '🥇 골드 백테스팅',
+  backtestnasdaq: '💻 나스닥 백테스팅',
   blogwrite: '✍️ 블로그글쓰기',
   blogmanage: '📝 블로그관리',
   blogmenu: '📂 블로그메뉴관리',
@@ -183,6 +186,8 @@ export default function Admin() {
           <div style={{ maxWidth: 900, margin: '0 auto' }}>
             {activeTab === 'licenses' && <LicenseAdminPanel adminToken={adminToken} showToast={showToast} />}
             {activeTab === 'versions' && <VersionAdminPanel adminToken={adminToken} showToast={showToast} />}
+            {activeTab === 'backtestgold' && <BacktestDataPanel adminToken={adminToken} showToast={showToast} symbol="GOLD" title="🥇 골드 백테스팅 데이터" />}
+            {activeTab === 'backtestnasdaq' && <BacktestDataPanel adminToken={adminToken} showToast={showToast} symbol="NASDAQ" title="💻 나스닥 백테스팅 데이터" />}
             {activeTab === 'blogwrite' && <BlogAdminPanel adminToken={adminToken} showToast={showToast} initialView="write" />}
             {activeTab === 'blogmanage' && <BlogAdminPanel adminToken={adminToken} showToast={showToast} initialView="list" />}
             {activeTab === 'blogmenu' && <BlogMenuPanel adminToken={adminToken} />}
