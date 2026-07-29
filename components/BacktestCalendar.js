@@ -1,0 +1,95 @@
+// 골드/나스닥 백테스팅 데이터의 "어느 날짜에 데이터가 있는지" 보여주는 달력.
+// 라이브 재생 페이지(backtest-chart.js)와 admin 업로드 패널(BacktestDataPanel.js)이 같이 쓴다.
+const WEEKDAY_LABEL = ['일', '월', '화', '수', '목', '금', '토']
+
+// "YYYY-MM-DD" 문자열 그대로 하루씩 이동 (로컬 타임존 기준 - candleCsv.js의 toLocalDateStr과 짝을 맞춤)
+function addDays(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() + days)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+
+// 데이터셋들의 date_from~date_to 구간을 모두 합쳐 "데이터가 있는 날짜" 집합을 만든다.
+// (실제 캔들이 없는 주말도 포함될 수 있지만, 그런 날은 선택해도 "캔들 없음"으로 자연스럽게 처리됨)
+export function buildAvailableDates(datasets) {
+  const set = new Set()
+  for (const ds of datasets) {
+    if (!ds.date_from || !ds.date_to) continue
+    let cur = ds.date_from
+    let guard = 0
+    while (cur <= ds.date_to && guard < 3660) {
+      set.add(cur)
+      cur = addDays(cur, 1)
+      guard++
+    }
+  }
+  return set
+}
+
+// 데이터가 있는 가장 최근 날짜가 속한 달을 기본으로 보여줄 때 씀
+export function latestMonth(datasets) {
+  const latest = datasets.reduce((max, r) => (r.date_to && r.date_to > max ? r.date_to : max), '')
+  if (!latest) return null
+  const [y, m] = latest.split('-').map(Number)
+  return new Date(y, m - 1, 1)
+}
+
+// onSelect를 안 넘기면 클릭 불가능한 읽기 전용 달력(admin의 "빈 날짜 확인용")으로 동작한다.
+export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDate, onSelect, maxWidth = 340 }) {
+  const year = viewDate.getFullYear()
+  const month = viewDate.getMonth()
+  const startWeekday = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+  const cells = []
+  for (let i = 0; i < startWeekday; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+
+  const navBtn = {
+    background: 'none', border: '1px solid #2a2e38', color: '#9aa0ab', borderRadius: 8,
+    width: 30, height: 30, cursor: 'pointer', fontSize: 14,
+  }
+
+  return (
+    <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, maxWidth }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <button type="button" onClick={() => onNavigate(-1)} style={navBtn}>‹</button>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{year}년 {month + 1}월</div>
+        <button type="button" onClick={() => onNavigate(1)} style={navBtn}>›</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4, fontSize: 11, color: '#9aa0ab', textAlign: 'center', marginBottom: 4 }}>
+        {WEEKDAY_LABEL.map(w => <div key={w}>{w}</div>)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
+        {cells.map((d, i) => {
+          if (d == null) return <div key={i} />
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+          const has = availableDates.has(dateStr)
+          const isSelected = dateStr === selectedDate
+          const clickable = has && !!onSelect
+          return (
+            <button
+              type="button"
+              key={i}
+              disabled={!clickable}
+              onClick={clickable ? () => onSelect(dateStr) : undefined}
+              style={{
+                padding: '8px 0', borderRadius: 6, fontSize: 12,
+                cursor: clickable ? 'pointer' : 'default',
+                border: isSelected ? '1px solid #4CAF50' : '1px solid transparent',
+                background: isSelected ? '#4CAF50' : has ? 'rgba(76,175,80,0.15)' : 'transparent',
+                color: isSelected ? '#fff' : has ? '#e8eaed' : '#3a3f4a',
+                fontWeight: has ? 700 : 400,
+              }}
+            >{d}</button>
+          )
+        })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 11, color: '#9aa0ab' }}>
+        <span style={{ width: 10, height: 10, borderRadius: 3, background: 'rgba(76,175,80,0.15)', display: 'inline-block' }} />
+        데이터 있음
+      </div>
+    </div>
+  )
+}

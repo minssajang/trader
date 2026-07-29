@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { S, ConfirmModal } from './AdminUI'
 import { publicSupabase } from '../../lib/publicSupabase'
 import { parseCandleCsv } from '../../lib/candleCsv'
+import { MonthCalendar, buildAvailableDates, latestMonth } from '../BacktestCalendar'
 
 const BUCKET = 'backtest-data'
 
@@ -11,21 +12,35 @@ export default function BacktestDataPanel({ adminToken, showToast, symbol, title
   const [dragOver, setDragOver] = useState(false)
   const [queue, setQueue] = useState([]) // [{name, status, message}]
   const [confirmTarget, setConfirmTarget] = useState(null)
+  const [viewDate, setViewDate] = useState(new Date())
   const fileInputRef = useRef(null)
+  const centeredRef = useRef(false) // 데이터 있는 달로 처음 한 번만 자동 이동시키기 위한 플래그
+
+  const availableDates = useMemo(() => buildAvailableDates(rows), [rows])
 
   const load = async () => {
     setLoading(true)
     try {
       const res = await fetch('/api/admin/backtest-datasets', { headers: { 'x-admin-token': adminToken } })
       const data = await res.json()
-      setRows((data.rows || []).filter(r => r.symbol === symbol))
+      const symbolRows = (data.rows || []).filter(r => r.symbol === symbol)
+      setRows(symbolRows)
+      if (!centeredRef.current) {
+        const m = latestMonth(symbolRows)
+        if (m) setViewDate(m)
+        centeredRef.current = true
+      }
     } catch {
       showToast?.('❌ 목록을 불러오지 못했습니다')
     }
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [symbol])
+  useEffect(() => {
+    centeredRef.current = false
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol])
 
   const setQueueItem = (name, patch) => {
     setQueue(q => q.map(item => (item.name === name ? { ...item, ...patch } : item)))
@@ -125,6 +140,10 @@ export default function BacktestDataPanel({ adminToken, showToast, symbol, title
     }
   }
 
+  const navigateMonth = (delta) => {
+    setViewDate(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
+  }
+
   return (
     <div style={S.card}>
       <div style={S.cardTitle}>{title} ({rows.length})</div>
@@ -132,24 +151,36 @@ export default function BacktestDataPanel({ adminToken, showToast, symbol, title
         시가/고가/저가/종가와 시간이 있는 1분봉 CSV 파일을 여러 개 한번에 드래그해서 놓으면 자동으로 분석해서 등록해요.
       </p>
 
-      <div
-        onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-        onClick={() => fileInputRef.current?.click()}
-        style={{
-          border: `2px dashed ${dragOver ? '#4CAF50' : '#2a2e38'}`,
-          borderRadius: 12, padding: '36px 20px', textAlign: 'center',
-          cursor: 'pointer', background: dragOver ? 'rgba(76,175,80,0.08)' : '#0f1115',
-          marginBottom: 16, transition: 'all 0.15s',
-        }}
-      >
-        <div style={{ fontSize: 32, marginBottom: 8 }}>📥</div>
-        <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 600 }}>여기에 CSV 파일을 드래그하세요 (여러 개 가능)</div>
-        <div style={{ color: '#9aa0ab', fontSize: 12, marginTop: 4 }}>또는 클릭해서 선택</div>
-        <input
-          ref={fileInputRef} type="file" accept=".csv" multiple style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = '' }}
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+          <div
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              border: `2px dashed ${dragOver ? '#4CAF50' : '#2a2e38'}`,
+              borderRadius: 12, padding: '36px 20px', textAlign: 'center',
+              cursor: 'pointer', background: dragOver ? 'rgba(76,175,80,0.08)' : '#0f1115',
+              transition: 'all 0.15s', height: '100%', boxSizing: 'border-box',
+              display: 'flex', flexDirection: 'column', justifyContent: 'center',
+            }}
+          >
+            <div style={{ fontSize: 32, marginBottom: 8 }}>📥</div>
+            <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 600 }}>여기에 CSV 파일을 드래그하세요 (여러 개 가능)</div>
+            <div style={{ color: '#9aa0ab', fontSize: 12, marginTop: 4 }}>또는 클릭해서 선택</div>
+            <input
+              ref={fileInputRef} type="file" accept=".csv" multiple style={{ display: 'none' }}
+              onChange={e => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = '' }}
+            />
+          </div>
+        </div>
+
+        <MonthCalendar
+          viewDate={viewDate}
+          onNavigate={navigateMonth}
+          availableDates={availableDates}
+          maxWidth={280}
         />
       </div>
 

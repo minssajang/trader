@@ -2,99 +2,18 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Head from 'next/head'
 import { createChart, CrosshairMode } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
+import { MonthCalendar, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr } from '../lib/candleCsv'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
 
 const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
-const WEEKDAY_LABEL = ['일', '월', '화', '수', '목', '금', '토']
 const SPEEDS = [1, 5, 20, 60]
 const TICK_MS = 200
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
-}
-
-// "YYYY-MM-DD" 문자열 그대로 하루씩 이동 (로컬 타임존 기준 - toLocalDateStr과 짝을 맞춤)
-function addDays(dateStr, days) {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  const dt = new Date(y, m - 1, d)
-  dt.setDate(dt.getDate() + days)
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
-}
-
-// 데이터셋들의 date_from~date_to 구간을 모두 합쳐 "데이터가 있는 날짜" 집합을 만든다.
-// (실제 캔들이 없는 주말도 포함될 수 있지만, 그런 날은 선택해도 "캔들 없음"으로 자연스럽게 처리됨)
-function buildAvailableDates(datasets) {
-  const set = new Set()
-  for (const ds of datasets) {
-    if (!ds.date_from || !ds.date_to) continue
-    let cur = ds.date_from
-    let guard = 0
-    while (cur <= ds.date_to && guard < 3660) {
-      set.add(cur)
-      cur = addDays(cur, 1)
-      guard++
-    }
-  }
-  return set
-}
-
-function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDate, onSelect }) {
-  const year = viewDate.getFullYear()
-  const month = viewDate.getMonth()
-  const startWeekday = new Date(year, month, 1).getDay()
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-
-  const cells = []
-  for (let i = 0; i < startWeekday; i++) cells.push(null)
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
-
-  const navBtn = {
-    background: 'none', border: '1px solid #2a2e38', color: '#9aa0ab', borderRadius: 8,
-    width: 30, height: 30, cursor: 'pointer', fontSize: 14,
-  }
-
-  return (
-    <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, maxWidth: 340 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <button onClick={() => onNavigate(-1)} style={navBtn}>‹</button>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>{year}년 {month + 1}월</div>
-        <button onClick={() => onNavigate(1)} style={navBtn}>›</button>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4, fontSize: 11, color: '#9aa0ab', textAlign: 'center', marginBottom: 4 }}>
-        {WEEKDAY_LABEL.map(w => <div key={w}>{w}</div>)}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
-        {cells.map((d, i) => {
-          if (d == null) return <div key={i} />
-          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-          const has = availableDates.has(dateStr)
-          const isSelected = dateStr === selectedDate
-          return (
-            <button
-              key={i}
-              disabled={!has}
-              onClick={() => onSelect(dateStr)}
-              style={{
-                padding: '8px 0', borderRadius: 6, fontSize: 12,
-                cursor: has ? 'pointer' : 'default',
-                border: isSelected ? '1px solid #4CAF50' : '1px solid transparent',
-                background: isSelected ? '#4CAF50' : has ? 'rgba(76,175,80,0.15)' : 'transparent',
-                color: isSelected ? '#fff' : has ? '#e8eaed' : '#3a3f4a',
-                fontWeight: has ? 700 : 400,
-              }}
-            >{d}</button>
-          )
-        })}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 11, color: '#9aa0ab' }}>
-        <span style={{ width: 10, height: 10, borderRadius: 3, background: 'rgba(76,175,80,0.15)', display: 'inline-block' }} />
-        데이터 있음
-      </div>
-    </div>
-  )
 }
 
 export default function BacktestChart() {
@@ -277,17 +196,24 @@ export default function BacktestChart() {
           <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>캔들 시뮬레이션 차트</h1>
           <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>달력에서 데이터가 있는 날짜를 골라서, 그날 시세를 순서대로 재생해볼 수 있어요.</p>
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-            {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
-              <button key={sym} onClick={() => setSymbol(sym)} style={{
-                background: symbol === sym ? '#4CAF50' : 'none', color: symbol === sym ? '#fff' : '#9aa0ab',
-                border: `1px solid ${symbol === sym ? '#4CAF50' : '#2a2e38'}`, borderRadius: 9,
-                padding: '8px 18px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-              }}>{label}</button>
-            ))}
-          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 20, alignItems: 'start' }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
+                <button key={sym} onClick={() => setSymbol(sym)} style={{
+                  flex: 1, background: symbol === sym ? '#4CAF50' : 'none', color: symbol === sym ? '#fff' : '#9aa0ab',
+                  border: `1px solid ${symbol === sym ? '#4CAF50' : '#2a2e38'}`, borderRadius: 9,
+                  padding: '8px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                }}>{label}</button>
+              ))}
+            </div>
 
-          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', minHeight: 38 }}>
+              {!selectedDate && <div style={{ color: '#9aa0ab', fontSize: 13 }}>왼쪽 달력에서 초록색으로 표시된 날짜를 눌러보세요.</div>}
+              {selectedDate && <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 700 }}>{selectedDate}</div>}
+              {error && <div style={{ color: '#F44336', fontSize: 13, marginLeft: 12 }}>❌ {error}</div>}
+              {loadingCsv && <div style={{ color: '#9aa0ab', fontSize: 13, marginLeft: 12 }}>불러오는 중...</div>}
+            </div>
+
             <MonthCalendar
               viewDate={viewDate}
               onNavigate={navigateMonth}
@@ -296,12 +222,7 @@ export default function BacktestChart() {
               onSelect={loadDate}
             />
 
-            <div style={{ flex: 1, minWidth: 280 }}>
-              {!selectedDate && <div style={{ color: '#9aa0ab', fontSize: 13, marginBottom: 12 }}>왼쪽 달력에서 초록색으로 표시된 날짜를 눌러보세요.</div>}
-              {selectedDate && <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 700, marginBottom: 12 }}>{selectedDate}</div>}
-              {error && <div style={{ color: '#F44336', fontSize: 13, marginBottom: 12 }}>❌ {error}</div>}
-              {loadingCsv && <div style={{ color: '#9aa0ab', fontSize: 13, marginBottom: 12 }}>데이터 불러오는 중...</div>}
-
+            <div>
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16 }}>
                 <div ref={containerRef} style={{ width: '100%', height: 480 }} />
               </div>
