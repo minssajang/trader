@@ -33,6 +33,8 @@ const DEFAULT_DEAD_COLOR = '#FF1744'
 // - NAS100(Cash): 계약크기 1, 틱당 가치 USD $1. 수수료/스프레드는 계산하지 않음.
 const POINT_VALUE_PER_LOT = { GOLD: 100, NASDAQ: 1 }
 const DEFAULT_STARTING_BALANCE = 10000
+// 볼린저 타임프레임(period)과 짝이 되는 H(HMA) 이평선을 찾기 위한 매핑 - "볼린저+H이평선" 조건에서 씀
+const HMA_BY_PERIOD = Object.fromEntries(MOVING_AVERAGES.filter(m => m.type === 'hma').map(m => [m.period, m.id]))
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
@@ -71,6 +73,11 @@ export default function BacktestChart() {
   const [lotSize, setLotSize] = useState(0.01)
   const [positions, setPositions] = useState([]) // { id, side:'buy'|'sell', symbol, lot, entryPrice, entryTime }
   const [pnlDisplay, setPnlDisplay] = useState('dollar') // 'dollar' | 'point'
+  // 반자동진입 - 왼쪽 "크로스" 표시(crossEnabled)와는 완전히 별개의 체크 상태
+  const [semiAutoEnabled, setSemiAutoEnabled] = useState(false)
+  const [autoCrossEnabled, setAutoCrossEnabled] = useState({})   // maId -> bool
+  const [autoDoubleBEnabled, setAutoDoubleBEnabled] = useState({}) // bollingerId -> bool
+  const [autoBollHEnabled, setAutoBollHEnabled] = useState({})   // bollingerId -> bool
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -84,6 +91,7 @@ export default function BacktestChart() {
   const maDataRef = useRef({})       // maId -> [{time,value}|null] - 선택한 날짜분, 워밍업 포함해서 계산됨
   const maSeriesRef = useRef({})     // maId -> lightweight-charts 라인 시리즈 (밴드와 달리 선 1개)
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
+  const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
@@ -102,6 +110,7 @@ export default function BacktestChart() {
     maDataRef.current = {}
     syncMA(0)
     crossPointsRef.current = []
+    autoEventsRef.current = []
     seriesRef.current?.setMarkers([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
@@ -217,6 +226,20 @@ export default function BacktestChart() {
     syncBands(to)
     syncMA(to)
     applyCrossMarkers(to)
+    // 반자동진입 - 재생(자동 진행)으로 새로 드러난 구간에서만 조건을 확인한다.
+    // 슬라이더로 수동 스크럽할 때는 안 걸리게(applyIndex가 아니라 여기서만 체크)
+    if (semiAutoEnabled) {
+      const triggered = autoEventsRef.current.filter(e => e.idx >= from && e.idx < to)
+      if (triggered.length) {
+        setPositions(prev => [
+          ...prev,
+          ...triggered.map(e => ({
+            id: `auto_${e.idx}_${e.source}_${Math.random()}`,
+            side: e.side, symbol, lot: lotSize, entryPrice: rows[e.idx].close, entryTime: rows[e.idx].time,
+          })),
+        ])
+      }
+    }
     indexRef.current = to
     setPlayIndex(to)
   }
@@ -239,6 +262,7 @@ export default function BacktestChart() {
     maDataRef.current = {}
     syncMA(0)
     crossPointsRef.current = []
+    autoEventsRef.current = []
     seriesRef.current?.setMarkers([])
     setPositions([]) // 새 날짜를 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
@@ -292,6 +316,7 @@ export default function BacktestChart() {
         }
         maDataRef.current = newMaData
         refreshCross()
+        refreshAutoEvents()
       }
 
       if (dayRows.length === 0) setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
@@ -440,8 +465,9 @@ export default function BacktestChart() {
   // 체크한 이평선들 중 기간이 짧은 쪽을 단기선, 긴 쪽을 장기선으로 보고
   // 단기선이 장기선을 아래→위로 뚫으면 골든크로스, 위→아래면 데드크로스로 분류해
   // 그날 데이터 전체에서 미리 찾아둔다 (재생 위치 필터링은 applyCrossMarkers가 담당)
-  const refreshCross = (enabledMap = crossEnabled) => {
-    const ids = MOVING_AVERAGES.map(m => m.id).filter(id => enabledMap[id])
+  // 이평선 목록(ids) 중 기간이 짧은 쪽을 단기선, 긴 쪽을 장기선으로 보고 서로 교차하는
+  // 지점을 전부 찾는다 - 왼쪽 "크로스" 표시와 반자동진입 "크로스" 조건이 둘 다 이 로직을 공유해서 쓴다.
+  const findMACrosses = (ids) => {
     const maById = Object.fromEntries(MOVING_AVERAGES.map(m => [m.id, m]))
     const points = []
     for (let a = 0; a < ids.length; a++) {
@@ -461,9 +487,108 @@ export default function BacktestChart() {
         }
       }
     }
-    points.sort((p, q) => p.idx - q.idx)
-    crossPointsRef.current = points
+    return points
+  }
+
+  const refreshCross = (enabledMap = crossEnabled) => {
+    const ids = MOVING_AVERAGES.map(m => m.id).filter(id => enabledMap[id])
+    crossPointsRef.current = findMACrosses(ids).sort((p, q) => p.idx - q.idx)
     applyCrossMarkers(indexRef.current)
+  }
+
+  // "더블비" - 체크한 볼린저 밴드들 중 두 개씩 짝지어, 두 밴드의 범위가 겹치는 구간을
+  // 그 캔들의 고가/저가가 동시에 건드렸는지 확인한다. 겹친 구간이 두 밴드 중심선 평균보다
+  // 위면 매도(과열/저항), 아래면 매수(과매도/지지) 신호로 본다.
+  const computeDoubleBTouches = (bandIds) => {
+    const rows = rowsRef.current
+    const points = []
+    for (let a = 0; a < bandIds.length; a++) {
+      for (let b = a + 1; b < bandIds.length; b++) {
+        const A = bandDataRef.current[bandIds[a]]
+        const B = bandDataRef.current[bandIds[b]]
+        if (!A || !B) continue
+        for (let i = 0; i < rows.length; i++) {
+          const au = A.upper[i], al = A.lower[i], am = A.middle[i]
+          const bu = B.upper[i], bl = B.lower[i], bm = B.middle[i]
+          if (!au || !al || !am || !bu || !bl || !bm) continue
+          const lowVal = Math.max(al.value, bl.value)
+          const highVal = Math.min(au.value, bu.value)
+          if (lowVal > highVal) continue // 두 밴드가 안 겹침
+          const candle = rows[i]
+          if (candle.low > highVal || candle.high < lowVal) continue // 캔들이 겹친 구간을 안 건드림
+          const overlapMid = (lowVal + highVal) / 2
+          const avgMid = (am.value + bm.value) / 2
+          points.push({ idx: i, time: candle.time, side: overlapMid > avgMid ? 'sell' : 'buy' })
+        }
+      }
+    }
+    return points
+  }
+
+  // "볼린저+H이평선" - 체크한 각 타임프레임에서, 종가가 같은 타임프레임의 H(HMA) 이평선을
+  // 아래로 뚫으면 매도, 위로 뚫으면 매수. (예: 5분 타임프레임 체크 시 종가 vs "5분 H" 교차 감지)
+  const computeBollHCrosses = (bollingerIds) => {
+    const rows = rowsRef.current
+    const points = []
+    for (const bid of bollingerIds) {
+      const band = BOLLINGER_BANDS.find(b => b.id === bid)
+      const hmaId = HMA_BY_PERIOD[band?.period]
+      const H = maDataRef.current[hmaId]
+      if (!H) continue
+      for (let i = 1; i < rows.length; i++) {
+        const h0 = H[i - 1], h1 = H[i]
+        if (!h0 || !h1) continue
+        const d0 = rows[i - 1].close - h0.value
+        const d1 = rows[i].close - h1.value
+        if (d0 === 0 || (d0 > 0) === (d1 > 0)) continue
+        points.push({ idx: i, time: rows[i].time, side: d1 > 0 ? 'buy' : 'sell' })
+      }
+    }
+    return points
+  }
+
+  // 반자동진입 트리거 3종을 모두 다시 계산해 하나의 타임라인으로 합친다
+  const refreshAutoEvents = (
+    crossMap = autoCrossEnabled,
+    doubleBMap = autoDoubleBEnabled,
+    bollHMap = autoBollHEnabled,
+  ) => {
+    const crossIds = MOVING_AVERAGES.map(m => m.id).filter(id => crossMap[id])
+    const crossEvents = findMACrosses(crossIds).map(p => ({
+      idx: p.idx, time: p.time, side: p.type === 'golden' ? 'buy' : 'sell', source: 'cross',
+    }))
+
+    const doubleBIds = BOLLINGER_BANDS.map(b => b.id).filter(id => doubleBMap[id])
+    const doubleBEvents = computeDoubleBTouches(doubleBIds).map(p => ({ ...p, source: 'doubleB' }))
+
+    const bollHIds = BOLLINGER_BANDS.map(b => b.id).filter(id => bollHMap[id])
+    const bollHEvents = computeBollHCrosses(bollHIds).map(p => ({ ...p, source: 'bollH' }))
+
+    autoEventsRef.current = [...crossEvents, ...doubleBEvents, ...bollHEvents].sort((a, b) => a.idx - b.idx)
+  }
+
+  const toggleAutoCross = (maId) => {
+    setAutoCrossEnabled(prev => {
+      const next = { ...prev, [maId]: !prev[maId] }
+      refreshAutoEvents(next, autoDoubleBEnabled, autoBollHEnabled)
+      return next
+    })
+  }
+
+  const toggleAutoDoubleB = (bandId) => {
+    setAutoDoubleBEnabled(prev => {
+      const next = { ...prev, [bandId]: !prev[bandId] }
+      refreshAutoEvents(autoCrossEnabled, next, autoBollHEnabled)
+      return next
+    })
+  }
+
+  const toggleAutoBollH = (bandId) => {
+    setAutoBollHEnabled(prev => {
+      const next = { ...prev, [bandId]: !prev[bandId] }
+      refreshAutoEvents(autoCrossEnabled, autoDoubleBEnabled, next)
+      return next
+    })
   }
 
   const toggleCross = (maId) => {
@@ -556,6 +681,23 @@ export default function BacktestChart() {
   }
 
   // 골든/데드크로스 설정 행 하나를 그리는 헬퍼(둘 다 같은 구조라 중복 방지)
+  // 반자동진입 조건 목록에 쓰는 칩 스타일 체크박스 (여러 개를 좁은 공간에 촘촘히 배치)
+  const renderChip = (id, label, checked, onToggle, color) => (
+    <label
+      key={id}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 9px', borderRadius: 6,
+        border: `1px solid ${checked ? color : '#2a2e38'}`,
+        background: checked ? `${color}22` : 'none',
+        color: checked ? color : '#9aa0ab',
+        cursor: 'pointer',
+      }}
+    >
+      <input type="checkbox" checked={checked} onChange={onToggle} style={{ display: 'none' }} />
+      {label}
+    </label>
+  )
+
   const renderCrossRow = (title, shape, setShape, color, setColor, size, setSize) => (
     <div style={{ marginBottom: 10 }}>
       <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 4 }}>{title}</div>
@@ -864,7 +1006,7 @@ export default function BacktestChart() {
                   )
                 })}
               </div>
-              <div style={{ fontSize: 11, color: '#5a5f6a', marginTop: 4 }}>
+              <div style={{ fontSize: 12.5, color: '#c8ccd4', marginTop: 6, fontWeight: 500 }}>
                 x1 = 1분당 캔들 1개 (실제 시세 속도). 배속은 그 배수 — x2=30초/캔들, x60=1초/캔들
               </div>
 
@@ -902,13 +1044,13 @@ export default function BacktestChart() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     <span style={{ fontSize: 12, color: '#9aa0ab' }}>랏수</span>
-                    <button type="button" onClick={() => nudgeLot(-0.01)} style={{ width: 26, height: 26, background: 'none', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', cursor: 'pointer' }}>-</button>
+                    <button type="button" onClick={() => nudgeLot(-0.01)} style={{ width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1, background: 'none', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', fontSize: 16, cursor: 'pointer' }}>−</button>
                     <input
                       type="number" step={0.01} min={0.01} value={lotSize}
                       onChange={e => setLotSize(Math.max(0.01, Number(e.target.value) || 0.01))}
                       style={{ width: 64, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '5px 6px', fontSize: 13, textAlign: 'center' }}
                     />
-                    <button type="button" onClick={() => nudgeLot(0.01)} style={{ width: 26, height: 26, background: 'none', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', cursor: 'pointer' }}>+</button>
+                    <button type="button" onClick={() => nudgeLot(0.01)} style={{ width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1, background: 'none', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', fontSize: 16, cursor: 'pointer' }}>+</button>
                   </div>
 
                   <button
@@ -957,6 +1099,44 @@ export default function BacktestChart() {
                     })}
                   </div>
                 )}
+              </div>
+
+              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
+                  <input
+                    type="checkbox" checked={semiAutoEnabled}
+                    onChange={e => setSemiAutoEnabled(e.target.checked)}
+                    style={{ width: 15, height: 15, accentColor: '#4CAF50' }}
+                  />
+                  반자동 사용하기
+                </label>
+
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
+                    조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (왼쪽 "크로스" 표시와 별개로 동작)
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {MOVING_AVERAGES.map(ma => renderChip(ma.id, ma.label, !!autoCrossEnabled[ma.id], () => toggleAutoCross(ma.id), ma.color))}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
+                    조건: 더블비 — 체크한 볼린저 2개가 겹친 구간을 캔들이 동시에 터치 (겹친 구간이 상단쪽이면 매도, 하단쪽이면 매수)
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {BOLLINGER_BANDS.map(b => renderChip(b.id, b.label, !!autoDoubleBEnabled[b.id], () => toggleAutoDoubleB(b.id), b.color))}
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
+                    조건: 볼린저+H이평선 — 같은 타임프레임에서 종가가 H이평선을 아래로 뚫으면 매도, 위로 뚫으면 매수
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {BOLLINGER_BANDS.map(b => renderChip(b.id, b.label, !!autoBollHEnabled[b.id], () => toggleAutoBollH(b.id), b.color))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
