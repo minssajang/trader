@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Head from 'next/head'
 import { createChart, CrosshairMode } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
