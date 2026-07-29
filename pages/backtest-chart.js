@@ -11,8 +11,11 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsx
 const BUCKET = 'backtest-data'
 
 const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
-const SPEEDS = [1, 5, 20, 60]
-const TICK_MS = 200
+// x1 = 실제 1분봉 그대로(캔들 1개 = 60초). 다른 배속은 전부 이 기준의 배수.
+const SPEEDS = [0.25, 0.5, 1, 5, 20, 60, 300]
+const REALTIME_MS = 60000
+const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
+const MA_WIDTHS = [1, 2, 3, 4]
 const DEFAULT_UP_COLOR = '#38BDF8'   // 상승 기본색 - 스카이블루
 const DEFAULT_DOWN_COLOR = '#FF69B4' // 하락 기본색 - 밝은 핑크
 // lightweight-charts 마커가 네이티브로 지원하는 모양만 사용(삼각형은 화살표로 표현)
@@ -46,6 +49,7 @@ export default function BacktestChart() {
   const [bandColors, setBandColors] = useState({}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
   const [enabledMA, setEnabledMA] = useState({})
   const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
+  const [maWidths, setMaWidths] = useState({}) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
   const [upColor, setUpColorState] = useState(DEFAULT_UP_COLOR)
   const [downColor, setDownColorState] = useState(DEFAULT_DOWN_COLOR)
   const [crossEnabled, setCrossEnabled] = useState({}) // maId -> 크로스 감지 대상 포함 여부
@@ -381,6 +385,23 @@ export default function BacktestChart() {
     maSeriesRef.current[ma.id]?.applyOptions({ color: ma.color })
   }
 
+  // 커스텀 굵기를 안 골랐으면 MOVING_AVERAGES에 정의된 기본 lineWidth 그대로
+  const getMAWidth = (ma) => maWidths[ma.id] || ma.lineWidth
+
+  const setMAWidth = (maId, width) => {
+    setMaWidths(prev => ({ ...prev, [maId]: width }))
+    maSeriesRef.current[maId]?.applyOptions({ lineWidth: width })
+  }
+
+  const resetMAWidth = (ma) => {
+    setMaWidths(prev => {
+      const next = { ...prev }
+      delete next[ma.id]
+      return next
+    })
+    maSeriesRef.current[ma.id]?.applyOptions({ lineWidth: ma.lineWidth })
+  }
+
   const toggleMA = (maId) => {
     const turningOn = !enabledMA[maId]
     setEnabledMA(prev => ({ ...prev, [maId]: turningOn }))
@@ -389,9 +410,10 @@ export default function BacktestChart() {
       if (!maSeriesRef.current[maId] && chartRef.current) {
         const ma = MOVING_AVERAGES.find(m => m.id === maId)
         const color = getMAColor(ma)
-        // 각 이평선마다 정의된 굵기/실선-점선 스타일 그대로
+        const width = getMAWidth(ma)
+        // 각 이평선마다 정의된(또는 커스텀) 굵기 + 실선/점선 스타일 그대로
         maSeriesRef.current[maId] = chartRef.current.addLineSeries({
-          color, lineWidth: ma.lineWidth, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
+          color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
         })
       }
       applyMAIndex(maId, indexRef.current)
@@ -454,12 +476,17 @@ export default function BacktestChart() {
 
   useEffect(() => {
     if (!playing) return
+    // 이상적인 간격(실제 1분 ÷ 배속)이 브라우저 타이머 하한보다 짧아지면,
+    // 틱 간격은 하한에 고정하고 그 틱마다 여러 캔들을 진행시켜 같은 체감 속도를 낸다.
+    const idealMs = REALTIME_MS / speed
+    const tickMs = Math.max(MIN_TICK_MS, idealMs)
+    const candlesPerTick = Math.max(1, Math.round(speed * tickMs / REALTIME_MS))
     intervalRef.current = setInterval(() => {
       const from = indexRef.current
-      const to = Math.min(from + speed, rowsRef.current.length)
+      const to = Math.min(from + candlesPerTick, rowsRef.current.length)
       applyIncrement(from, to)
       if (to >= rowsRef.current.length) stopPlayback()
-    }, TICK_MS)
+    }, tickMs)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [playing, speed, stopPlayback])
 
@@ -662,7 +689,9 @@ export default function BacktestChart() {
                 {MOVING_AVERAGES.map(ma => {
                   const on = !!enabledMA[ma.id]
                   const color = getMAColor(ma)
-                  const isCustom = !!maColors[ma.id]
+                  const isCustomColor = !!maColors[ma.id]
+                  const width = getMAWidth(ma)
+                  const isCustomWidth = !!maWidths[ma.id]
                   return (
                     <div key={ma.id} style={{ padding: '1px 0' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
@@ -682,14 +711,39 @@ export default function BacktestChart() {
                           style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
                         />
                       </label>
-                      {on && isCustom && (
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 3 }}>
-                          <button
-                            type="button"
-                            onClick={() => resetMAColor(ma)}
-                            title="기본 색상으로"
-                            style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer' }}
-                          >↺</button>
+                      {on && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3 }}>
+                          {MA_WIDTHS.map(w => (
+                            <button
+                              key={w}
+                              type="button"
+                              onClick={() => setMAWidth(ma.id, w)}
+                              title={`굵기 ${w}`}
+                              style={{
+                                fontSize: 10, padding: '2px 6px', borderRadius: 5,
+                                border: `1px solid ${width === w ? color : '#2a2e38'}`,
+                                background: width === w ? `${color}22` : 'none',
+                                color: width === w ? color : '#5a5f6a',
+                                cursor: 'pointer',
+                              }}
+                            >{w}</button>
+                          ))}
+                          {isCustomColor && (
+                            <button
+                              type="button"
+                              onClick={() => resetMAColor(ma)}
+                              title="기본 색상으로"
+                              style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer', marginLeft: 'auto' }}
+                            >색↺</button>
+                          )}
+                          {isCustomWidth && (
+                            <button
+                              type="button"
+                              onClick={() => resetMAWidth(ma)}
+                              title="기본 굵기로"
+                              style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer' }}
+                            >굵↺</button>
+                          )}
                         </div>
                       )}
                     </div>
