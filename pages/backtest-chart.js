@@ -1071,7 +1071,7 @@ export default function BacktestChart() {
   const renderPairSlots = (pairs, setPair, options, namePrefix) => (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
       {pairs.map((pair, i) => (
-        <div key={i} style={{ minWidth: 150 }}>
+        <div key={i} style={{ width: '100%' }}>
           <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 3 }}>{namePrefix}{i + 1}</div>
           <div style={{ display: 'flex', gap: 4 }}>
             <PairSelect value={pair.a} onChange={v => setPair(i, 'a', v)} options={options} />
@@ -1087,9 +1087,12 @@ export default function BacktestChart() {
   const renderBollInnerSlots = (pairs, setPair, namePrefix) => (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
       {pairs.map((pair, i) => {
+        // 라벨에 단기 쪽만 보이면 슬롯마다 장기를 다르게 골랐을 때 뭐랑 비교 중인지 안 보이는 문제가
+        // 있었다(사용자 지적) - 장기 밴드 이름도 같이 보여준다("5분B→15분B 상단눌림"식)
         const shortLabel = BOLLINGER_BANDS.find(b => b.id === pair.short)?.label || '단기'
+        const longLabel = BOLLINGER_BANDS.find(b => b.id === pair.long)?.label || '장기'
         return (
-          <div key={i} style={{ minWidth: 170 }}>
+          <div key={i} style={{ width: '100%' }}>
             <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 3 }}>{namePrefix}{i + 1}</div>
             <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
               <PairSelect value={pair.short} onChange={v => setPair(i, 'short', v)} options={BOLLINGER_BANDS} placeholder="단기-" />
@@ -1098,11 +1101,11 @@ export default function BacktestChart() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: pair.sell ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!pair.sell} onChange={() => setPair(i, 'sell', !pair.sell)} style={{ width: 12, height: 12, margin: 0, accentColor: '#ef5350', flexShrink: 0 }} />
-                {shortLabel} 상단눌림 (매도)
+                {shortLabel}→{longLabel} 상단눌림 (매도)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: pair.buy ? '#26a69a' : '#9aa0ab', cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!pair.buy} onChange={() => setPair(i, 'buy', !pair.buy)} style={{ width: 12, height: 12, margin: 0, accentColor: '#26a69a', flexShrink: 0 }} />
-                {shortLabel} 하단눌림 (매수)
+                {shortLabel}→{longLabel} 하단눌림 (매수)
               </label>
             </div>
           </div>
