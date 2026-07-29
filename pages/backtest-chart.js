@@ -12,7 +12,7 @@ const BUCKET = 'backtest-data'
 
 const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 // x1 = 실제 1분봉 그대로(캔들 1개 = 60초). 다른 배속은 전부 이 기준의 배수.
-const SPEEDS = [0.25, 0.5, 1, 5, 20, 60, 300]
+const SPEEDS = [0.25, 0.5, 1, 2, 3, 5, 20, 60, 300]
 const REALTIME_MS = 60000
 const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
 const MA_WIDTHS = [1, 2, 3, 4]
@@ -28,6 +28,11 @@ const CROSS_SHAPES = [
 const CROSS_SIZES = [1, 2, 3]
 const DEFAULT_GOLDEN_COLOR = '#00E676'
 const DEFAULT_DEAD_COLOR = '#FF1744'
+// 1랏 기준 1.00포인트 변동 시 손익(달러). 골드는 사용자가 알려준 값($100),
+// 나스닥은 MonetaMarkets 공식 사이트(monetamarkets.com/trading/products/indices)에서 직접 확인함
+// - NAS100(Cash): 계약크기 1, 틱당 가치 USD $1. 수수료/스프레드는 계산하지 않음.
+const POINT_VALUE_PER_LOT = { GOLD: 100, NASDAQ: 1 }
+const DEFAULT_STARTING_BALANCE = 10000
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
@@ -60,6 +65,12 @@ export default function BacktestChart() {
   const [deadShape, setDeadShapeState] = useState('arrowDown')
   const [deadColor, setDeadColorState] = useState(DEFAULT_DEAD_COLOR)
   const [deadSize, setDeadSizeState] = useState(1)
+  // 매매 연습 - 헤징 허용(바이/셀 동시 보유 가능), 수수료/스프레드는 계산 안 함
+  const [startingBalance, setStartingBalanceState] = useState(DEFAULT_STARTING_BALANCE)
+  const [balance, setBalance] = useState(DEFAULT_STARTING_BALANCE)
+  const [lotSize, setLotSize] = useState(0.01)
+  const [positions, setPositions] = useState([]) // { id, side:'buy'|'sell', symbol, lot, entryPrice, entryTime }
+  const [pnlDisplay, setPnlDisplay] = useState('dollar') // 'dollar' | 'point'
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -92,6 +103,7 @@ export default function BacktestChart() {
     syncMA(0)
     crossPointsRef.current = []
     seriesRef.current?.setMarkers([])
+    setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
       .then(d => {
@@ -228,6 +240,7 @@ export default function BacktestChart() {
     syncMA(0)
     crossPointsRef.current = []
     seriesRef.current?.setMarkers([])
+    setPositions([]) // 새 날짜를 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
     setPlayIndex(0)
     try {
@@ -502,6 +515,44 @@ export default function BacktestChart() {
 
   const navigateMonth = (delta) => {
     setViewDate(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
+  }
+
+  // 재생으로 지금까지 드러난 마지막 캔들 종가 - 아직 재생 안 지난 미래 가격으로 체결/청산하면 안 되니 진입가 기준은 항상 이거
+  const currentPrice = playIndex > 0 ? rowsRef.current[playIndex - 1]?.close ?? null : null
+
+  const calcPnl = (pos, price) => {
+    const pointValue = POINT_VALUE_PER_LOT[pos.symbol] || 0
+    const points = pos.side === 'buy' ? price - pos.entryPrice : pos.entryPrice - price
+    return { points, dollars: points * pos.lot * pointValue }
+  }
+
+  const openPosition = (side) => {
+    if (currentPrice == null) return
+    setPositions(prev => [...prev, {
+      id: `${Date.now()}_${Math.random()}`,
+      side, symbol, lot: lotSize, entryPrice: currentPrice,
+      entryTime: rowsRef.current[playIndex - 1].time,
+    }])
+  }
+
+  const closePosition = (id) => {
+    const pos = positions.find(p => p.id === id)
+    if (!pos) return
+    if (currentPrice != null) {
+      const { dollars } = calcPnl(pos, currentPrice)
+      setBalance(b => b + dollars)
+    }
+    setPositions(prev => prev.filter(p => p.id !== id))
+  }
+
+  const applyStartingBalance = (value) => {
+    const v = Math.max(0, Number(value) || 0)
+    setStartingBalanceState(v)
+    setBalance(v)
+  }
+
+  const nudgeLot = (delta) => {
+    setLotSize(l => Math.max(0.01, Math.round((l + delta) * 100) / 100))
   }
 
   // 골든/데드크로스 설정 행 하나를 그리는 헬퍼(둘 다 같은 구조라 중복 방지)
@@ -781,7 +832,17 @@ export default function BacktestChart() {
                 <div ref={containerRef} style={{ width: '100%', height: 640 }} />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginTop: 16 }}>
+                <span style={{ color: '#9aa0ab', fontSize: 13 }}>{playIndex.toLocaleString()} / {total.toLocaleString()}봉</span>
+              </div>
+              <input
+                type="range" min={0} max={total || 0} value={playIndex}
+                onChange={e => scrub(Number(e.target.value))}
+                disabled={!total}
+                style={{ width: '100%', marginTop: 6 }}
+              />
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
                 <button onClick={playing ? stopPlayback : play} disabled={!total} style={{
                   background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 9,
                   padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
@@ -792,22 +853,111 @@ export default function BacktestChart() {
                   padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
                 }}>⏮ 처음부터</button>
 
-                {SPEEDS.map(s => (
-                  <button key={s} onClick={() => setSpeed(s)} style={{
-                    background: speed === s ? '#2a2e38' : 'none', color: speed === s ? '#e8eaed' : '#9aa0ab',
-                    border: '1px solid #2a2e38', borderRadius: 9, padding: '8px 12px', fontSize: 13, cursor: 'pointer',
-                  }}>x{s}</button>
-                ))}
-
-                <span style={{ color: '#9aa0ab', fontSize: 13, marginLeft: 'auto' }}>{playIndex.toLocaleString()} / {total.toLocaleString()}봉</span>
+                {SPEEDS.map(s => {
+                  const secs = REALTIME_MS / s / 1000
+                  const secsLabel = secs >= 60 ? `${(secs / 60).toFixed(secs % 60 === 0 ? 0 : 1)}분` : `${secs.toFixed(secs % 1 === 0 ? 0 : 1)}초`
+                  return (
+                    <button key={s} onClick={() => setSpeed(s)} title={`캔들 1개 = ${secsLabel}`} style={{
+                      background: speed === s ? '#2a2e38' : 'none', color: speed === s ? '#e8eaed' : '#9aa0ab',
+                      border: '1px solid #2a2e38', borderRadius: 9, padding: '8px 12px', fontSize: 13, cursor: 'pointer',
+                    }}>x{s}</button>
+                  )
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: '#5a5f6a', marginTop: 4 }}>
+                x1 = 1분당 캔들 1개 (실제 시세 속도). 배속은 그 배수 — x2=30초/캔들, x60=1초/캔들
               </div>
 
-              <input
-                type="range" min={0} max={total || 0} value={playIndex}
-                onChange={e => scrub(Number(e.target.value))}
-                disabled={!total}
-                style={{ width: '100%', marginTop: 10 }}
-              />
+              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa0ab' }}>
+                    시작 자금
+                    <input
+                      type="number" min={0} value={startingBalance}
+                      onChange={e => applyStartingBalance(e.target.value)}
+                      style={{ width: 100, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '5px 8px', fontSize: 13 }}
+                    />
+                    USD
+                  </label>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>
+                    잔고: ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+                    {[['dollar', '달러'], ['point', '포인트']].map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setPnlDisplay(mode)}
+                        style={{
+                          fontSize: 12, padding: '5px 10px', borderRadius: 7,
+                          border: `1px solid ${pnlDisplay === mode ? '#4CAF50' : '#2a2e38'}`,
+                          background: pnlDisplay === mode ? 'rgba(76,175,80,0.15)' : 'none',
+                          color: pnlDisplay === mode ? '#4CAF50' : '#9aa0ab', cursor: 'pointer',
+                        }}
+                      >{label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: '#9aa0ab' }}>랏수</span>
+                    <button type="button" onClick={() => nudgeLot(-0.01)} style={{ width: 26, height: 26, background: 'none', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', cursor: 'pointer' }}>-</button>
+                    <input
+                      type="number" step={0.01} min={0.01} value={lotSize}
+                      onChange={e => setLotSize(Math.max(0.01, Number(e.target.value) || 0.01))}
+                      style={{ width: 64, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '5px 6px', fontSize: 13, textAlign: 'center' }}
+                    />
+                    <button type="button" onClick={() => nudgeLot(0.01)} style={{ width: 26, height: 26, background: 'none', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', cursor: 'pointer' }}>+</button>
+                  </div>
+
+                  <button
+                    type="button" onClick={() => openPosition('buy')} disabled={currentPrice == null}
+                    style={{
+                      background: '#26a69a', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+                      padding: '9px 22px', fontSize: 14, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
+                    }}
+                  >BUY</button>
+                  <button
+                    type="button" onClick={() => openPosition('sell')} disabled={currentPrice == null}
+                    style={{
+                      background: '#ef5350', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+                      padding: '9px 22px', fontSize: 14, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
+                    }}
+                  >SELL</button>
+
+                  <span style={{ fontSize: 11, color: '#5a5f6a' }}>
+                    {symbol === 'GOLD' ? '골드 1랏 = 1.00pt당 $100' : '나스닥 1랏 = 1.00pt당 $1'} (수수료 미반영)
+                  </span>
+                </div>
+
+                {positions.length > 0 && (
+                  <div style={{ marginTop: 12, borderTop: '1px solid #2a2e38', paddingTop: 8 }}>
+                    {positions.map(pos => {
+                      const { points, dollars } = currentPrice != null ? calcPnl(pos, currentPrice) : { points: 0, dollars: 0 }
+                      const profit = dollars >= 0
+                      return (
+                        <div key={pos.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5 }}>
+                          <span style={{ color: pos.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36 }}>
+                            {pos.side === 'buy' ? 'BUY' : 'SELL'}
+                          </span>
+                          <span style={{ color: '#9aa0ab' }}>{pos.lot.toFixed(2)}랏</span>
+                          <span style={{ color: '#9aa0ab' }}>진입 {pos.entryPrice.toFixed(2)}</span>
+                          <span style={{ color: profit ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
+                            {currentPrice == null ? '—' : pnlDisplay === 'dollar'
+                              ? `${profit ? '+' : ''}$${dollars.toFixed(2)}`
+                              : `${points >= 0 ? '+' : ''}${points.toFixed(2)}pt`}
+                          </span>
+                          <button
+                            type="button" onClick={() => closePosition(pos.id)}
+                            style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
+                          >청산</button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </main>
