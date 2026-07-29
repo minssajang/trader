@@ -1,10 +1,11 @@
+
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Head from 'next/head'
 import { createChart, CrosshairMode } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr } from '../lib/candleCsv'
-import { BOLLINGER_BANDS, rollingBollinger } from '../lib/indicators'
+import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, rollingHMA } from '../lib/indicators'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
@@ -31,6 +32,8 @@ export default function BacktestChart() {
   const [enabledBands, setEnabledBands] = useState({})
   const [lineVisibility, setLineVisibility] = useState({}) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true)
   const [bandColors, setBandColors] = useState({}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
+  const [enabledMA, setEnabledMA] = useState({})
+  const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -41,6 +44,8 @@ export default function BacktestChart() {
   const datasetCacheRef = useRef({}) // dataset.id -> 파싱된 전체 rows (CSV 재요청 방지용)
   const bandDataRef = useRef({})     // bandId -> { upper, middle, lower } - 선택한 날짜분, 워밍업 포함해서 계산됨
   const bandSeriesRef = useRef({})   // bandId -> { upper, middle, lower } lightweight-charts 라인 시리즈
+  const maDataRef = useRef({})       // maId -> [{time,value}|null] - 선택한 날짜분, 워밍업 포함해서 계산됨
+  const maSeriesRef = useRef({})     // maId -> lightweight-charts 라인 시리즈 (밴드와 달리 선 1개)
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
@@ -56,6 +61,8 @@ export default function BacktestChart() {
     seriesRef.current?.setData([])
     bandDataRef.current = {}
     syncBands(0)
+    maDataRef.current = {}
+    syncMA(0)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
       .then(d => {
@@ -119,9 +126,22 @@ export default function BacktestChart() {
     Object.keys(bandSeriesRef.current).forEach(bandId => applyBandIndex(bandId, idx))
   }
 
+  // 이평선도 볼린저와 같은 이유로 재생 위치(idx)를 앞서가면 안 된다
+  const applyMAIndex = (maId, idx) => {
+    const series = maSeriesRef.current[maId]
+    const data = maDataRef.current[maId]
+    if (!series || !data) return
+    series.setData(data.slice(0, idx).filter(Boolean))
+  }
+
+  const syncMA = (idx) => {
+    Object.keys(maSeriesRef.current).forEach(maId => applyMAIndex(maId, idx))
+  }
+
   const applyIndex = (idx) => {
     seriesRef.current?.setData(rowsRef.current.slice(0, idx))
     syncBands(idx)
+    syncMA(idx)
     indexRef.current = idx
     setPlayIndex(idx)
   }
@@ -133,6 +153,7 @@ export default function BacktestChart() {
       seriesRef.current?.update(rows[i])
     }
     syncBands(to)
+    syncMA(to)
     indexRef.current = to
     setPlayIndex(to)
   }
@@ -152,6 +173,8 @@ export default function BacktestChart() {
     seriesRef.current?.setData([])
     bandDataRef.current = {}
     syncBands(0)
+    maDataRef.current = {}
+    syncMA(0)
     indexRef.current = 0
     setPlayIndex(0)
     try {
@@ -191,6 +214,17 @@ export default function BacktestChart() {
           newBandData[band.id] = { upper, middle, lower }
         }
         bandDataRef.current = newBandData
+
+        const newMaData = {}
+        for (const ma of MOVING_AVERAGES) {
+          const hma = rollingHMA(closes, ma.period)
+          const points = []
+          for (let i = startIdx; i < endIdx; i++) {
+            points.push(hma[i] != null ? { time: fullRows[i].time, value: hma[i] } : null)
+          }
+          newMaData[ma.id] = points
+        }
+        maDataRef.current = newMaData
       }
 
       if (dayRows.length === 0) setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
@@ -247,9 +281,10 @@ export default function BacktestChart() {
         const band = BOLLINGER_BANDS.find(b => b.id === bandId)
         const color = getBandColor(band)
         bandSeriesRef.current[bandId] = {
-          upper: chartRef.current.addLineSeries({ color, lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'upper') }),
+          // 위/중심/아래 모두 실선
+          upper: chartRef.current.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'upper') }),
           middle: chartRef.current.addLineSeries({ color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'middle') }),
-          lower: chartRef.current.addLineSeries({ color, lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'lower') }),
+          lower: chartRef.current.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'lower') }),
         }
       }
       applyBandIndex(bandId, indexRef.current)
@@ -261,6 +296,44 @@ export default function BacktestChart() {
         chartRef.current.removeSeries(s.lower)
       }
       delete bandSeriesRef.current[bandId]
+    }
+  }
+
+  // 커스텀 색을 안 골랐으면 MOVING_AVERAGES에 정의된 기본색(볼린저와 동일) 그대로
+  const getMAColor = (ma) => maColors[ma.id] || ma.color
+
+  const setMAColor = (maId, color) => {
+    setMaColors(prev => ({ ...prev, [maId]: color }))
+    maSeriesRef.current[maId]?.applyOptions({ color })
+  }
+
+  const resetMAColor = (ma) => {
+    setMaColors(prev => {
+      const next = { ...prev }
+      delete next[ma.id]
+      return next
+    })
+    maSeriesRef.current[ma.id]?.applyOptions({ color: ma.color })
+  }
+
+  const toggleMA = (maId) => {
+    const turningOn = !enabledMA[maId]
+    setEnabledMA(prev => ({ ...prev, [maId]: turningOn }))
+
+    if (turningOn) {
+      if (!maSeriesRef.current[maId] && chartRef.current) {
+        const ma = MOVING_AVERAGES.find(m => m.id === maId)
+        const color = getMAColor(ma)
+        // 볼린저와 구분되게 굵은 점선
+        maSeriesRef.current[maId] = chartRef.current.addLineSeries({
+          color, lineWidth: 3, lineStyle: 2, lastValueVisible: false, priceLineVisible: false,
+        })
+      }
+      applyMAIndex(maId, indexRef.current)
+    } else {
+      const s = maSeriesRef.current[maId]
+      if (s && chartRef.current) chartRef.current.removeSeries(s)
+      delete maSeriesRef.current[maId]
     }
   }
 
@@ -337,7 +410,7 @@ export default function BacktestChart() {
                 />
               </CollapsibleCard>
 
-              <CollapsibleCard title="볼린저 / 이평선" maxWidth={170}>
+              <CollapsibleCard title="볼린저" maxWidth={170}>
                 {BOLLINGER_BANDS.map(band => {
                   const on = !!enabledBands[band.id]
                   const color = getBandColor(band)
@@ -351,12 +424,6 @@ export default function BacktestChart() {
                           onChange={() => toggleBand(band.id)}
                           style={{ width: 13, height: 13, margin: 0, accentColor: color, flexShrink: 0 }}
                         />
-                        {/* 위/중심/아래 3줄이 그려진다는 걸 보여주는 미니 아이콘 (사각형 1개 대신) */}
-                        <span style={{ display: 'flex', flexDirection: 'column', gap: 1, width: 14, flexShrink: 0 }}>
-                          <span style={{ height: 2, borderRadius: 1, background: color, opacity: 0.55 }} />
-                          <span style={{ height: 2, borderRadius: 1, background: color }} />
-                          <span style={{ height: 2, borderRadius: 1, background: color, opacity: 0.55 }} />
-                        </span>
                         <span style={{ flex: 1 }}>{band.label}</span>
                         {/* 네모를 누르면 브라우저 기본 색상선택기가 뜬다 - 기본값은 BOLLINGER_BANDS의 원래 색 */}
                         <input
@@ -364,7 +431,7 @@ export default function BacktestChart() {
                           value={color}
                           onClick={e => e.stopPropagation()}
                           onChange={e => setBandColor(band.id, e.target.value)}
-                          title="색상 바꾸기"
+                          title="색상변경 가능"
                           style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
                         />
                       </label>
@@ -397,6 +464,45 @@ export default function BacktestChart() {
                               style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer', marginLeft: 2 }}
                             >↺</button>
                           )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </CollapsibleCard>
+
+              <CollapsibleCard title="이평선" maxWidth={170}>
+                {MOVING_AVERAGES.map(ma => {
+                  const on = !!enabledMA[ma.id]
+                  const color = getMAColor(ma)
+                  const isCustom = !!maColors[ma.id]
+                  return (
+                    <div key={ma.id} style={{ padding: '3px 0' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() => toggleMA(ma.id)}
+                          style={{ width: 13, height: 13, margin: 0, accentColor: color, flexShrink: 0 }}
+                        />
+                        <span style={{ flex: 1 }}>{ma.label}</span>
+                        <input
+                          type="color"
+                          value={color}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => setMAColor(ma.id, e.target.value)}
+                          title="색상변경 가능"
+                          style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                        />
+                      </label>
+                      {on && isCustom && (
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 3 }}>
+                          <button
+                            type="button"
+                            onClick={() => resetMAColor(ma)}
+                            title="기본 색상으로"
+                            style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer' }}
+                          >↺</button>
                         </div>
                       )}
                     </div>
