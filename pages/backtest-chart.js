@@ -4,7 +4,7 @@ import Head from 'next/head'
 import { createChart, CrosshairMode } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
-import { parseCandleCsv, toLocalDateStr } from '../lib/candleCsv'
+import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
 import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, computeMA } from '../lib/indicators'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
@@ -41,8 +41,35 @@ function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
 }
 
+// lightweight-charts는 숫자 타임스탬프를 축/툴팁에 표시할 때 기본적으로 UTC로 포맷한다.
+// 반면 candleCsv.js의 toUnixSeconds/toLocalDateStr은 시간대 표기 없는 원본 문자열을
+// "브라우저 로컬시간 그대로"로 해석한다 - 이 둘의 기준이 서로 달라서, 한국시간 자정
+// 근처 캔들이 날짜 필터링(로컬)과 화면 표시(UTC)에서 서로 다른 날짜로 보이는 문제가 있었다.
+// 화면 표시도 로컬(new Date().getHours() 등)로 맞춰서 둘의 기준을 통일한다.
+function localTickMarkFormatter(time) {
+  const d = new Date(time * 1000)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  if (hh === '00' && mm === '00') {
+    const yy = String(d.getFullYear()).slice(-2)
+    return `${yy}년 ${d.getMonth() + 1}월 ${d.getDate()}일`
+  }
+  return `${hh}:${mm}`
+}
+
+function localTimeFormatter(time) {
+  const d = new Date(time * 1000)
+  const yy = String(d.getFullYear()).slice(-2)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${yy}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${hh}:${mm}`
+}
+
 export default function BacktestChart() {
   const [symbol, setSymbol] = useState('GOLD')
+  // 브로커 서머타임 여부 - 겨울엔 서버시간이 1시간 밀려서(EEST→EET) 한국시간 환산 오프셋이 6→7시간으로 바뀐다.
+  // 자동판별할 방법이 없어서 버튼으로 직접 전환하게 함(기본값: 서머타임 켜짐)
+  const [summerTime, setSummerTime] = useState(true)
   const [datasets, setDatasets] = useState([])
   const [viewDate, setViewDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState('')
@@ -182,8 +209,9 @@ export default function BacktestChart() {
       layout: { background: { color: '#0f1115' }, textColor: '#9aa0ab' },
       grid: { vertLines: { color: '#1c2028' }, horzLines: { color: '#1c2028' } },
       crosshair: { mode: CrosshairMode.Normal },
-      timeScale: { borderColor: '#2a2e38', timeVisible: true, secondsVisible: false },
+      timeScale: { borderColor: '#2a2e38', timeVisible: true, secondsVisible: false, tickMarkFormatter: localTickMarkFormatter },
       rightPriceScale: { borderColor: '#2a2e38' },
+      localization: { timeFormatter: localTimeFormatter },
     })
     const series = chart.addCandlestickSeries({
       upColor, downColor,
@@ -343,7 +371,9 @@ export default function BacktestChart() {
     setError('')
     setSelectedDate(dateStr)
 
-    const ds = datasets.find(d => d.date_from <= dateStr && dateStr <= d.date_to)
+    // symbol 전환 직후엔 datasets state가 아직 이전 심볼 목록일 수 있다(비동기 fetch가 덜 끝난 사이 클릭한 경우) -
+    // d.symbol 체크 없이 날짜 범위만 보면 그 사이에 이전 심볼(예: GOLD) 파일을 잘못 불러오는 버그가 있었다.
+    const ds = datasets.find(d => d.symbol === symbol && d.date_from <= dateStr && dateStr <= d.date_to)
     if (!ds) {
       setError('해당 날짜의 데이터를 찾을 수 없습니다')
       return
@@ -371,7 +401,7 @@ export default function BacktestChart() {
         const res = await fetch(publicUrl(ds.storage_path))
         if (!res.ok) throw new Error(`파일을 가져오지 못했습니다 (${res.status})`)
         const text = await res.text()
-        fullRows = parseCandleCsv(text).rows
+        fullRows = parseCandleCsv(text, summerTime ? BROKER_OFFSET_SECONDS.summer : BROKER_OFFSET_SECONDS.winter).rows
         datasetCacheRef.current[ds.id] = fullRows
       }
 
@@ -428,6 +458,17 @@ export default function BacktestChart() {
     }
     setLoadingCsv(false)
   }
+
+  const toggleSummerTime = () => setSummerTime(prev => !prev)
+
+  // 서머타임 상태가 바뀌면 캐시된 rows엔 예전 오프셋이 이미 반영돼 있어서 그대로 두면 안 바뀐다.
+  // 캐시를 통째로 비우고, 지금 보고 있던 날짜가 있으면 새 오프셋으로 다시 불러온다.
+  // (setSummerTime 콜백 안에서 바로 loadDate를 부르면 summerTime이 아직 안 바뀐 값이라 한 번 밀리므로 effect로 분리)
+  useEffect(() => {
+    datasetCacheRef.current = {}
+    if (selectedDate) loadDate(selectedDate)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summerTime])
 
   // 위/중심/아래 각 줄을 따로 숨길 수도 있게 - 기본은 다 보임(true)
   const isLineVisible = (bandId, which) => lineVisibility[`${bandId}:${which}`] !== false
@@ -846,6 +887,10 @@ export default function BacktestChart() {
   const play = () => {
     if (!rowsRef.current.length) return
     if (indexRef.current >= rowsRef.current.length) applyIndex(0)
+    // 재생 위치를 찾기 힘들다는 피드백 - 재생 시작할 때 차트를 지금 캔들이 보이는 오른쪽 끝으로 이동시킨다.
+    // 여기서 한 번만 옮겨두면, 그 뒤로 재생되면서 새 캔들이 추가될 때도 lightweight-charts가
+    // 오른쪽 끝에 붙어있는 상태를 기본적으로 계속 따라가 준다.
+    chartRef.current?.timeScale().scrollToPosition(0, true)
     setPlaying(true)
   }
 
@@ -933,6 +978,26 @@ export default function BacktestChart() {
       <input type="checkbox" checked={checked} onChange={onToggle} style={{ display: 'none' }} />
       {label}
     </label>
+  )
+
+  // 롱/숏 편집 대상을 탭처럼 눈에 보이게 전환하는 버튼 쌍 (더블비 신호 / 볼린저 눌림 신호가 같이 씀)
+  // - 드롭다운은 지금 뭐가 선택된 상태인지 안 보여서 헷갈린다는 피드백으로 탭 버튼으로 변경함
+  const renderSideTabs = (side, setSide) => (
+    <div style={{ display: 'flex', gap: 2 }}>
+      {[['long', '롱', '#26a69a'], ['short', '숏', '#ef5350']].map(([val, label, color]) => (
+        <button
+          key={val}
+          type="button"
+          onClick={() => setSide(val)}
+          style={{
+            fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontWeight: side === val ? 700 : 400,
+            border: `1px solid ${side === val ? color : '#2a2e38'}`,
+            background: side === val ? `${color}22` : 'none',
+            color: side === val ? color : '#9aa0ab',
+          }}
+        >{label}</button>
+      ))}
+    </div>
   )
 
   const renderCrossRow = (title, shape, setShape, color, setColor, size, setSize, extra) => (
@@ -1211,15 +1276,7 @@ export default function BacktestChart() {
                   doubleBEditSide === 'long' ? setDoubleBColorLong : setDoubleBColorShort,
                   doubleBEditSide === 'long' ? doubleBSizeLong : doubleBSizeShort,
                   doubleBEditSide === 'long' ? setDoubleBSizeLong : setDoubleBSizeShort,
-                  <select
-                    value={doubleBEditSide}
-                    onChange={e => setDoubleBEditSide(e.target.value)}
-                    title="지금 편집 중인 방향 (모양·색상·크기는 롱/숏 따로 저장됨)"
-                    style={{ fontSize: 10, background: '#0f1115', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 4px', cursor: 'pointer' }}
-                  >
-                    <option value="long">롱(매수)</option>
-                    <option value="short">숏(매도)</option>
-                  </select>
+                  renderSideTabs(doubleBEditSide, setDoubleBEditSide)
                 )}
                 {/* 시간대별로 윗선/중심/아래선을 각각 따로 켜고 끌 수 있게 - 다른 시간대 라인끼리도 짝지어 겹침을 본다 */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1257,15 +1314,7 @@ export default function BacktestChart() {
                   bollInnerEditSide === 'long' ? setBollInnerColorLong : setBollInnerColorShort,
                   bollInnerEditSide === 'long' ? bollInnerSizeLong : bollInnerSizeShort,
                   bollInnerEditSide === 'long' ? setBollInnerSizeLong : setBollInnerSizeShort,
-                  <select
-                    value={bollInnerEditSide}
-                    onChange={e => setBollInnerEditSide(e.target.value)}
-                    title="지금 편집 중인 방향 (모양·색상·크기는 롱/숏 따로 저장됨)"
-                    style={{ fontSize: 10, background: '#0f1115', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 4px', cursor: 'pointer' }}
-                  >
-                    <option value="long">롱(매수)</option>
-                    <option value="short">숏(매도)</option>
-                  </select>
+                  renderSideTabs(bollInnerEditSide, setBollInnerEditSide)
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: bollInnerSignalSellEnabled ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
@@ -1297,6 +1346,17 @@ export default function BacktestChart() {
                 {selectedDate && <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 700 }}>{selectedDate}</div>}
                 {error && <div style={{ color: '#F44336', fontSize: 13, marginLeft: 12 }}>❌ {error}</div>}
                 {loadingCsv && <div style={{ color: '#9aa0ab', fontSize: 13, marginLeft: 12 }}>불러오는 중...</div>}
+                <button
+                  type="button"
+                  onClick={toggleSummerTime}
+                  title="브로커 서버가 서머타임 중인지 전환 - 겨울엔 서버시간이 1시간 밀려서(EEST→EET) 한국시간 환산 기준이 바뀝니다"
+                  style={{
+                    marginLeft: 'auto', fontSize: 12, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700,
+                    border: `1px solid ${summerTime ? '#FF9800' : '#4FC3F7'}`,
+                    background: summerTime ? '#FF980022' : '#4FC3F722',
+                    color: summerTime ? '#FF9800' : '#4FC3F7',
+                  }}
+                >{summerTime ? '☀ 서머타임 (+6h)' : '❄ 윈터타임 (+7h)'}</button>
               </div>
 
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16 }}>
