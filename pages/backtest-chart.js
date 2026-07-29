@@ -112,8 +112,8 @@ export default function BacktestChart() {
   // 그 쌍의 겹침만 본다. 반자동/시뮬레이션의 더블비 조건(autoDoubleBPairs/simDoubleBPairs)과 슬롯 상태는
   // 따로 관리하지만, 계산 함수(computeDoubleBTouchForPair)는 공유한다.
   const [doubleBPairs, setDoubleBPairsState] = useState(EMPTY_PAIR_SLOTS)
-  // 더블비 신호 모양/색상/크기 - 매수(롱)/매도(숏) 방향별로 따로 저장하고, 드롭다운으로 지금 편집 중인 방향만 전환해서 보여준다
-  const [doubleBEditSide, setDoubleBEditSideState] = useState('long')
+  // 더블비 신호 모양/색상/크기 - 매수(롱)/매도(숏) 방향별로 따로 저장하고, 크로스 신호(골든/데드)와 같은
+  // 방식으로 롱/숏 두 행을 탭 전환 없이 항상 같이 보여준다(사용자 요청 - 통일성)
   const [doubleBShapeLong, setDoubleBShapeLongState] = useState('square')
   const [doubleBColorLong, setDoubleBColorLongState] = useState('#00BCD4')
   const [doubleBSizeLong, setDoubleBSizeLongState] = useState(1)
@@ -124,7 +124,7 @@ export default function BacktestChart() {
   // 드롭다운으로 직접 골라서(short가 long 안쪽으로 눌리면 상단눌림/하단눌림) 그 조합만 본다.
   // 반자동/시뮬레이션의 눌림 조건과 슬롯 상태는 따로 관리하지만 계산 함수(computeBollInnerTouchForPair)는 공유.
   const [bollInnerPairs, setBollInnerPairsState] = useState([DEFAULT_BOLL_INNER_PAIR, { short: '', long: '', sell: false, buy: false }, { short: '', long: '', sell: false, buy: false }])
-  const [bollInnerEditSide, setBollInnerEditSideState] = useState('long')
+  // 롱/숏 모양/색상/크기 - 더블비와 같은 이유로 탭 전환 없이 두 행을 항상 같이 보여준다
   const [bollInnerShapeLong, setBollInnerShapeLongState] = useState('circle')
   const [bollInnerColorLong, setBollInnerColorLongState] = useState('#26A69A')
   const [bollInnerSizeLong, setBollInnerSizeLongState] = useState(1)
@@ -877,7 +877,6 @@ export default function BacktestChart() {
   const setDeadShape = (v) => { setDeadShapeState(v); applyAllMarkers(indexRef.current, { deadShape: v }) }
   const setDeadColor = (v) => { setDeadColorState(v); applyAllMarkers(indexRef.current, { deadColor: v }) }
   const setDeadSize = (v) => { setDeadSizeState(v); applyAllMarkers(indexRef.current, { deadSize: v }) }
-  const setDoubleBEditSide = (v) => setDoubleBEditSideState(v)
   const setDoubleBShapeLong = (v) => { setDoubleBShapeLongState(v); applyAllMarkers(indexRef.current, { doubleBShapeLong: v }) }
   const setDoubleBColorLong = (v) => { setDoubleBColorLongState(v); applyAllMarkers(indexRef.current, { doubleBColorLong: v }) }
   const setDoubleBSizeLong = (v) => { setDoubleBSizeLongState(v); applyAllMarkers(indexRef.current, { doubleBSizeLong: v }) }
@@ -902,7 +901,6 @@ export default function BacktestChart() {
     })
   }
 
-  const setBollInnerEditSide = (v) => setBollInnerEditSideState(v)
   const setBollInnerShapeLong = (v) => { setBollInnerShapeLongState(v); applyAllMarkers(indexRef.current, { bollInnerShapeLong: v }) }
   const setBollInnerColorLong = (v) => { setBollInnerColorLongState(v); applyAllMarkers(indexRef.current, { bollInnerColorLong: v }) }
   const setBollInnerSizeLong = (v) => { setBollInnerSizeLongState(v); applyAllMarkers(indexRef.current, { bollInnerSizeLong: v }) }
@@ -1063,26 +1061,6 @@ export default function BacktestChart() {
           </div>
         )
       })}
-    </div>
-  )
-
-  // 롱/숏 편집 대상을 탭처럼 눈에 보이게 전환하는 버튼 쌍 (더블비 신호 / 볼린저 눌림 신호가 같이 씀)
-  // - 드롭다운은 지금 뭐가 선택된 상태인지 안 보여서 헷갈린다는 피드백으로 탭 버튼으로 변경함
-  const renderSideTabs = (side, setSide) => (
-    <div style={{ display: 'flex', gap: 2 }}>
-      {[['long', '롱', '#26a69a'], ['short', '숏', '#ef5350']].map(([val, label, color]) => (
-        <button
-          key={val}
-          type="button"
-          onClick={() => setSide(val)}
-          style={{
-            fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontWeight: side === val ? 700 : 400,
-            border: `1px solid ${side === val ? color : '#2a2e38'}`,
-            background: side === val ? `${color}22` : 'none',
-            color: side === val ? color : '#9aa0ab',
-          }}
-        >{label}</button>
-      ))}
     </div>
   )
 
@@ -1355,30 +1333,14 @@ export default function BacktestChart() {
               </CollapsibleCard>
 
               <CollapsibleCard title="더블비 신호" maxWidth={170}>
-                {renderCrossRow(
-                  '더블비 신호',
-                  doubleBEditSide === 'long' ? doubleBShapeLong : doubleBShapeShort,
-                  doubleBEditSide === 'long' ? setDoubleBShapeLong : setDoubleBShapeShort,
-                  doubleBEditSide === 'long' ? doubleBColorLong : doubleBColorShort,
-                  doubleBEditSide === 'long' ? setDoubleBColorLong : setDoubleBColorShort,
-                  doubleBEditSide === 'long' ? doubleBSizeLong : doubleBSizeShort,
-                  doubleBEditSide === 'long' ? setDoubleBSizeLong : setDoubleBSizeShort,
-                  renderSideTabs(doubleBEditSide, setDoubleBEditSide)
-                )}
+                {renderCrossRow('더블비 롱', doubleBShapeLong, setDoubleBShapeLong, doubleBColorLong, setDoubleBColorLong, doubleBSizeLong, setDoubleBSizeLong)}
+                {renderCrossRow('더블비 숏', doubleBShapeShort, setDoubleBShapeShort, doubleBColorShort, setDoubleBColorShort, doubleBSizeShort, setDoubleBSizeShort)}
                 {renderPairSlots(doubleBPairs, setDoubleBPair, DOUBLE_B_LINE_OPTIONS, '더블비')}
               </CollapsibleCard>
 
               <CollapsibleCard title="볼린저 눌림 신호" maxWidth={170}>
-                {renderCrossRow(
-                  '볼린저 눌림',
-                  bollInnerEditSide === 'long' ? bollInnerShapeLong : bollInnerShapeShort,
-                  bollInnerEditSide === 'long' ? setBollInnerShapeLong : setBollInnerShapeShort,
-                  bollInnerEditSide === 'long' ? bollInnerColorLong : bollInnerColorShort,
-                  bollInnerEditSide === 'long' ? setBollInnerColorLong : setBollInnerColorShort,
-                  bollInnerEditSide === 'long' ? bollInnerSizeLong : bollInnerSizeShort,
-                  bollInnerEditSide === 'long' ? setBollInnerSizeLong : setBollInnerSizeShort,
-                  renderSideTabs(bollInnerEditSide, setBollInnerEditSide)
-                )}
+                {renderCrossRow('눌림 롱', bollInnerShapeLong, setBollInnerShapeLong, bollInnerColorLong, setBollInnerColorLong, bollInnerSizeLong, setBollInnerSizeLong)}
+                {renderCrossRow('눌림 숏', bollInnerShapeShort, setBollInnerShapeShort, bollInnerColorShort, setBollInnerColorShort, bollInnerSizeShort, setBollInnerSizeShort)}
                 {renderBollInnerSlots(bollInnerPairs, setBollInnerPair, '눌림')}
               </CollapsibleCard>
             </div>
