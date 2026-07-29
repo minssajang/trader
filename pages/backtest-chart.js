@@ -4,6 +4,7 @@ import { createChart, CrosshairMode } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr } from '../lib/candleCsv'
+import { BOLLINGER_BANDS, rollingBollinger } from '../lib/indicators'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
@@ -27,6 +28,7 @@ export default function BacktestChart() {
   const [speed, setSpeed] = useState(5)
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
+  const [enabledBands, setEnabledBands] = useState({})
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -35,6 +37,8 @@ export default function BacktestChart() {
   const intervalRef = useRef(null)
   const indexRef = useRef(0)
   const datasetCacheRef = useRef({}) // dataset.id -> 파싱된 전체 rows (CSV 재요청 방지용)
+  const bandDataRef = useRef({})     // bandId -> { upper, middle, lower } - 선택한 날짜분, 워밍업 포함해서 계산됨
+  const bandSeriesRef = useRef({})   // bandId -> { upper, middle, lower } lightweight-charts 라인 시리즈
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
@@ -48,6 +52,8 @@ export default function BacktestChart() {
     setPlayIndex(0)
     setTotal(0)
     seriesRef.current?.setData([])
+    bandDataRef.current = {}
+    syncBands(0)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
       .then(d => {
@@ -96,8 +102,24 @@ export default function BacktestChart() {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
   }, [])
 
+  // 지표 라인은 봉 재생 위치(idx)를 절대 앞서가면 안 된다 - 아직 안 지난 미래 구간의
+  // 볼린저 값이 미리 보이면 "다시보기 하면서 판단 연습"이라는 이 페이지의 목적이 깨진다.
+  const applyBandIndex = (bandId, idx) => {
+    const series = bandSeriesRef.current[bandId]
+    const data = bandDataRef.current[bandId]
+    if (!series || !data) return
+    series.upper.setData(data.upper.slice(0, idx).filter(Boolean))
+    series.middle.setData(data.middle.slice(0, idx).filter(Boolean))
+    series.lower.setData(data.lower.slice(0, idx).filter(Boolean))
+  }
+
+  const syncBands = (idx) => {
+    Object.keys(bandSeriesRef.current).forEach(bandId => applyBandIndex(bandId, idx))
+  }
+
   const applyIndex = (idx) => {
     seriesRef.current?.setData(rowsRef.current.slice(0, idx))
+    syncBands(idx)
     indexRef.current = idx
     setPlayIndex(idx)
   }
@@ -108,6 +130,7 @@ export default function BacktestChart() {
     for (let i = from; i < to; i++) {
       seriesRef.current?.update(rows[i])
     }
+    syncBands(to)
     indexRef.current = to
     setPlayIndex(to)
   }
@@ -125,6 +148,8 @@ export default function BacktestChart() {
 
     setLoadingCsv(true)
     seriesRef.current?.setData([])
+    bandDataRef.current = {}
+    syncBands(0)
     indexRef.current = 0
     setPlayIndex(0)
     try {
@@ -136,9 +161,36 @@ export default function BacktestChart() {
         fullRows = parseCandleCsv(text).rows
         datasetCacheRef.current[ds.id] = fullRows
       }
-      const dayRows = fullRows.filter(r => toLocalDateStr(r.time) === dateStr)
+
+      let startIdx = fullRows.findIndex(r => toLocalDateStr(r.time) === dateStr)
+      let endIdx = startIdx
+      if (startIdx >= 0) {
+        endIdx = startIdx
+        while (endIdx < fullRows.length && toLocalDateStr(fullRows[endIdx].time) === dateStr) endIdx++
+      }
+      const dayRows = startIdx >= 0 ? fullRows.slice(startIdx, endIdx) : []
       rowsRef.current = dayRows
       setTotal(dayRows.length)
+
+      // 볼린저는 그날 데이터만으론 워밍업이 부족하니(예: 1시간봉 SMA1200 = 20시간 분량)
+      // 같은 파일 안의 이전 날짜들까지 포함해서 계산한 뒤, 표시 구간만 그날로 잘라낸다.
+      if (dayRows.length > 0) {
+        const closes = fullRows.map(r => r.close)
+        const newBandData = {}
+        for (const band of BOLLINGER_BANDS) {
+          const { mids, ups, lows } = rollingBollinger(closes, band.period)
+          const upper = [], middle = [], lower = []
+          for (let i = startIdx; i < endIdx; i++) {
+            const t = fullRows[i].time
+            upper.push(ups[i] != null ? { time: t, value: ups[i] } : null)
+            middle.push(mids[i] != null ? { time: t, value: mids[i] } : null)
+            lower.push(lows[i] != null ? { time: t, value: lows[i] } : null)
+          }
+          newBandData[band.id] = { upper, middle, lower }
+        }
+        bandDataRef.current = newBandData
+      }
+
       if (dayRows.length === 0) setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
     } catch (e) {
       setError(e.message)
@@ -146,6 +198,31 @@ export default function BacktestChart() {
       setTotal(0)
     }
     setLoadingCsv(false)
+  }
+
+  const toggleBand = (bandId) => {
+    const turningOn = !enabledBands[bandId]
+    setEnabledBands(prev => ({ ...prev, [bandId]: turningOn }))
+
+    if (turningOn) {
+      if (!bandSeriesRef.current[bandId] && chartRef.current) {
+        const band = BOLLINGER_BANDS.find(b => b.id === bandId)
+        bandSeriesRef.current[bandId] = {
+          upper: chartRef.current.addLineSeries({ color: band.color, lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false }),
+          middle: chartRef.current.addLineSeries({ color: band.color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }),
+          lower: chartRef.current.addLineSeries({ color: band.color, lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false }),
+        }
+      }
+      applyBandIndex(bandId, indexRef.current)
+    } else {
+      const s = bandSeriesRef.current[bandId]
+      if (s && chartRef.current) {
+        chartRef.current.removeSeries(s.upper)
+        chartRef.current.removeSeries(s.middle)
+        chartRef.current.removeSeries(s.lower)
+      }
+      delete bandSeriesRef.current[bandId]
+    }
   }
 
   const play = () => {
@@ -255,6 +332,22 @@ export default function BacktestChart() {
                 disabled={!total}
                 style={{ width: '100%', marginTop: 10 }}
               />
+            </div>
+
+            <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 12, maxWidth: 170 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#9aa0ab', marginBottom: 8 }}>볼린저 / 이평선</div>
+              {BOLLINGER_BANDS.map(band => (
+                <label key={band.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!enabledBands[band.id]}
+                    onChange={() => toggleBand(band.id)}
+                    style={{ width: 13, height: 13, margin: 0, accentColor: band.color, flexShrink: 0 }}
+                  />
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: band.color, display: 'inline-block', flexShrink: 0 }} />
+                  <span>{band.label}</span>
+                </label>
+              ))}
             </div>
           </div>
         </main>
