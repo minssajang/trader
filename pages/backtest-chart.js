@@ -69,6 +69,67 @@ function localTimeFormatter(time) {
   return `${yy}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${hh}:${mm}`
 }
 
+// 크로스/더블비/눌림 슬롯에서 쓰는 커스텀 드롭다운 - 네이티브 <select>는 옵션 목록 팝업 너비를
+// 브라우저가 내용 길이에 맞춰 자기 마음대로 정해서(CSS로 못 줄임), 좁은 170px 카드 밖으로
+// 옵션 목록이 튀어나오는 문제가 있었다(라벨을 줄여도 여전히 브라우저 재량이라 근본 해결이 안 됨).
+// 그래서 직접 그리는 팝업으로 바꿔서 너비를 완전히 우리가 통제한다(트리거 버튼과 같은 너비, 넘치면 줄임표).
+function PairSelect({ value, onChange, options, placeholder = '-' }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  const selected = options.find(o => o.id === value)
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', textAlign: 'left', background: '#0f1115', color: value ? '#e8eaed' : '#5a5f6a',
+          border: `1px solid ${open ? '#4CAF50' : '#2a2e38'}`, borderRadius: 6, fontSize: 11, padding: '3px 6px',
+          cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2,
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected ? selected.label : placeholder}</span>
+        <span style={{ fontSize: 9, flexShrink: 0, color: '#5a5f6a' }}>▾</span>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: '100%', left: 0, zIndex: 30, marginTop: 2,
+            width: 'max-content', minWidth: '100%', maxWidth: 160, maxHeight: 190, overflowY: 'auto',
+            background: '#171a21', border: '1px solid #2a2e38', borderRadius: 6,
+            boxShadow: '0 6px 16px rgba(0,0,0,0.45)',
+          }}
+        >
+          <div
+            onClick={() => { onChange(''); setOpen(false) }}
+            style={{ padding: '5px 8px', fontSize: 11, color: '#5a5f6a', cursor: 'pointer' }}
+          >{placeholder}</div>
+          {options.map(o => (
+            <div
+              key={o.id}
+              onClick={() => { onChange(o.id); setOpen(false) }}
+              style={{
+                padding: '5px 8px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+                color: o.id === value ? '#4CAF50' : '#e8eaed',
+                background: o.id === value ? 'rgba(76,175,80,0.12)' : 'none',
+              }}
+            >{o.label}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function BacktestChart() {
   const [symbol, setSymbol] = useState('NASDAQ')
   // 브로커 서머타임 여부 - 겨울엔 서버시간이 1시간 밀려서(EEST→EET) 한국시간 환산 오프셋이 6→7시간으로 바뀐다.
@@ -1005,8 +1066,6 @@ export default function BacktestChart() {
     setLotSize(l => Math.max(0.01, Math.round((l + delta) * 100) / 100))
   }
 
-  const pairSelectStyle = { flex: 1, minWidth: 80, background: '#0f1115', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 6, fontSize: 11, padding: '3px 4px' }
-
   // 크로스/더블비 슬롯 공용 - 슬롯 3개(namePrefix+1/2/3), 슬롯마다 옵션 목록(options: [{id,label}])에서
   // 드롭다운 2개로 정확히 한 쌍만 고른다. 왼쪽 표시/반자동/시뮬레이션이 전부 이 헬퍼를 공유한다.
   const renderPairSlots = (pairs, setPair, options, namePrefix) => (
@@ -1015,14 +1074,8 @@ export default function BacktestChart() {
         <div key={i} style={{ minWidth: 150 }}>
           <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 3 }}>{namePrefix}{i + 1}</div>
           <div style={{ display: 'flex', gap: 4 }}>
-            <select value={pair.a} onChange={e => setPair(i, 'a', e.target.value)} style={pairSelectStyle}>
-              <option value="">-</option>
-              {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
-            <select value={pair.b} onChange={e => setPair(i, 'b', e.target.value)} style={pairSelectStyle}>
-              <option value="">-</option>
-              {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
+            <PairSelect value={pair.a} onChange={v => setPair(i, 'a', v)} options={options} />
+            <PairSelect value={pair.b} onChange={v => setPair(i, 'b', v)} options={options} />
           </div>
         </div>
       ))}
@@ -1039,14 +1092,8 @@ export default function BacktestChart() {
           <div key={i} style={{ minWidth: 170 }}>
             <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 3 }}>{namePrefix}{i + 1}</div>
             <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-              <select value={pair.short} onChange={e => setPair(i, 'short', e.target.value)} style={pairSelectStyle}>
-                <option value="">단기-</option>
-                {BOLLINGER_BANDS.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
-              </select>
-              <select value={pair.long} onChange={e => setPair(i, 'long', e.target.value)} style={pairSelectStyle}>
-                <option value="">장기-</option>
-                {BOLLINGER_BANDS.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
-              </select>
+              <PairSelect value={pair.short} onChange={v => setPair(i, 'short', v)} options={BOLLINGER_BANDS} placeholder="단기-" />
+              <PairSelect value={pair.long} onChange={v => setPair(i, 'long', v)} options={BOLLINGER_BANDS} placeholder="장기-" />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: pair.sell ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
