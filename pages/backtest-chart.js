@@ -13,6 +13,8 @@ const BUCKET = 'backtest-data'
 const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 const SPEEDS = [1, 5, 20, 60]
 const TICK_MS = 200
+const DEFAULT_UP_COLOR = '#38BDF8'   // 상승 기본색 - 스카이블루
+const DEFAULT_DOWN_COLOR = '#9D174D' // 하락 기본색 - 자주색
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
@@ -34,6 +36,8 @@ export default function BacktestChart() {
   const [bandColors, setBandColors] = useState({}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
   const [enabledMA, setEnabledMA] = useState({})
   const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
+  const [upColor, setUpColorState] = useState(DEFAULT_UP_COLOR)
+  const [downColor, setDownColorState] = useState(DEFAULT_DOWN_COLOR)
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -83,7 +87,7 @@ export default function BacktestChart() {
     if (!containerRef.current) return
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 480,
+      height: 640,
       layout: { background: { color: '#0f1115' }, textColor: '#9aa0ab' },
       grid: { vertLines: { color: '#1c2028' }, horzLines: { color: '#1c2028' } },
       crosshair: { mode: CrosshairMode.Normal },
@@ -91,9 +95,9 @@ export default function BacktestChart() {
       rightPriceScale: { borderColor: '#2a2e38' },
     })
     const series = chart.addCandlestickSeries({
-      upColor: '#26a69a', downColor: '#ef5350',
-      borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-      wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+      upColor, downColor,
+      borderUpColor: upColor, borderDownColor: downColor,
+      wickUpColor: upColor, wickDownColor: downColor,
     })
     chartRef.current = chart
     seriesRef.current = series
@@ -245,6 +249,21 @@ export default function BacktestChart() {
     bandSeriesRef.current[bandId]?.[which].applyOptions({ visible: nextVisible })
   }
 
+  const setUpColor = (color) => {
+    setUpColorState(color)
+    seriesRef.current?.applyOptions({ upColor: color, borderUpColor: color, wickUpColor: color })
+  }
+
+  const setDownColor = (color) => {
+    setDownColorState(color)
+    seriesRef.current?.applyOptions({ downColor: color, borderDownColor: color, wickDownColor: color })
+  }
+
+  const resetCandleColors = () => {
+    setUpColor(DEFAULT_UP_COLOR)
+    setDownColor(DEFAULT_DOWN_COLOR)
+  }
+
   // 커스텀 색을 안 골랐으면 BOLLINGER_BANDS에 정의된 기본색 그대로
   const getBandColor = (band) => bandColors[band.id] || band.color
 
@@ -381,7 +400,7 @@ export default function BacktestChart() {
           <BrandLogo label="백테스팅" />
         </header>
 
-        <main style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 20px 60px' }}>
+        <main style={{ maxWidth: 1500, margin: '0 auto', padding: '28px 20px 60px' }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>캔들 시뮬레이션 차트</h1>
           <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>달력에서 데이터가 있는 날짜를 골라서, 그날 시세를 순서대로 재생해볼 수 있어요.</p>
 
@@ -396,6 +415,34 @@ export default function BacktestChart() {
                     padding: '8px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer',
                   }}>{label}</button>
                 ))}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#9aa0ab' }}>
+                <span style={{ flex: 1 }}>캔들 색상</span>
+                <label title="상승 색상 변경 가능" style={{ display: 'flex', cursor: 'pointer' }}>
+                  <input
+                    type="color"
+                    value={upColor}
+                    onChange={e => setUpColor(e.target.value)}
+                    style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                  />
+                </label>
+                <label title="하락 색상 변경 가능" style={{ display: 'flex', cursor: 'pointer' }}>
+                  <input
+                    type="color"
+                    value={downColor}
+                    onChange={e => setDownColor(e.target.value)}
+                    style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                  />
+                </label>
+                {(upColor !== DEFAULT_UP_COLOR || downColor !== DEFAULT_DOWN_COLOR) && (
+                  <button
+                    type="button"
+                    onClick={resetCandleColors}
+                    title="기본 색상으로"
+                    style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer' }}
+                  >↺</button>
+                )}
               </div>
 
               <CollapsibleCard title="달력" maxWidth={170}>
@@ -521,7 +568,7 @@ export default function BacktestChart() {
               </div>
 
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16 }}>
-                <div ref={containerRef} style={{ width: '100%', height: 480 }} />
+                <div ref={containerRef} style={{ width: '100%', height: 640 }} />
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
