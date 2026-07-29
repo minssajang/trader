@@ -80,6 +80,17 @@ export default function BacktestChart() {
   const [doubleBShapeShort, setDoubleBShapeShortState] = useState('square')
   const [doubleBColorShort, setDoubleBColorShortState] = useState('#FF6D00')
   const [doubleBSizeShort, setDoubleBSizeShortState] = useState(1)
+  // 볼린저 눌림 신호(왼쪽 표시용, 5분↔15분 고정) - 반자동/시뮬레이션의 볼린저 눌림 조건과 켜고 끄는 체크는
+  // 따로 관리하지만 계산 함수(computeBollInnerTouches)는 공유한다. 모양/색상/크기는 더블비처럼 매수(롱)/매도(숏) 방향별로 따로 저장
+  const [bollInnerSignalSellEnabled, setBollInnerSignalSellEnabled] = useState(false) // 5분 상단선이 15분 상단선 안(아래)
+  const [bollInnerSignalBuyEnabled, setBollInnerSignalBuyEnabled] = useState(false)   // 5분 하단선이 15분 하단선 안(위)
+  const [bollInnerEditSide, setBollInnerEditSideState] = useState('long')
+  const [bollInnerShapeLong, setBollInnerShapeLongState] = useState('circle')
+  const [bollInnerColorLong, setBollInnerColorLongState] = useState('#26A69A')
+  const [bollInnerSizeLong, setBollInnerSizeLongState] = useState(1)
+  const [bollInnerShapeShort, setBollInnerShapeShortState] = useState('circle')
+  const [bollInnerColorShort, setBollInnerColorShortState] = useState('#EF5350')
+  const [bollInnerSizeShort, setBollInnerSizeShortState] = useState(1)
   // 매매 연습 - 헤징 허용(바이/셀 동시 보유 가능), 수수료/스프레드는 계산 안 함
   const [startingBalance, setStartingBalanceState] = useState(DEFAULT_STARTING_BALANCE)
   const [balance, setBalance] = useState(DEFAULT_STARTING_BALANCE)
@@ -97,6 +108,14 @@ export default function BacktestChart() {
   const [autoBollInnerSellEnabled, setAutoBollInnerSellEnabled] = useState(false) // 5분 상단선이 15분 상단선 안(아래)일 때 매도
   const [autoBollInnerBuyEnabled, setAutoBollInnerBuyEnabled] = useState(false)   // 5분 하단선이 15분 하단선 안(위)일 때 매수
 
+  // 시뮬레이션 - 반자동과 조건 구성은 완전히 동일하되, 켜고 끄는 체크 상태와 트리거 타임라인은 독립적이라
+  // 반자동과 시뮬레이션을 동시에 켜두고 서로 다른 조건 조합을 비교해볼 수 있다
+  const [simulationEnabled, setSimulationEnabled] = useState(false)
+  const [simCrossEnabled, setSimCrossEnabled] = useState({})
+  const [simDoubleBEnabled, setSimDoubleBEnabled] = useState({})
+  const [simBollInnerSellEnabled, setSimBollInnerSellEnabled] = useState(false)
+  const [simBollInnerBuyEnabled, setSimBollInnerBuyEnabled] = useState(false)
+
   const containerRef = useRef(null)
   const chartRef = useRef(null)
   const seriesRef = useRef(null)
@@ -111,7 +130,9 @@ export default function BacktestChart() {
   const maSeriesRef = useRef({})     // maId -> lightweight-charts 라인 시리즈 (밴드와 달리 선 1개)
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
+  const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
   const doubleBSignalPointsRef = useRef([]) // 더블비 신호(표시용) 전체 [{idx, time, side}]
+  const bollInnerSignalPointsRef = useRef([]) // 볼린저 눌림 신호(표시용) 전체 [{idx, time, side}]
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
@@ -132,7 +153,9 @@ export default function BacktestChart() {
     syncMA(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
+    simEventsRef.current = []
     doubleBSignalPointsRef.current = []
+    bollInnerSignalPointsRef.current = []
     markerSeriesRef.current?.setMarkers([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
@@ -233,6 +256,12 @@ export default function BacktestChart() {
     const bShapeShort = overrides.doubleBShapeShort ?? doubleBShapeShort
     const bColorShort = overrides.doubleBColorShort ?? doubleBColorShort
     const bSizeShort = overrides.doubleBSizeShort ?? doubleBSizeShort
+    const iShapeLong = overrides.bollInnerShapeLong ?? bollInnerShapeLong
+    const iColorLong = overrides.bollInnerColorLong ?? bollInnerColorLong
+    const iSizeLong = overrides.bollInnerSizeLong ?? bollInnerSizeLong
+    const iShapeShort = overrides.bollInnerShapeShort ?? bollInnerShapeShort
+    const iColorShort = overrides.bollInnerColorShort ?? bollInnerColorShort
+    const iSizeShort = overrides.bollInnerSizeShort ?? bollInnerSizeShort
 
     const crossMarkers = crossPointsRef.current
       .filter(p => p.idx < idx)
@@ -247,7 +276,14 @@ export default function BacktestChart() {
         ? { time: p.time, position: 'inBar', color: bColorLong, shape: bShapeLong, size: bSizeLong, text: '' }
         : { time: p.time, position: 'inBar', color: bColorShort, shape: bShapeShort, size: bSizeShort, text: '' })
 
-    markerSeriesRef.current.setMarkers([...crossMarkers, ...doubleBMarkers].sort((a, b) => a.time - b.time))
+    // 볼린저 눌림 신호도 더블비와 같은 방식 - 매수(롱)/매도(숏) 방향별로 다른 모양·색상·크기
+    const bollInnerMarkers = bollInnerSignalPointsRef.current
+      .filter(p => p.idx < idx)
+      .map(p => p.side === 'buy'
+        ? { time: p.time, position: 'inBar', color: iColorLong, shape: iShapeLong, size: iSizeLong, text: '' }
+        : { time: p.time, position: 'inBar', color: iColorShort, shape: iShapeShort, size: iSizeShort, text: '' })
+
+    markerSeriesRef.current.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers].sort((a, b) => a.time - b.time))
   }
 
   const applyIndex = (idx) => {
@@ -285,6 +321,19 @@ export default function BacktestChart() {
         ])
       }
     }
+    // 시뮬레이션 - 반자동과 같은 방식으로, 켜져 있을 때만 새로 드러난 구간의 트리거를 확인해 진입한다
+    if (simulationEnabled) {
+      const triggered = simEventsRef.current.filter(e => e.idx >= from && e.idx < to)
+      if (triggered.length) {
+        setPositions(prev => [
+          ...prev,
+          ...triggered.map(e => ({
+            id: `sim_${e.idx}_${e.source}_${Math.random()}`,
+            side: e.side, symbol, lot: lotSize, entryPrice: rows[e.idx].close, entryTime: rows[e.idx].time,
+          })),
+        ])
+      }
+    }
     indexRef.current = to
     setPlayIndex(to)
   }
@@ -309,7 +358,9 @@ export default function BacktestChart() {
     syncMA(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
+    simEventsRef.current = []
     doubleBSignalPointsRef.current = []
+    bollInnerSignalPointsRef.current = []
     markerSeriesRef.current?.setMarkers([])
     setPositions([]) // 새 날짜를 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
@@ -364,7 +415,9 @@ export default function BacktestChart() {
         maDataRef.current = newMaData
         refreshCross()
         refreshDoubleBSignal()
+        refreshBollInnerSignal()
         refreshAutoEvents()
+        refreshSimEvents()
       }
 
       if (dayRows.length === 0) setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
@@ -668,6 +721,60 @@ export default function BacktestChart() {
     })
   }
 
+  // 시뮬레이션 트리거 3종 - 반자동(refreshAutoEvents)과 완전히 같은 계산이지만 별도 타임라인(simEventsRef)에 쌓는다
+  const refreshSimEvents = (
+    crossMap = simCrossEnabled,
+    doubleBMap = simDoubleBEnabled,
+    bollInnerSell = simBollInnerSellEnabled,
+    bollInnerBuy = simBollInnerBuyEnabled,
+  ) => {
+    const crossIds = MOVING_AVERAGES.map(m => m.id).filter(id => crossMap[id])
+    const crossEvents = findMACrosses(crossIds).map(p => ({
+      idx: p.idx, time: p.time, side: p.type === 'golden' ? 'buy' : 'sell', source: 'cross',
+    }))
+
+    const doubleBIds = Object.keys(doubleBMap).filter(k => doubleBMap[k])
+    const doubleBEvents = computeDoubleBLineTouches(doubleBIds).map(p => ({ ...p, source: 'doubleB' }))
+
+    const bollInnerEvents = computeBollInnerTouches()
+      .filter(p => (p.side === 'sell' && bollInnerSell) || (p.side === 'buy' && bollInnerBuy))
+      .map(p => ({ ...p, source: 'bollInner' }))
+
+    simEventsRef.current = [...crossEvents, ...doubleBEvents, ...bollInnerEvents].sort((a, b) => a.idx - b.idx)
+  }
+
+  const toggleSimCross = (maId) => {
+    setSimCrossEnabled(prev => {
+      const next = { ...prev, [maId]: !prev[maId] }
+      refreshSimEvents(next, simDoubleBEnabled, simBollInnerSellEnabled, simBollInnerBuyEnabled)
+      return next
+    })
+  }
+
+  const toggleSimDoubleB = (lineKey) => {
+    setSimDoubleBEnabled(prev => {
+      const next = { ...prev, [lineKey]: !prev[lineKey] }
+      refreshSimEvents(simCrossEnabled, next, simBollInnerSellEnabled, simBollInnerBuyEnabled)
+      return next
+    })
+  }
+
+  const toggleSimBollInnerSell = () => {
+    setSimBollInnerSellEnabled(prev => {
+      const next = !prev
+      refreshSimEvents(simCrossEnabled, simDoubleBEnabled, next, simBollInnerBuyEnabled)
+      return next
+    })
+  }
+
+  const toggleSimBollInnerBuy = () => {
+    setSimBollInnerBuyEnabled(prev => {
+      const next = !prev
+      refreshSimEvents(simCrossEnabled, simDoubleBEnabled, simBollInnerSellEnabled, next)
+      return next
+    })
+  }
+
   const toggleCross = (maId) => {
     setCrossEnabled(prev => {
       const next = { ...prev, [maId]: !prev[maId] }
@@ -700,6 +807,38 @@ export default function BacktestChart() {
     setDoubleBSignalEnabled(prev => {
       const next = { ...prev, [lineKey]: !prev[lineKey] }
       refreshDoubleBSignal(next)
+      return next
+    })
+  }
+
+  const setBollInnerEditSide = (v) => setBollInnerEditSideState(v)
+  const setBollInnerShapeLong = (v) => { setBollInnerShapeLongState(v); applyAllMarkers(indexRef.current, { bollInnerShapeLong: v }) }
+  const setBollInnerColorLong = (v) => { setBollInnerColorLongState(v); applyAllMarkers(indexRef.current, { bollInnerColorLong: v }) }
+  const setBollInnerSizeLong = (v) => { setBollInnerSizeLongState(v); applyAllMarkers(indexRef.current, { bollInnerSizeLong: v }) }
+  const setBollInnerShapeShort = (v) => { setBollInnerShapeShortState(v); applyAllMarkers(indexRef.current, { bollInnerShapeShort: v }) }
+  const setBollInnerColorShort = (v) => { setBollInnerColorShortState(v); applyAllMarkers(indexRef.current, { bollInnerColorShort: v }) }
+  const setBollInnerSizeShort = (v) => { setBollInnerSizeShortState(v); applyAllMarkers(indexRef.current, { bollInnerSizeShort: v }) }
+
+  // 볼린저 눌림 신호(왼쪽 표시용) - computeBollInnerTouches()는 반자동/시뮬레이션과 공유, 매도/매수 표시만 따로 켜고 끈다
+  const refreshBollInnerSignal = (sellEnabled = bollInnerSignalSellEnabled, buyEnabled = bollInnerSignalBuyEnabled) => {
+    bollInnerSignalPointsRef.current = computeBollInnerTouches()
+      .filter(p => (p.side === 'sell' && sellEnabled) || (p.side === 'buy' && buyEnabled))
+      .sort((p, q) => p.idx - q.idx)
+    applyAllMarkers(indexRef.current)
+  }
+
+  const toggleBollInnerSignalSell = () => {
+    setBollInnerSignalSellEnabled(prev => {
+      const next = !prev
+      refreshBollInnerSignal(next, bollInnerSignalBuyEnabled)
+      return next
+    })
+  }
+
+  const toggleBollInnerSignalBuy = () => {
+    setBollInnerSignalBuyEnabled(prev => {
+      const next = !prev
+      refreshBollInnerSignal(bollInnerSignalSellEnabled, next)
       return next
     })
   }
@@ -1061,51 +1200,92 @@ export default function BacktestChart() {
                     </label>
                   ))}
                 </div>
+              </CollapsibleCard>
 
-                <div style={{ borderTop: '1px solid #2a2e38', marginTop: 10, paddingTop: 10 }}>
-                  {renderCrossRow(
-                    '더블비 신호',
-                    doubleBEditSide === 'long' ? doubleBShapeLong : doubleBShapeShort,
-                    doubleBEditSide === 'long' ? setDoubleBShapeLong : setDoubleBShapeShort,
-                    doubleBEditSide === 'long' ? doubleBColorLong : doubleBColorShort,
-                    doubleBEditSide === 'long' ? setDoubleBColorLong : setDoubleBColorShort,
-                    doubleBEditSide === 'long' ? doubleBSizeLong : doubleBSizeShort,
-                    doubleBEditSide === 'long' ? setDoubleBSizeLong : setDoubleBSizeShort,
-                    <select
-                      value={doubleBEditSide}
-                      onChange={e => setDoubleBEditSide(e.target.value)}
-                      title="지금 편집 중인 방향 (모양·색상·크기는 롱/숏 따로 저장됨)"
-                      style={{ fontSize: 10, background: '#0f1115', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 4px', cursor: 'pointer' }}
-                    >
-                      <option value="long">롱(매수)</option>
-                      <option value="short">숏(매도)</option>
-                    </select>
-                  )}
-                  {/* 시간대별로 윗선/중심/아래선을 각각 따로 켜고 끌 수 있게 - 다른 시간대 라인끼리도 짝지어 겹침을 본다 */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {BOLLINGER_BANDS.map(b => (
-                      <div key={b.id}>
-                        <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.label}</div>
-                        <div style={{ display: 'flex', gap: 10, marginLeft: 2 }}>
-                          {[['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
-                            const lineKey = `${b.id}:${which}`
-                            const on = !!doubleBSignalEnabled[lineKey]
-                            return (
-                              <label key={which} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: on ? b.color : '#9aa0ab', cursor: 'pointer' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={on}
-                                  onChange={() => toggleDoubleBSignal(lineKey)}
-                                  style={{ width: 12, height: 12, margin: 0, accentColor: b.color, flexShrink: 0 }}
-                                />
-                                {wlabel}
-                              </label>
-                            )
-                          })}
-                        </div>
+              <CollapsibleCard title="더블비 신호" maxWidth={170}>
+                {renderCrossRow(
+                  '더블비 신호',
+                  doubleBEditSide === 'long' ? doubleBShapeLong : doubleBShapeShort,
+                  doubleBEditSide === 'long' ? setDoubleBShapeLong : setDoubleBShapeShort,
+                  doubleBEditSide === 'long' ? doubleBColorLong : doubleBColorShort,
+                  doubleBEditSide === 'long' ? setDoubleBColorLong : setDoubleBColorShort,
+                  doubleBEditSide === 'long' ? doubleBSizeLong : doubleBSizeShort,
+                  doubleBEditSide === 'long' ? setDoubleBSizeLong : setDoubleBSizeShort,
+                  <select
+                    value={doubleBEditSide}
+                    onChange={e => setDoubleBEditSide(e.target.value)}
+                    title="지금 편집 중인 방향 (모양·색상·크기는 롱/숏 따로 저장됨)"
+                    style={{ fontSize: 10, background: '#0f1115', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 4px', cursor: 'pointer' }}
+                  >
+                    <option value="long">롱(매수)</option>
+                    <option value="short">숏(매도)</option>
+                  </select>
+                )}
+                {/* 시간대별로 윗선/중심/아래선을 각각 따로 켜고 끌 수 있게 - 다른 시간대 라인끼리도 짝지어 겹침을 본다 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {BOLLINGER_BANDS.map(b => (
+                    <div key={b.id}>
+                      <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.label}</div>
+                      <div style={{ display: 'flex', gap: 10, marginLeft: 2 }}>
+                        {[['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
+                          const lineKey = `${b.id}:${which}`
+                          const on = !!doubleBSignalEnabled[lineKey]
+                          return (
+                            <label key={which} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: on ? b.color : '#9aa0ab', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={on}
+                                onChange={() => toggleDoubleBSignal(lineKey)}
+                                style={{ width: 12, height: 12, margin: 0, accentColor: b.color, flexShrink: 0 }}
+                              />
+                              {wlabel}
+                            </label>
+                          )
+                        })}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
+                </div>
+              </CollapsibleCard>
+
+              <CollapsibleCard title="볼린저 눌림 신호" maxWidth={170}>
+                {renderCrossRow(
+                  '볼린저 눌림(5분↔15분)',
+                  bollInnerEditSide === 'long' ? bollInnerShapeLong : bollInnerShapeShort,
+                  bollInnerEditSide === 'long' ? setBollInnerShapeLong : setBollInnerShapeShort,
+                  bollInnerEditSide === 'long' ? bollInnerColorLong : bollInnerColorShort,
+                  bollInnerEditSide === 'long' ? setBollInnerColorLong : setBollInnerColorShort,
+                  bollInnerEditSide === 'long' ? bollInnerSizeLong : bollInnerSizeShort,
+                  bollInnerEditSide === 'long' ? setBollInnerSizeLong : setBollInnerSizeShort,
+                  <select
+                    value={bollInnerEditSide}
+                    onChange={e => setBollInnerEditSide(e.target.value)}
+                    title="지금 편집 중인 방향 (모양·색상·크기는 롱/숏 따로 저장됨)"
+                    style={{ fontSize: 10, background: '#0f1115', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 4px', cursor: 'pointer' }}
+                  >
+                    <option value="long">롱(매수)</option>
+                    <option value="short">숏(매도)</option>
+                  </select>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: bollInnerSignalSellEnabled ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={bollInnerSignalSellEnabled}
+                      onChange={toggleBollInnerSignalSell}
+                      style={{ width: 12, height: 12, margin: 0, accentColor: '#ef5350', flexShrink: 0 }}
+                    />
+                    5분 상단 눌림 (매도)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: bollInnerSignalBuyEnabled ? '#26a69a' : '#9aa0ab', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={bollInnerSignalBuyEnabled}
+                      onChange={toggleBollInnerSignalBuy}
+                      style={{ width: 12, height: 12, margin: 0, accentColor: '#26a69a', flexShrink: 0 }}
+                    />
+                    5분 하단 눌림 (매수)
+                  </label>
                 </div>
               </CollapsibleCard>
             </div>
@@ -1250,46 +1430,94 @@ export default function BacktestChart() {
                 )}
               </div>
 
-              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
-                  <input
-                    type="checkbox" checked={semiAutoEnabled}
-                    onChange={e => setSemiAutoEnabled(e.target.checked)}
-                    style={{ width: 15, height: 15, accentColor: '#4CAF50' }}
-                  />
-                  반자동 사용하기
-                </label>
+              <div style={{ marginTop: 16 }}>
+                <CollapsibleCard title="⚙ 반자동" maxWidth="none">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
+                    <input
+                      type="checkbox" checked={semiAutoEnabled}
+                      onChange={e => setSemiAutoEnabled(e.target.checked)}
+                      style={{ width: 15, height: 15, accentColor: '#4CAF50' }}
+                    />
+                    반자동 사용하기
+                  </label>
 
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                    조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (왼쪽 "크로스" 표시와는 체크 목록이 따로지만, 같은 항목을 체크하면 마커가 뜨는 캔들에 그대로 진입됩니다)
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
+                      조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (왼쪽 "크로스" 표시와는 체크 목록이 따로지만, 같은 항목을 체크하면 마커가 뜨는 캔들에 그대로 진입됩니다)
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {MOVING_AVERAGES.map(ma => renderChip(ma.id, ma.label, !!autoCrossEnabled[ma.id], () => toggleAutoCross(ma.id), ma.color))}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {MOVING_AVERAGES.map(ma => renderChip(ma.id, ma.label, !!autoCrossEnabled[ma.id], () => toggleAutoCross(ma.id), ma.color))}
-                  </div>
-                </div>
 
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                    조건: 더블비 — 체크한 라인 2개가 겹친 구간을 캔들이 동시에 터치 (겹친 구간이 상단쪽이면 매도, 하단쪽이면 매수 / 왼쪽 "더블비 신호" 표시와는 체크 목록이 따로지만, 같은 항목을 체크하면 마커가 뜨는 캔들에 그대로 진입됩니다)
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
+                      조건: 더블비 — 체크한 라인 2개가 겹친 구간을 캔들이 동시에 터치 (겹친 구간이 상단쪽이면 매도, 하단쪽이면 매수 / 왼쪽 "더블비 신호" 표시와는 체크 목록이 따로지만, 같은 항목을 체크하면 마커가 뜨는 캔들에 그대로 진입됩니다)
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {BOLLINGER_BANDS.flatMap(b => [['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
+                        const lineKey = `${b.id}:${which}`
+                        return renderChip(lineKey, `${b.label} ${wlabel}`, !!autoDoubleBEnabled[lineKey], () => toggleAutoDoubleB(lineKey), b.color)
+                      }))}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {BOLLINGER_BANDS.flatMap(b => [['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
-                      const lineKey = `${b.id}:${which}`
-                      return renderChip(lineKey, `${b.label} ${wlabel}`, !!autoDoubleBEnabled[lineKey], () => toggleAutoDoubleB(lineKey), b.color)
-                    }))}
-                  </div>
-                </div>
 
-                <div>
-                  <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                    조건: 볼린저 눌림(5분↔15분 고정) — 5분 상단선이 15분 상단선 안(아래)이면 매도, 5분 하단선이 15분 하단선 안(위)이면 매수. 유지되는 동안 매 캔들 계속 신호
+                  <div>
+                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
+                      조건: 볼린저 눌림(5분↔15분 고정) — 5분 상단선이 15분 상단선 안(아래)이면 매도, 5분 하단선이 15분 하단선 안(위)이면 매수. 유지되는 동안 매 캔들 계속 신호
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {renderChip('bollInnerSell', '5분 상단 눌림 → 매도', autoBollInnerSellEnabled, toggleAutoBollInnerSell, '#ef5350')}
+                      {renderChip('bollInnerBuy', '5분 하단 눌림 → 매수', autoBollInnerBuyEnabled, toggleAutoBollInnerBuy, '#26a69a')}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {renderChip('bollInnerSell', '5분 상단 눌림 → 매도', autoBollInnerSellEnabled, toggleAutoBollInnerSell, '#ef5350')}
-                    {renderChip('bollInnerBuy', '5분 하단 눌림 → 매수', autoBollInnerBuyEnabled, toggleAutoBollInnerBuy, '#26a69a')}
+                </CollapsibleCard>
+              </div>
+
+              {/* 시뮬레이션 - 반자동과 조건 구성/계산 로직은 동일하고, 켜고 끄는 체크와 진입 타임라인만 별도라
+                  반자동과 동시에 켜두고 서로 다른 조건 조합을 비교해볼 수 있다. 날짜 선택/재생은 위 차트 컨트롤 그대로 공용으로 쓴다. */}
+              <div style={{ marginTop: 16 }}>
+                <CollapsibleCard title="🧪 시뮬레이션" maxWidth="none">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
+                    <input
+                      type="checkbox" checked={simulationEnabled}
+                      onChange={e => setSimulationEnabled(e.target.checked)}
+                      style={{ width: 15, height: 15, accentColor: '#4CAF50' }}
+                    />
+                    시뮬레이션 사용하기
+                  </label>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
+                      조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (반자동과 별개로 켜고 끌 수 있는 시뮬레이션 전용 체크 목록입니다)
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {MOVING_AVERAGES.map(ma => renderChip(ma.id, ma.label, !!simCrossEnabled[ma.id], () => toggleSimCross(ma.id), ma.color))}
+                    </div>
                   </div>
-                </div>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
+                      조건: 더블비 — 체크한 라인 2개가 겹친 구간을 캔들이 동시에 터치 (겹친 구간이 상단쪽이면 매도, 하단쪽이면 매수 / 반자동과 별개인 시뮬레이션 전용 체크 목록입니다)
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {BOLLINGER_BANDS.flatMap(b => [['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
+                        const lineKey = `${b.id}:${which}`
+                        return renderChip(lineKey, `${b.label} ${wlabel}`, !!simDoubleBEnabled[lineKey], () => toggleSimDoubleB(lineKey), b.color)
+                      }))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
+                      조건: 볼린저 눌림(5분↔15분 고정) — 5분 상단선이 15분 상단선 안(아래)이면 매도, 5분 하단선이 15분 하단선 안(위)이면 매수. 유지되는 동안 매 캔들 계속 신호
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {renderChip('simBollInnerSell', '5분 상단 눌림 → 매도', simBollInnerSellEnabled, toggleSimBollInnerSell, '#ef5350')}
+                      {renderChip('simBollInnerBuy', '5분 하단 눌림 → 매수', simBollInnerBuyEnabled, toggleSimBollInnerBuy, '#26a69a')}
+                    </div>
+                  </div>
+                </CollapsibleCard>
               </div>
             </div>
           </div>
