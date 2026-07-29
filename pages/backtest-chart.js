@@ -67,6 +67,11 @@ export default function BacktestChart() {
   const [deadShape, setDeadShapeState] = useState('arrowDown')
   const [deadColor, setDeadColorState] = useState(DEFAULT_DEAD_COLOR)
   const [deadSize, setDeadSizeState] = useState(1)
+  // 더블비 신호(왼쪽 표시용) - 반자동진입의 더블비 조건(autoDoubleBEnabled)과는 별개
+  const [doubleBSignalEnabled, setDoubleBSignalEnabled] = useState({}) // bollingerId -> bool
+  const [doubleBShape, setDoubleBShapeState] = useState('square')
+  const [doubleBColor, setDoubleBColorState] = useState('#00BCD4')
+  const [doubleBSize, setDoubleBSizeState] = useState(1)
   // 매매 연습 - 헤징 허용(바이/셀 동시 보유 가능), 수수료/스프레드는 계산 안 함
   const [startingBalance, setStartingBalanceState] = useState(DEFAULT_STARTING_BALANCE)
   const [balance, setBalance] = useState(DEFAULT_STARTING_BALANCE)
@@ -82,6 +87,7 @@ export default function BacktestChart() {
   const containerRef = useRef(null)
   const chartRef = useRef(null)
   const seriesRef = useRef(null)
+  const markerSeriesRef = useRef(null) // 투명 라인 시리즈 - 마커 전용. 다른 라인이 새로 추가될 때마다 지웠다 다시 만들어서 항상 맨 위(가장 나중에 추가된 시리즈)에 오게 함
   const rowsRef = useRef([])
   const intervalRef = useRef(null)
   const indexRef = useRef(0)
@@ -92,6 +98,7 @@ export default function BacktestChart() {
   const maSeriesRef = useRef({})     // maId -> lightweight-charts 라인 시리즈 (밴드와 달리 선 1개)
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
+  const doubleBSignalPointsRef = useRef([]) // 더블비 신호(표시용) 전체 [{idx, time, side}]
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
@@ -105,13 +112,15 @@ export default function BacktestChart() {
     setPlayIndex(0)
     setTotal(0)
     seriesRef.current?.setData([])
+    markerSeriesRef.current?.setData([])
     bandDataRef.current = {}
     syncBands(0)
     maDataRef.current = {}
     syncMA(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
-    seriesRef.current?.setMarkers([])
+    doubleBSignalPointsRef.current = []
+    markerSeriesRef.current?.setMarkers([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
@@ -147,6 +156,10 @@ export default function BacktestChart() {
     })
     chartRef.current = chart
     seriesRef.current = series
+    markerSeriesRef.current = chart.addLineSeries({
+      color: 'rgba(0,0,0,0)', lineWidth: 1,
+      lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+    })
 
     const onResize = () => chart.applyOptions({ width: containerRef.current.clientWidth })
     window.addEventListener('resize', onResize)
@@ -188,31 +201,43 @@ export default function BacktestChart() {
     Object.keys(maSeriesRef.current).forEach(maId => applyMAIndex(maId, idx))
   }
 
-  // 크로스 마커도 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 교차점 중
-  // 아직 재생 안 지난 구간은 걸러서 캔들 시리즈에 마커로 얹는다.
+  // 크로스/더블비 신호 마커 둘 다 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 지점 중
+  // 아직 재생 안 지난 구간은 걸러서 캔들 시리즈 마커 하나로 합쳐서 얹는다
+  // (setMarkers는 호출할 때마다 통째로 교체되므로 두 종류를 항상 같이 계산해서 넘겨야 함).
   // overrides로 넘긴 값만 즉시 반영하고 나머지는 현재 state를 그대로 씀
   // (setState 직후 같은 틱에 호출될 때 클로저가 stale해지는 걸 피하기 위함)
-  const applyCrossMarkers = (idx, overrides = {}) => {
-    if (!seriesRef.current) return
+  const applyAllMarkers = (idx, overrides = {}) => {
+    if (!markerSeriesRef.current) return
     const gShape = overrides.goldenShape ?? goldenShape
     const gColor = overrides.goldenColor ?? goldenColor
     const gSize = overrides.goldenSize ?? goldenSize
     const dShape = overrides.deadShape ?? deadShape
     const dColor = overrides.deadColor ?? deadColor
     const dSize = overrides.deadSize ?? deadSize
-    const markers = crossPointsRef.current
+    const bShape = overrides.doubleBShape ?? doubleBShape
+    const bColor = overrides.doubleBColor ?? doubleBColor
+    const bSize = overrides.doubleBSize ?? doubleBSize
+
+    const crossMarkers = crossPointsRef.current
       .filter(p => p.idx < idx)
       .map(p => p.type === 'golden'
         ? { time: p.time, position: 'belowBar', color: gColor, shape: gShape, size: gSize, text: '' }
         : { time: p.time, position: 'aboveBar', color: dColor, shape: dShape, size: dSize, text: '' })
-    seriesRef.current.setMarkers(markers)
+
+    const doubleBMarkers = doubleBSignalPointsRef.current
+      .filter(p => p.idx < idx)
+      .map(p => ({ time: p.time, position: 'inBar', color: bColor, shape: bShape, size: bSize, text: '' }))
+
+    markerSeriesRef.current.setMarkers([...crossMarkers, ...doubleBMarkers].sort((a, b) => a.time - b.time))
   }
 
   const applyIndex = (idx) => {
-    seriesRef.current?.setData(rowsRef.current.slice(0, idx))
+    const dayRows = rowsRef.current.slice(0, idx)
+    seriesRef.current?.setData(dayRows)
+    markerSeriesRef.current?.setData(dayRows.map(r => ({ time: r.time, value: r.close })))
     syncBands(idx)
     syncMA(idx)
-    applyCrossMarkers(idx)
+    applyAllMarkers(idx)
     indexRef.current = idx
     setPlayIndex(idx)
   }
@@ -222,10 +247,11 @@ export default function BacktestChart() {
     const rows = rowsRef.current
     for (let i = from; i < to; i++) {
       seriesRef.current?.update(rows[i])
+      markerSeriesRef.current?.update({ time: rows[i].time, value: rows[i].close })
     }
     syncBands(to)
     syncMA(to)
-    applyCrossMarkers(to)
+    applyAllMarkers(to)
     // 반자동진입 - 재생(자동 진행)으로 새로 드러난 구간에서만 조건을 확인한다.
     // 슬라이더로 수동 스크럽할 때는 안 걸리게(applyIndex가 아니라 여기서만 체크)
     if (semiAutoEnabled) {
@@ -257,13 +283,15 @@ export default function BacktestChart() {
 
     setLoadingCsv(true)
     seriesRef.current?.setData([])
+    markerSeriesRef.current?.setData([])
     bandDataRef.current = {}
     syncBands(0)
     maDataRef.current = {}
     syncMA(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
-    seriesRef.current?.setMarkers([])
+    doubleBSignalPointsRef.current = []
+    markerSeriesRef.current?.setMarkers([])
     setPositions([]) // 새 날짜를 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
     setPlayIndex(0)
@@ -316,6 +344,7 @@ export default function BacktestChart() {
         }
         maDataRef.current = newMaData
         refreshCross()
+        refreshDoubleBSignal()
         refreshAutoEvents()
       }
 
@@ -379,6 +408,20 @@ export default function BacktestChart() {
     }
   }
 
+  // lightweight-charts는 시리즈를 추가한 순서대로 위에 그린다 - 볼린저/이평선을 새로 켤 때마다
+  // 마커 전용 투명 시리즈를 지웠다 새로 만들어서 항상 "가장 나중에 추가된 = 가장 위" 자리를 되찾는다.
+  const bumpMarkerLayer = () => {
+    if (!chartRef.current) return
+    if (markerSeriesRef.current) chartRef.current.removeSeries(markerSeriesRef.current)
+    markerSeriesRef.current = chartRef.current.addLineSeries({
+      color: 'rgba(0,0,0,0)', lineWidth: 1,
+      lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+    })
+    const idx = indexRef.current
+    markerSeriesRef.current.setData(rowsRef.current.slice(0, idx).map(r => ({ time: r.time, value: r.close })))
+    applyAllMarkers(idx)
+  }
+
   const toggleBand = (bandId) => {
     const turningOn = !enabledBands[bandId]
     setEnabledBands(prev => ({ ...prev, [bandId]: turningOn }))
@@ -393,6 +436,7 @@ export default function BacktestChart() {
           middle: chartRef.current.addLineSeries({ color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'middle') }),
           lower: chartRef.current.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'lower') }),
         }
+        bumpMarkerLayer()
       }
       applyBandIndex(bandId, indexRef.current)
     } else {
@@ -453,6 +497,7 @@ export default function BacktestChart() {
         maSeriesRef.current[maId] = chartRef.current.addLineSeries({
           color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
         })
+        bumpMarkerLayer()
       }
       applyMAIndex(maId, indexRef.current)
     } else {
@@ -464,7 +509,7 @@ export default function BacktestChart() {
 
   // 체크한 이평선들 중 기간이 짧은 쪽을 단기선, 긴 쪽을 장기선으로 보고
   // 단기선이 장기선을 아래→위로 뚫으면 골든크로스, 위→아래면 데드크로스로 분류해
-  // 그날 데이터 전체에서 미리 찾아둔다 (재생 위치 필터링은 applyCrossMarkers가 담당)
+  // 그날 데이터 전체에서 미리 찾아둔다 (재생 위치 필터링은 applyAllMarkers가 담당)
   // 이평선 목록(ids) 중 기간이 짧은 쪽을 단기선, 긴 쪽을 장기선으로 보고 서로 교차하는
   // 지점을 전부 찾는다 - 왼쪽 "크로스" 표시와 반자동진입 "크로스" 조건이 둘 다 이 로직을 공유해서 쓴다.
   const findMACrosses = (ids) => {
@@ -493,7 +538,7 @@ export default function BacktestChart() {
   const refreshCross = (enabledMap = crossEnabled) => {
     const ids = MOVING_AVERAGES.map(m => m.id).filter(id => enabledMap[id])
     crossPointsRef.current = findMACrosses(ids).sort((p, q) => p.idx - q.idx)
-    applyCrossMarkers(indexRef.current)
+    applyAllMarkers(indexRef.current)
   }
 
   // "더블비" - 체크한 볼린저 밴드들 중 두 개씩 짝지어, 두 밴드의 범위가 겹치는 구간을
@@ -599,12 +644,29 @@ export default function BacktestChart() {
     })
   }
 
-  const setGoldenShape = (v) => { setGoldenShapeState(v); applyCrossMarkers(indexRef.current, { goldenShape: v }) }
-  const setGoldenColor = (v) => { setGoldenColorState(v); applyCrossMarkers(indexRef.current, { goldenColor: v }) }
-  const setGoldenSize = (v) => { setGoldenSizeState(v); applyCrossMarkers(indexRef.current, { goldenSize: v }) }
-  const setDeadShape = (v) => { setDeadShapeState(v); applyCrossMarkers(indexRef.current, { deadShape: v }) }
-  const setDeadColor = (v) => { setDeadColorState(v); applyCrossMarkers(indexRef.current, { deadColor: v }) }
-  const setDeadSize = (v) => { setDeadSizeState(v); applyCrossMarkers(indexRef.current, { deadSize: v }) }
+  const setGoldenShape = (v) => { setGoldenShapeState(v); applyAllMarkers(indexRef.current, { goldenShape: v }) }
+  const setGoldenColor = (v) => { setGoldenColorState(v); applyAllMarkers(indexRef.current, { goldenColor: v }) }
+  const setGoldenSize = (v) => { setGoldenSizeState(v); applyAllMarkers(indexRef.current, { goldenSize: v }) }
+  const setDeadShape = (v) => { setDeadShapeState(v); applyAllMarkers(indexRef.current, { deadShape: v }) }
+  const setDeadColor = (v) => { setDeadColorState(v); applyAllMarkers(indexRef.current, { deadColor: v }) }
+  const setDeadSize = (v) => { setDeadSizeState(v); applyAllMarkers(indexRef.current, { deadSize: v }) }
+  const setDoubleBShape = (v) => { setDoubleBShapeState(v); applyAllMarkers(indexRef.current, { doubleBShape: v }) }
+  const setDoubleBColor = (v) => { setDoubleBColorState(v); applyAllMarkers(indexRef.current, { doubleBColor: v }) }
+  const setDoubleBSize = (v) => { setDoubleBSizeState(v); applyAllMarkers(indexRef.current, { doubleBSize: v }) }
+
+  const refreshDoubleBSignal = (enabledMap = doubleBSignalEnabled) => {
+    const ids = BOLLINGER_BANDS.map(b => b.id).filter(id => enabledMap[id])
+    doubleBSignalPointsRef.current = computeDoubleBTouches(ids).sort((p, q) => p.idx - q.idx)
+    applyAllMarkers(indexRef.current)
+  }
+
+  const toggleDoubleBSignal = (bandId) => {
+    setDoubleBSignalEnabled(prev => {
+      const next = { ...prev, [bandId]: !prev[bandId] }
+      refreshDoubleBSignal(next)
+      return next
+    })
+  }
 
   const play = () => {
     if (!rowsRef.current.length) return
@@ -944,20 +1006,39 @@ export default function BacktestChart() {
                 })}
               </CollapsibleCard>
 
-              <CollapsibleCard title="크로스" maxWidth={170}>
+              <CollapsibleCard title="크로스 신호" maxWidth={170}>
                 {renderCrossRow('골든크로스', goldenShape, setGoldenShape, goldenColor, setGoldenColor, goldenSize, setGoldenSize)}
                 {renderCrossRow('데드크로스', deadShape, setDeadShape, deadColor, setDeadColor, deadSize, setDeadSize)}
-                {MOVING_AVERAGES.map(ma => (
-                  <label key={ma.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', padding: '1px 0' }}>
-                    <input
-                      type="checkbox"
-                      checked={!!crossEnabled[ma.id]}
-                      onChange={() => toggleCross(ma.id)}
-                      style={{ width: 13, height: 13, margin: 0, accentColor: ma.color, flexShrink: 0 }}
-                    />
-                    <span style={{ flex: 1 }}>{ma.label}</span>
-                  </label>
-                ))}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px 6px' }}>
+                  {MOVING_AVERAGES.map(ma => (
+                    <label key={ma.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#e8eaed', cursor: 'pointer', padding: '1px 0', minWidth: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={!!crossEnabled[ma.id]}
+                        onChange={() => toggleCross(ma.id)}
+                        style={{ width: 12, height: 12, margin: 0, accentColor: ma.color, flexShrink: 0 }}
+                      />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ma.label}</span>
+                    </label>
+                  ))}
+                </div>
+
+                <div style={{ borderTop: '1px solid #2a2e38', marginTop: 10, paddingTop: 10 }}>
+                  {renderCrossRow('더블비 신호', doubleBShape, setDoubleBShape, doubleBColor, setDoubleBColor, doubleBSize, setDoubleBSize)}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px 6px' }}>
+                    {BOLLINGER_BANDS.map(b => (
+                      <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#e8eaed', cursor: 'pointer', padding: '1px 0', minWidth: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!doubleBSignalEnabled[b.id]}
+                          onChange={() => toggleDoubleBSignal(b.id)}
+                          style={{ width: 12, height: 12, margin: 0, accentColor: b.color, flexShrink: 0 }}
+                        />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </CollapsibleCard>
             </div>
 
