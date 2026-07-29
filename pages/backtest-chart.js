@@ -1071,7 +1071,7 @@ export default function BacktestChart() {
   const renderPairSlots = (pairs, setPair, options, namePrefix) => (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
       {pairs.map((pair, i) => (
-        <div key={i} style={{ width: '100%' }}>
+        <div key={i} style={{ minWidth: 140 }}>
           <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 3 }}>{namePrefix}{i + 1}</div>
           <div style={{ display: 'flex', gap: 4 }}>
             <PairSelect value={pair.a} onChange={v => setPair(i, 'a', v)} options={options} />
@@ -1092,7 +1092,7 @@ export default function BacktestChart() {
         const shortLabel = BOLLINGER_BANDS.find(b => b.id === pair.short)?.label || '단기'
         const longLabel = BOLLINGER_BANDS.find(b => b.id === pair.long)?.label || '장기'
         return (
-          <div key={i} style={{ width: '100%' }}>
+          <div key={i} style={{ minWidth: 140 }}>
             <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 3 }}>{namePrefix}{i + 1}</div>
             <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
               <PairSelect value={pair.short} onChange={v => setPair(i, 'short', v)} options={BOLLINGER_BANDS} placeholder="단기-" />
