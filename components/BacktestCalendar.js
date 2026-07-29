@@ -60,6 +60,17 @@ export function CollapsibleCard({ title, defaultOpen = true, maxWidth = 170, chi
   )
 }
 
+// 텍스트 글자(‹ ›)는 폰트마다 글리프 자체가 박스 중앙에 딱 오지 않아서 살짝 위/아래로 치우쳐 보이는
+// 문제가 있었다 - 폰트에 의존하지 않도록 SVG로 직접 그려서 항상 버튼 정중앙에 오게 한다.
+function Chevron({ direction }) {
+  const points = direction === 'left' ? '15 6 9 12 15 18' : '9 6 15 12 9 18'
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ display: 'block' }}>
+      <polyline points={points} stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 // onSelect를 안 넘기면 클릭 불가능한 읽기 전용 달력(admin의 "빈 날짜 확인용")으로 동작한다.
 // bare=true면 카드 껍데기(배경/테두리/패딩) 없이 내용만 렌더링 - CollapsibleCard 안에 넣을 때 씀.
 // selectedDateTo를 같이 넘기면 selectedDate~selectedDateTo 구간 전체를 옅게 하이라이트한다(범위 선택 표시용).
@@ -76,7 +87,7 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
 
   const navBtn = {
     background: 'none', border: '1px solid #2a2e38', color: '#9aa0ab', borderRadius: 8,
-    width: 30, height: 30, cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1,
+    width: 30, height: 30, cursor: 'pointer', padding: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   }
 
@@ -89,9 +100,9 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
   return (
     <div style={wrapperStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <button type="button" onClick={() => onNavigate(-1)} style={navBtn}>‹</button>
+        <button type="button" onClick={() => onNavigate(-1)} style={navBtn}><Chevron direction="left" /></button>
         <div style={{ fontWeight: 700, fontSize: 14 }}>{year}년 {month + 1}월</div>
-        <button type="button" onClick={() => onNavigate(1)} style={navBtn}>›</button>
+        <button type="button" onClick={() => onNavigate(1)} style={navBtn}><Chevron direction="right" /></button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4, fontSize: 11, color: '#9aa0ab', textAlign: 'center', marginBottom: 4 }}>
         {WEEKDAY_LABEL.map(w => <div key={w}>{w}</div>)}
