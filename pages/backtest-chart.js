@@ -65,7 +65,7 @@ function localTimeFormatter(time) {
 }
 
 export default function BacktestChart() {
-  const [symbol, setSymbol] = useState('GOLD')
+  const [symbol, setSymbol] = useState('NASDAQ')
   // 브로커 서머타임 여부 - 겨울엔 서버시간이 1시간 밀려서(EEST→EET) 한국시간 환산 오프셋이 6→7시간으로 바뀐다.
   // 자동판별할 방법이 없어서 버튼으로 직접 전환하게 함(기본값: 서머타임 켜짐)
   const [summerTime, setSummerTime] = useState(true)
@@ -80,22 +80,25 @@ export default function BacktestChart() {
   const [speed, setSpeed] = useState(1)
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
-  const [enabledBands, setEnabledBands] = useState({})
-  const [lineVisibility, setLineVisibility] = useState({}) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true)
+  // 기본 셋팅(사용자 요청) - 1분 볼린저는 중간선만, 5분/15분/1시간 볼린저는 전체 표시
+  const [enabledBands, setEnabledBands] = useState({ sma20: true, sma100: true, sma300: true, sma1200: true })
+  const [lineVisibility, setLineVisibility] = useState({ 'sma20:upper': false, 'sma20:lower': false }) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true)
   const [bandColors, setBandColors] = useState({}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
-  const [enabledMA, setEnabledMA] = useState({})
+  // 기본 셋팅 - 3분/5분/15분 H, 1분/5분 W17, 1시간 W4 이평선 체크
+  const [enabledMA, setEnabledMA] = useState({ hma60: true, hma100: true, hma300: true, wma17_1m: true, wma17_5m: true, wma4_1h: true })
   const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
-  const [maWidths, setMaWidths] = useState({}) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
+  // 기본 셋팅 - 위 6개 이평선 전부 두께 3
+  const [maWidths, setMaWidths] = useState({ hma60: 3, hma100: 3, hma300: 3, wma17_1m: 3, wma17_5m: 3, wma4_1h: 3 }) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
   const [upColor, setUpColorState] = useState(DEFAULT_UP_COLOR)
   const [downColor, setDownColorState] = useState(DEFAULT_DOWN_COLOR)
   const [crossEnabled, setCrossEnabled] = useState({}) // maId -> 크로스 감지 대상 포함 여부
   // 골든크로스(단기선이 장기선을 아래에서 위로 돌파)/데드크로스(그 반대) 표시를 따로 설정
   const [goldenShape, setGoldenShapeState] = useState('arrowUp')
   const [goldenColor, setGoldenColorState] = useState(DEFAULT_GOLDEN_COLOR)
-  const [goldenSize, setGoldenSizeState] = useState(1)
+  const [goldenSize, setGoldenSizeState] = useState(3) // 기본 셋팅(사용자 요청) - 크로스 신호 크기 3번
   const [deadShape, setDeadShapeState] = useState('arrowDown')
   const [deadColor, setDeadColorState] = useState(DEFAULT_DEAD_COLOR)
-  const [deadSize, setDeadSizeState] = useState(1)
+  const [deadSize, setDeadSizeState] = useState(3) // 기본 셋팅(사용자 요청) - 크로스 신호 크기 3번
   // 더블비 신호(왼쪽 표시용) - 반자동진입의 더블비 조건(autoDoubleBEnabled)과 켜고 끄는 체크는 따로 관리하지만,
   // 계산 함수(computeDoubleBLineTouches)는 공유한다. 그래서 양쪽에 같은 라인을 체크하면 마커가 뜨는
   // 캔들과 실제 진입되는 캔들이 정확히 같아진다 - "별개"는 체크 상태만이고, 판정 로직 자체는 같다.
@@ -232,6 +235,28 @@ export default function BacktestChart() {
     })
     chartRef.current = chart
     seriesRef.current = series
+
+    // 기본으로 켜둔 볼린저/이평선은 toggleBand/toggleMA(클릭했을 때만 시리즈를 만듦)를 거치지 않으므로,
+    // 마운트 시점에 켜져 있는 것들의 실제 차트 시리즈를 여기서 직접 만들어둔다.
+    // (마커 시리즈는 항상 "가장 나중에 추가된 것 = 맨 위"여야 하므로 이 시리즈들보다 뒤에 만든다)
+    for (const band of BOLLINGER_BANDS) {
+      if (!enabledBands[band.id]) continue
+      const color = bandColors[band.id] || band.color
+      bandSeriesRef.current[band.id] = {
+        upper: chart.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:upper`] !== false }),
+        middle: chart.addLineSeries({ color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:middle`] !== false }),
+        lower: chart.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:lower`] !== false }),
+      }
+    }
+    for (const ma of MOVING_AVERAGES) {
+      if (!enabledMA[ma.id]) continue
+      const color = maColors[ma.id] || ma.color
+      const width = maWidths[ma.id] || ma.lineWidth
+      maSeriesRef.current[ma.id] = chart.addLineSeries({
+        color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
+      })
+    }
+
     markerSeriesRef.current = chart.addLineSeries({
       color: 'rgba(0,0,0,0)', lineWidth: 1,
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
