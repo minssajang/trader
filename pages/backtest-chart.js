@@ -5,7 +5,7 @@ import { createChart, CrosshairMode } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr } from '../lib/candleCsv'
-import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, rollingHMA } from '../lib/indicators'
+import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, computeMA } from '../lib/indicators'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
@@ -15,6 +15,14 @@ const SPEEDS = [1, 5, 20, 60]
 const TICK_MS = 200
 const DEFAULT_UP_COLOR = '#38BDF8'   // 상승 기본색 - 스카이블루
 const DEFAULT_DOWN_COLOR = '#FF69B4' // 하락 기본색 - 밝은 핑크
+const CROSS_COLOR = '#FFD600'
+// lightweight-charts 마커가 네이티브로 지원하는 모양만 사용(삼각형은 화살표로 표현)
+const CROSS_SHAPES = [
+  { id: 'circle', label: '●' },
+  { id: 'square', label: '■' },
+  { id: 'arrowUp', label: '▲' },
+  { id: 'arrowDown', label: '▼' },
+]
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
@@ -38,6 +46,8 @@ export default function BacktestChart() {
   const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
   const [upColor, setUpColorState] = useState(DEFAULT_UP_COLOR)
   const [downColor, setDownColorState] = useState(DEFAULT_DOWN_COLOR)
+  const [crossEnabled, setCrossEnabled] = useState({}) // maId -> 크로스 감지 대상 포함 여부
+  const [crossShape, setCrossShape] = useState('circle')
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -50,6 +60,7 @@ export default function BacktestChart() {
   const bandSeriesRef = useRef({})   // bandId -> { upper, middle, lower } lightweight-charts 라인 시리즈
   const maDataRef = useRef({})       // maId -> [{time,value}|null] - 선택한 날짜분, 워밍업 포함해서 계산됨
   const maSeriesRef = useRef({})     // maId -> lightweight-charts 라인 시리즈 (밴드와 달리 선 1개)
+  const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time}] - 그날 데이터 기준
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
@@ -67,6 +78,8 @@ export default function BacktestChart() {
     syncBands(0)
     maDataRef.current = {}
     syncMA(0)
+    crossPointsRef.current = []
+    seriesRef.current?.setMarkers([])
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
       .then(d => {
@@ -142,10 +155,21 @@ export default function BacktestChart() {
     Object.keys(maSeriesRef.current).forEach(maId => applyMAIndex(maId, idx))
   }
 
+  // 크로스 마커도 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 교차점 중
+  // 아직 재생 안 지난 구간은 걸러서 캔들 시리즈에 마커로 얹는다.
+  const applyCrossMarkers = (idx, shape = crossShape) => {
+    if (!seriesRef.current) return
+    const markers = crossPointsRef.current
+      .filter(p => p.idx < idx)
+      .map(p => ({ time: p.time, position: 'aboveBar', color: CROSS_COLOR, shape, text: '' }))
+    seriesRef.current.setMarkers(markers)
+  }
+
   const applyIndex = (idx) => {
     seriesRef.current?.setData(rowsRef.current.slice(0, idx))
     syncBands(idx)
     syncMA(idx)
+    applyCrossMarkers(idx)
     indexRef.current = idx
     setPlayIndex(idx)
   }
@@ -158,6 +182,7 @@ export default function BacktestChart() {
     }
     syncBands(to)
     syncMA(to)
+    applyCrossMarkers(to)
     indexRef.current = to
     setPlayIndex(to)
   }
@@ -179,6 +204,8 @@ export default function BacktestChart() {
     syncBands(0)
     maDataRef.current = {}
     syncMA(0)
+    crossPointsRef.current = []
+    seriesRef.current?.setMarkers([])
     indexRef.current = 0
     setPlayIndex(0)
     try {
@@ -221,14 +248,15 @@ export default function BacktestChart() {
 
         const newMaData = {}
         for (const ma of MOVING_AVERAGES) {
-          const hma = rollingHMA(closes, ma.period)
+          const vals = computeMA(ma, closes)
           const points = []
           for (let i = startIdx; i < endIdx; i++) {
-            points.push(hma[i] != null ? { time: fullRows[i].time, value: hma[i] } : null)
+            points.push(vals[i] != null ? { time: fullRows[i].time, value: vals[i] } : null)
           }
           newMaData[ma.id] = points
         }
         maDataRef.current = newMaData
+        refreshCross()
       }
 
       if (dayRows.length === 0) setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
@@ -343,9 +371,9 @@ export default function BacktestChart() {
       if (!maSeriesRef.current[maId] && chartRef.current) {
         const ma = MOVING_AVERAGES.find(m => m.id === maId)
         const color = getMAColor(ma)
-        // 볼린저와 구분되게 굵은 점선
+        // 각 이평선마다 정의된 굵기/실선-점선 스타일 그대로
         maSeriesRef.current[maId] = chartRef.current.addLineSeries({
-          color, lineWidth: 3, lineStyle: 2, lastValueVisible: false, priceLineVisible: false,
+          color, lineWidth: ma.lineWidth, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
         })
       }
       applyMAIndex(maId, indexRef.current)
@@ -354,6 +382,44 @@ export default function BacktestChart() {
       if (s && chartRef.current) chartRef.current.removeSeries(s)
       delete maSeriesRef.current[maId]
     }
+  }
+
+  // 체크한 이평선들 서로간의 교차점을 그날 데이터 전체에서 미리 찾아둔다
+  // (재생 위치 필터링은 applyCrossMarkers가 담당)
+  const refreshCross = (enabledMap = crossEnabled, shape = crossShape) => {
+    const ids = MOVING_AVERAGES.map(m => m.id).filter(id => enabledMap[id])
+    const points = []
+    for (let a = 0; a < ids.length; a++) {
+      for (let b = a + 1; b < ids.length; b++) {
+        const A = maDataRef.current[ids[a]]
+        const B = maDataRef.current[ids[b]]
+        if (!A || !B) continue
+        for (let i = 1; i < A.length; i++) {
+          const a0 = A[i - 1], a1 = A[i], b0 = B[i - 1], b1 = B[i]
+          if (!a0 || !a1 || !b0 || !b1) continue
+          const d0 = a0.value - b0.value
+          const d1 = a1.value - b1.value
+          if (d0 === 0 || (d0 > 0) === (d1 > 0)) continue
+          points.push({ idx: i, time: a1.time })
+        }
+      }
+    }
+    points.sort((p, q) => p.idx - q.idx)
+    crossPointsRef.current = points
+    applyCrossMarkers(indexRef.current, shape)
+  }
+
+  const toggleCross = (maId) => {
+    setCrossEnabled(prev => {
+      const next = { ...prev, [maId]: !prev[maId] }
+      refreshCross(next, crossShape)
+      return next
+    })
+  }
+
+  const selectCrossShape = (shape) => {
+    setCrossShape(shape)
+    refreshCross(crossEnabled, shape)
   }
 
   const play = () => {
@@ -555,6 +621,37 @@ export default function BacktestChart() {
                     </div>
                   )
                 })}
+              </CollapsibleCard>
+
+              <CollapsibleCard title="크로스" maxWidth={170}>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                  {CROSS_SHAPES.map(s => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => selectCrossShape(s.id)}
+                      title={s.id}
+                      style={{
+                        flex: 1, fontSize: 13, padding: '4px 0', borderRadius: 6,
+                        border: `1px solid ${crossShape === s.id ? CROSS_COLOR : '#2a2e38'}`,
+                        background: crossShape === s.id ? `${CROSS_COLOR}22` : 'none',
+                        color: crossShape === s.id ? CROSS_COLOR : '#9aa0ab',
+                        cursor: 'pointer',
+                      }}
+                    >{s.label}</button>
+                  ))}
+                </div>
+                {MOVING_AVERAGES.map(ma => (
+                  <label key={ma.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', padding: '2px 0' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!crossEnabled[ma.id]}
+                      onChange={() => toggleCross(ma.id)}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: ma.color, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>{ma.label}</span>
+                  </label>
+                ))}
               </CollapsibleCard>
             </div>
 
