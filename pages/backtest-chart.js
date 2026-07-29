@@ -196,7 +196,7 @@ export default function BacktestChart() {
           <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>캔들 시뮬레이션 차트</h1>
           <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>달력에서 데이터가 있는 날짜를 골라서, 그날 시세를 순서대로 재생해볼 수 있어요.</p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 20, alignItems: 'start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '170px 1fr', gap: 20, alignItems: 'start' }}>
             <div style={{ display: 'flex', gap: 8 }}>
               {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
                 <button key={sym} onClick={() => setSymbol(sym)} style={{
@@ -220,6 +220,7 @@ export default function BacktestChart() {
               availableDates={availableDates}
               selectedDate={selectedDate}
               onSelect={loadDate}
+              maxWidth={170}
             />
 
             <div>
