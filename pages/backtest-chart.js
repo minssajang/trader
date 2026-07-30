@@ -989,7 +989,7 @@ export default function BacktestChart() {
     if (turningOn) {
       if (!rsiSeriesRef.current && chartRef.current) {
         rsiSeriesRef.current = chartRef.current.addLineSeries({
-          color: rsiColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'rsi',
+          color: rsiColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true, priceScaleId: 'rsi',
         })
         bumpMarkerLayer()
       }
@@ -1017,10 +1017,10 @@ export default function BacktestChart() {
             lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
           }),
           macd: chartRef.current.addLineSeries({
-            color: macdLineColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+            color: macdLineColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true, priceScaleId: 'macd',
           }),
           signal: chartRef.current.addLineSeries({
-            color: macdSignalColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+            color: macdSignalColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false, priceScaleId: 'macd',
           }),
         }
         bumpMarkerLayer()
@@ -1060,10 +1060,10 @@ export default function BacktestChart() {
             lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
           }),
           macd: chartRef.current.addLineSeries({
-            color: macd5LineColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+            color: macd5LineColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true, priceScaleId: 'macd',
           }),
           signal: chartRef.current.addLineSeries({
-            color: macd5SignalColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+            color: macd5SignalColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false, priceScaleId: 'macd',
           }),
         }
         bumpMarkerLayer()
