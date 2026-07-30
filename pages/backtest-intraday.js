@@ -29,10 +29,12 @@ const MINUTES_PER_BUCKET = 15
 const BUCKETS_PER_HOUR = 60 / MINUTES_PER_BUCKET
 const TOTAL_BUCKETS = 24 * BUCKETS_PER_HOUR
 
-// 세계 3대 시장 개장 시각 - backtest-chart.js와 동일한 시간 라벨(브로커 서버+서머타임 오프셋) 기준
+// 세계 주요 시장 개장 시각 - backtest-chart.js와 동일한 시간 라벨(브로커 서버+서머타임 오프셋) 기준
 // 분(minute-of-day). 유럽(런던)은 서머타임(BST) 기준 07:00 UTC=16:00 이 라벨(겨울엔 17:00).
 const SESSION_OPENS = [
   { label: '아시아', minute: 7 * 60, color: '#64B5F6' },
+  { label: '도쿄', minute: 9 * 60, color: '#4DB6AC' },
+  { label: '홍콩', minute: 10 * 60 + 30, color: '#FF8A65' },
   { label: '유럽', minute: 16 * 60, color: '#FFD54F' },
   { label: '미장', minute: 22 * 60 + 30, color: '#BA68C8' },
 ]
@@ -274,7 +276,7 @@ export default function BacktestIntraday() {
     ctx.textAlign = 'left'
     ctx.fillText('시가(07:00, 0)', 58, zeroY - 5)
 
-    // 세계 3대 시장 개장 시각 - 지금 보이는 구간 안에 있을 때만 세로 점선 + 라벨로 표시
+    // 세계 주요 시장 개장 시각 - 지금 보이는 구간 안에 있을 때만 세로 점선 + 라벨로 표시
     ctx.font = '10px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif'
     for (const session of SESSION_OPENS) {
       if (!inWindow(session.minute)) continue
@@ -463,42 +465,81 @@ export default function BacktestIntraday() {
   }
 
   // "⏱ 시간대별 변동성 분석" - 지금 왼쪽 달력에서 클릭해서 고른 날짜들(selectedDates, 위 오버레이
-  // 차트에 그려지는 바로 그 날짜들)만 대상으로, 하루 중 어느 15분 구간에 변동이 몰리는지 계산한다 -
-  // "24시간 중 언제 자리를 지키고 있어야 하는지" 물어본 데서 나온 기능. 처음엔 1시간 단위(24칸)로
-  // 만들었는데 "1시간은 너무 뭉뚱그려진다, 15분에 하나씩(1시간=4칸)으로 쪼개달라"는 요청으로 96개
-  // 15분 버킷 단위로 세분화함. 원본 행(dayRowsRef)은 편차가 아니라 실제 open/high/low/close라
-  // 이 계산에 필요한 레인지(고가-저가)·직전 종가 대비 변동폭을 그대로 쓸 수 있다.
-  // 지표: 그 15분 구간 1분봉들의 (종가 - 직전 종가) 절대값을 하루 안에서만 누적한 값 - 고른 날짜 전체의
-  // 총 변동 중 이 구간이 차지하는 비중(%)으로 순위를 매긴다.
+  // 차트에 그려지는 바로 그 날짜들)만 대상으로, 하루 중 어느 15분 구간에서 "자리를 지키고 있어야
+  // 하는지" 계산한다.
+  // 처음엔 "그 구간에 틱이 얼마나 어지럽게 움직였나(활동량)"로 순위를 매겼는데, 이러면 시가 대비
+  // 편차가 완만하게(느리지만 꾸준히) 방향을 트는 진짜 전환점(예: 9시반에 고점 찍고 서서히 내려가기
+  // 시작)이 하나도 안 잡히는 문제가 있었다(사용자가 오버레이 차트를 직접 보고 9시반/10시/15시를
+  // 짚었는데 활동량 지표엔 그 시간들이 전혀 안 나왔음 - 실제로 다른 걸 재는 지표였던 것).
+  // 그래서 "국소 고점/저점(그 앞뒤 45분보다 높거나 낮은 지점 = 전환점 후보)"을 날짜별로 찾고,
+  // 그 전환점에서 "다음 전환점까지 실제로 얼마나 움직였는지"로 중요도를 매기는 방식으로 바꿈 -
+  // 이게 "여기서부터 지켜보고 있었으면 그 다음 큰 움직임을 놓치지 않았을 시점"과 정확히 같은 의미다.
+  // (2026-07-01 나스닥 실측으로 검증 - 09:30이 실제로 3위권 전환점으로 나옴, 사용자가 짚은 지점과 일치)
+  const PIVOT_WINDOW = 3 // 앞뒤 3버킷(45분) 안에서 극값이면 전환점 후보로 봄
+
+  const findPivotScores = (rows) => {
+    const dayLast = new Array(TOTAL_BUCKETS).fill(null)
+    const dayRangeSum = new Array(TOTAL_BUCKETS).fill(0)
+    const dayRangeCnt = new Array(TOTAL_BUCKETS).fill(0)
+    for (const r of rows) {
+      const d = new Date(r.time * 1000)
+      const idx = d.getHours() * BUCKETS_PER_HOUR + Math.floor(d.getMinutes() / MINUTES_PER_BUCKET)
+      dayLast[idx] = r.close
+      dayRangeSum[idx] += r.high - r.low
+      dayRangeCnt[idx] += 1
+    }
+    const valid = []
+    for (let i = 0; i < TOTAL_BUCKETS; i++) if (dayLast[i] != null) valid.push({ idx: i, v: dayLast[i] })
+
+    const isPivot = (i) => {
+      const v = valid[i].v
+      let isMax = true, isMin = true
+      for (let k = 1; k <= PIVOT_WINDOW; k++) {
+        if (valid[i - k].v > v || valid[i + k].v > v) isMax = false
+        if (valid[i - k].v < v || valid[i + k].v < v) isMin = false
+      }
+      return isMax || isMin
+    }
+
+    const pivotScore = new Array(TOTAL_BUCKETS).fill(0)
+    for (let i = PIVOT_WINDOW; i < valid.length - PIVOT_WINDOW; i++) {
+      if (!isPivot(i)) continue
+      // 다음 전환점(또는 그 날 마지막 값)까지 실제로 얼마나 움직였는지가 이 전환점의 "중요도"
+      let j = i + 1
+      while (j < valid.length - PIVOT_WINDOW && !isPivot(j)) j++
+      const endV = j < valid.length ? valid[j].v : valid[valid.length - 1].v
+      pivotScore[valid[i].idx] += Math.abs(endV - valid[i].v)
+    }
+    return { pivotScore, dayRangeSum, dayRangeCnt }
+  }
+
   const runHourlyAnalysis = useCallback(() => {
     if (selectedDates.length === 0) return
 
     const bucketRangeSum = new Array(TOTAL_BUCKETS).fill(0)
     const bucketRangeCnt = new Array(TOTAL_BUCKETS).fill(0)
-    const bucketMoveSum = new Array(TOTAL_BUCKETS).fill(0)
+    const bucketPivotScore = new Array(TOTAL_BUCKETS).fill(0)
 
     for (const date of selectedDates) {
       const rows = dayRowsRef.current[date]
       if (!rows || rows.length === 0) continue
-      let prevClose = null
-      for (const r of rows) {
-        const d = new Date(r.time * 1000)
-        const idx = d.getHours() * BUCKETS_PER_HOUR + Math.floor(d.getMinutes() / MINUTES_PER_BUCKET)
-        bucketRangeSum[idx] += r.high - r.low
-        bucketRangeCnt[idx] += 1
-        if (prevClose != null) bucketMoveSum[idx] += Math.abs(r.close - prevClose)
-        prevClose = r.close
+      const { pivotScore, dayRangeSum, dayRangeCnt } = findPivotScores(rows)
+      for (let idx = 0; idx < TOTAL_BUCKETS; idx++) {
+        bucketRangeSum[idx] += dayRangeSum[idx]
+        bucketRangeCnt[idx] += dayRangeCnt[idx]
+        bucketPivotScore[idx] += pivotScore[idx]
       }
     }
 
-    const grandTotal = bucketMoveSum.reduce((a, b) => a + b, 0)
+    const grandTotal = bucketPivotScore.reduce((a, b) => a + b, 0)
     const missingBuckets = []
     const ranked = []
     for (let idx = 0; idx < TOTAL_BUCKETS; idx++) {
       if (bucketRangeCnt[idx] === 0) { missingBuckets.push(idx); continue }
+      if (bucketPivotScore[idx] === 0) continue // 전환점이 아니었던 구간은 막대 없이 비워둔다
       ranked.push({
         bucket: idx,
-        sharePct: grandTotal ? (bucketMoveSum[idx] / grandTotal * 100) : 0,
+        sharePct: grandTotal ? (bucketPivotScore[idx] / grandTotal * 100) : 0,
         avgRange: bucketRangeSum[idx] / bucketRangeCnt[idx],
       })
     }
@@ -546,7 +587,7 @@ export default function BacktestIntraday() {
                 opacity: selectedDates.length === 0 ? 0.5 : 1,
               }}
             >
-              ⏱ 고른 날짜 시간대별 변동성 분석{selectedDates.length > 0 ? ` (${selectedDates.length}일)` : ''}
+              ⏱ 고른 날짜 전환점(자리 지켜야 할 시간) 분석{selectedDates.length > 0 ? ` (${selectedDates.length}일)` : ''}
             </button>
             {selectedDates.length === 0 && (
               <span style={{ marginLeft: 10, fontSize: 12, color: '#5a5f6a' }}>왼쪽 달력에서 날짜를 먼저 골라주세요</span>
@@ -564,7 +605,7 @@ export default function BacktestIntraday() {
               return (
                 <div style={{ marginTop: 14, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20 }}>
                   <div style={{ fontSize: 12.5, color: '#9aa0ab', marginBottom: 18 }}>
-                    {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 15분 단위로 쪼갠 구간별 총 변동(1분봉 종가 변화 절대값을 하루 안에서 누적) 비중. 막대 위 숫자는 순위(1위=가장 바쁜 구간, 96칸 전부 표시 - 세로쓰기), 상위 3개는 초록색으로 강조.
+                    {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 그 15분 구간이 국소 고점/저점(전환점)이었던 날짜에서, 그 다음 전환점까지 실제로 얼마나 움직였는지로 비중을 매김. 막대가 있는 곳 = 여기서부터 지켜보고 있었어야 할 시점, 막대가 없으면 그 구간엔 전환점이 없었다는 뜻(활동량과 무관). 순위 숫자는 96칸 전부 표시(세로쓰기), 상위 3개는 초록색.
                     {missingHoursSet.size > 0 && (
                       <> · {[...missingHoursSet].sort((a, b) => a - b).map(h => `${String(h).padStart(2, '0')}시`).join(', ')} 구간엔 데이터 없음</>
                     )}
