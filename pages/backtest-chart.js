@@ -746,10 +746,47 @@ export default function BacktestChart() {
     loadRange(from, to)
   }
 
+  // 선택 전부 지우고 빈 화면으로 - '전체선택' 체크 해제할 때 씀. symbol 전환 리셋과 같은 항목을 지운다.
+  const clearSelection = () => {
+    stopPlayback()
+    setSelectedDate('')
+    setSelectedDateTo('')
+    rangeAnchorRef.current = ''
+    setError('')
+    rowsRef.current = []
+    indexRef.current = 0
+    setPlayIndex(0)
+    setTotal(0)
+    seriesRef.current?.setData([])
+    markerSeriesRef.current?.setData([])
+    bandDataRef.current = {}
+    syncBands(0)
+    maDataRef.current = {}
+    syncMA(0)
+    rsiDataRef.current = []
+    syncRSI(0)
+    macdDataRef.current = { macd: [], signal: [], hist: [] }
+    syncMACD(0)
+    macd5DataRef.current = { macd: [], signal: [], hist: [] }
+    syncMACD5(0)
+    crossPointsRef.current = []
+    autoEventsRef.current = []
+    simEventsRef.current = []
+    doubleBSignalPointsRef.current = []
+    bollInnerSignalPointsRef.current = []
+    sessionPointsRef.current = []
+    markerSeriesRef.current?.setMarkers([])
+    setPositions([])
+  }
+
   // '전체선택' - 지금 보고 있는 달에 데이터 있는 날짜를 전부 이어서 하나의 재생 구간으로 불러온다.
   // (loadRange가 '같은 데이터 파일 안'이어야 한다는 제약을 그대로 검사하므로, 파일 경계에 걸친 달은
-  // 기존과 동일하게 에러 메시지가 뜬다.)
+  // 기존과 동일하게 에러 메시지가 뜬다.) 체크 해제하면 clearSelection으로 빈 화면으로 되돌린다.
   const selectAllMonth = () => {
+    if (allMonthSelected) {
+      clearSelection()
+      return
+    }
     if (monthAvailableDates.length === 0) return
     rangeAnchorRef.current = ''
     setMultiSelectMode(true)
