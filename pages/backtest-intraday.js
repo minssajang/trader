@@ -46,6 +46,8 @@ export default function BacktestIntraday() {
   // 지금 보고 있는 구간 - 드래그(팬)로 시작 위치를, 휠(줌)로 폭을 바꾼다
   const [windowStart, setWindowStart] = useState(0)
   const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
+  // 지금 마우스가 어느 영역(본문/y축/x축) 위에 있는지에 따라 커서 모양을 바꿔서 뭘 할 수 있는지 알려준다
+  const [cursorStyle, setCursorStyle] = useState('grab')
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
@@ -154,9 +156,11 @@ export default function BacktestIntraday() {
     [selectedDates]
   )
 
-  // y축 범위는 지금 보이는 구간 안의 값만 기준으로 삼는다(창을 옮기거나 확대/축소하면 세로 스케일도 다시 잡힘)
+  // y축 범위는 지금 보이는 구간 안의 값만 기준으로 자동으로 잡되, y축 위에서 세로로 드래그하면
+  // yZoom 배율만큼 그 자동 범위를 더 늘리거나 줄인다(사용자 요청 - y축 잡고 드래그하면 위아래 확대/축소).
   const windowEnd = windowStart + windowSize - 1
-  const { yLo, yHi } = useMemo(() => {
+  const [yZoom, setYZoom] = useState(1)
+  const { yLo: baseYLo, yHi: baseYHi } = useMemo(() => {
     let lo = Infinity, hi = -Infinity
     for (const d of selectedSeries) {
       for (const [mnt, v] of d.points) {
@@ -169,6 +173,11 @@ export default function BacktestIntraday() {
     const pad = (hi - lo) * 0.08 || 1
     return { yLo: lo - pad, yHi: hi + pad }
   }, [selectedSeries, windowStart, windowEnd])
+  const { yLo, yHi } = useMemo(() => {
+    const center = (baseYLo + baseYHi) / 2
+    const halfRange = (baseYHi - baseYLo) / 2 / yZoom
+    return { yLo: center - halfRange, yHi: center + halfRange }
+  }, [baseYLo, baseYHi, yZoom])
 
   // "평균선 표시" 버튼을 켰을 때만 계산 - 기본은 안 켜져 있으니 매번 계산 안 해도 됨
   const avgMap = useMemo(() => {
@@ -296,48 +305,93 @@ export default function BacktestIntraday() {
     setHoverInfo({ minute, avg: avgMap.get(minute), up, down })
   }
 
-  // 트레이딩뷰처럼 드래그로 좌우 이동 - 마우스다운 한 지점을 기억해두고, 움직인 픽셀만큼을
-  // 지금 보이는 구간(windowSize) 비율로 환산해서 windowStart를 옮긴다(사용자 요청 - 슬라이드바 대신).
+  // 트레이딩뷰처럼 영역별로 드래그 동작이 다르다(사용자 요청):
+  //  - 가운데(차트 본문)를 잡고 끌면 좌우 이동(팬)
+  //  - 왼쪽 y축(가격 라벨) 위를 잡고 위아래로 끌면 세로 확대/축소
+  //  - 아래쪽 x축(시간 라벨) 위를 잡고 좌우로 끌면 가로 확대/축소(휠과 같은 효과, 드래그로도 가능하게)
+  const AXIS_LEFT = 56, AXIS_BOTTOM = 34
+
   const onMouseDown = (e) => {
     if (selectedSeries.length === 0) return
-    dragRef.current = { startClientX: e.clientX, startWindowStart: windowStart }
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    let mode = 'pan'
+    if (mx < AXIS_LEFT) mode = 'yzoom'
+    else if (my > rect.height - AXIS_BOTTOM) mode = 'xzoom'
+    dragRef.current = {
+      mode,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startWindowStart: windowStart,
+      startWindowSize: windowSize,
+      startYZoom: yZoom,
+    }
+    setCursorStyle(mode === 'yzoom' ? 'ns-resize' : mode === 'xzoom' ? 'ew-resize' : 'grabbing')
   }
 
-  const onMouseUp = () => { dragRef.current = null }
+  const onMouseUp = () => {
+    dragRef.current = null
+    setCursorStyle('grab')
+  }
 
   const onMouseMove = (e) => {
     const canvas = canvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
-    const plotW = rect.width - 56 - 20
+    const plotW = rect.width - AXIS_LEFT - 20
+    const drag = dragRef.current
 
-    if (dragRef.current) {
-      const deltaPx = e.clientX - dragRef.current.startClientX
-      const deltaMin = -(deltaPx / plotW) * windowSize
-      const maxStart = Math.max(0, 1440 - windowSize)
-      const next = Math.max(0, Math.min(maxStart, Math.round(dragRef.current.startWindowStart + deltaMin)))
-      setWindowStart(next)
+    if (drag) {
+      if (drag.mode === 'pan') {
+        const deltaPx = e.clientX - drag.startClientX
+        const deltaMin = -(deltaPx / plotW) * windowSize
+        const maxStart = Math.max(0, 1440 - windowSize)
+        setWindowStart(Math.max(0, Math.min(maxStart, Math.round(drag.startWindowStart + deltaMin))))
+      } else if (drag.mode === 'yzoom') {
+        // 위로 끌면 확대, 아래로 끌면 축소
+        const deltaPx = e.clientY - drag.startClientY
+        const factor = Math.exp(-deltaPx / 150)
+        setYZoom(Math.max(0.2, Math.min(8, drag.startYZoom * factor)))
+      } else if (drag.mode === 'xzoom') {
+        // 오른쪽으로 끌면 확대(구간 좁아짐), 왼쪽으로 끌면 축소 - 지금 보이는 구간 중심은 고정
+        const deltaPx = e.clientX - drag.startClientX
+        const factor = Math.exp(-deltaPx / 150)
+        const center = drag.startWindowStart + drag.startWindowSize / 2
+        const nextSize = Math.max(MIN_WINDOW_MIN, Math.min(MAX_WINDOW_MIN, Math.round(drag.startWindowSize * factor)))
+        const maxStart = Math.max(0, 1440 - nextSize)
+        setWindowSize(nextSize)
+        setWindowStart(Math.max(0, Math.min(maxStart, Math.round(center - nextSize / 2))))
+      }
       setHoverInfo(null)
       return
     }
 
-    if (selectedSeries.length === 0) return
+    // 드래그 중이 아닐 땐 지금 위치가 어느 영역인지에 따라 커서 모양만 바꿔서 "여길 잡으면 뭘 할 수 있는지" 알려준다
     const mx = e.clientX - rect.left
-    if (mx < 56 || mx > rect.width - 20) { setHoverInfo(null); return }
-    const t = (mx - 56) / plotW
+    const my = e.clientY - rect.top
+    if (mx < AXIS_LEFT) { setCursorStyle('ns-resize'); setHoverInfo(null); return }
+    if (my > rect.height - AXIS_BOTTOM) { setCursorStyle('ew-resize'); setHoverInfo(null); return }
+    setCursorStyle('grab')
+
+    if (selectedSeries.length === 0) return
+    if (mx > rect.width - 20) { setHoverInfo(null); return }
+    const t = (mx - AXIS_LEFT) / plotW
     const minute = Math.max(windowStart, Math.min(windowEnd, Math.round(windowStart + t * (windowSize - 1))))
     updateHoverForMinute(minute)
   }
 
-  // 마우스 휠로 확대/축소 - 마우스 커서가 가리키는 시각을 고정한 채로 구간 폭(windowSize)만 줄이거나 늘린다
+  // 마우스 휠로도 확대/축소 - 마우스 커서가 가리키는 시각을 고정한 채로 구간 폭(windowSize)만 줄이거나 늘린다
   const onWheel = (e) => {
     const canvas = canvasRef.current
     if (!canvas) return
     e.preventDefault()
     const rect = canvas.getBoundingClientRect()
-    const plotW = rect.width - 56 - 20
+    const plotW = rect.width - AXIS_LEFT - 20
     const mx = e.clientX - rect.left
-    const t = Math.max(0, Math.min(1, (mx - 56) / plotW))
+    const t = Math.max(0, Math.min(1, (mx - AXIS_LEFT) / plotW))
     const cursorMinute = windowStart + t * (windowSize - 1)
     const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15
     const nextSize = Math.max(MIN_WINDOW_MIN, Math.min(MAX_WINDOW_MIN, Math.round(windowSize * factor)))
@@ -447,9 +501,9 @@ export default function BacktestIntraday() {
                     ref={canvasRef}
                     onMouseDown={onMouseDown}
                     onMouseMove={onMouseMove}
-                    onMouseLeave={() => setHoverInfo(null)}
+                    onMouseLeave={() => { setHoverInfo(null); if (!dragRef.current) setCursorStyle('grab') }}
                     onWheel={onWheel}
-                    style={{ display: 'block', width: '100%', height: 460, cursor: 'grab', touchAction: 'none' }}
+                    style={{ display: 'block', width: '100%', height: 460, cursor: cursorStyle, touchAction: 'none' }}
                   />
                   {hoverInfo && (
                     <div style={{
@@ -473,7 +527,7 @@ export default function BacktestIntraday() {
                   )}
                 </div>
                 <p style={{ color: '#5a5f6a', fontSize: 11, marginTop: 10, marginBottom: 0 }}>
-                  차트를 드래그하면 좌우로 이동, 마우스 휠로 확대/축소됩니다.
+                  차트 본문을 드래그하면 좌우 이동, 왼쪽 가격축을 드래그하면 세로 확대/축소, 아래 시간축을 드래그하거나 휠을 돌리면 가로 확대/축소됩니다.
                 </p>
               </div>
 
