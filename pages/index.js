@@ -11,6 +11,19 @@ const FEATURES = [
   { icon: '🛡️', title: '손쉬운 손절 익절', desc: '복잡한 설정 없이 손절·익절을 자동으로 처리해요.' },
 ]
 
+const PRACTICE_FEATURES = [
+  {
+    tag: '📊 캔들 재생', title: '과거 데이터로 매매 연습',
+    desc: '과거 캔들을 순서대로 재생하면서 실전처럼 매매 판단을 연습해요. 이평선·볼린저는 개수 제한 없이 동시에 그릴 수 있고, 크로스·더블비·볼린저 눌림 신호, 반자동 진입, 시뮬레이션 결과 저장까지 지원해요. 골드·나스닥 데이터는 계속 추가되고, 스토캐스틱·MACD 등 원하는 보조지표도 요청하면 추가해드려요.',
+    href: '/backtest-chart', cta: '📊 캔들 재생 해보기',
+  },
+  {
+    tag: '📈 일중 패턴 분석', title: '언제 크게 움직였는지 분석',
+    desc: '원하는 날짜(들)의 과거 시세를 겹쳐보고, 하루 중 언제 방향이 크게 바뀌었는지·언제 가장 많이 움직였는지를 분석해줘요. 전체 분석을 PDF 리포트로 다운로드할 수도 있어요.',
+    href: '/backtest-intraday', cta: '📈 일중 패턴 분석 해보기',
+  },
+]
+
 const STEPS = [
   { title: '무료체험 신청', desc: <><Link href="/apply">신청 페이지</Link>에서 이름/이메일/제품만 입력하면 끝 — 베타 기간엔 입금 없이 바로 신청됩니다.</> },
   { title: '라이선스 발급', desc: '신청 확인 후 이메일로 일주일 무료체험 라이선스 키를 보내드립니다.' },
@@ -156,26 +169,28 @@ export default function Home() {
         </div>
 
         <div className="section-title" style={{ marginTop: 48 }}>
-          <h2>📈 일중 패턴 분석</h2>
-          <p>과거 데이터로 언제 크게 움직였는지 확인하고, PDF 리포트로도 받아보세요</p>
+          <h2>🕹️ 언제든, 무료로 매매연습</h2>
+          <p>과거 데이터로 실전처럼 연습해보세요 — 로그인도 비용도 필요 없어요</p>
         </div>
-        <div className="card" style={{ display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap', marginBottom: 20 }}>
+        <div className="product-grid" style={{ marginBottom: 20 }}>
+          {PRACTICE_FEATURES.map((p, i) => (
+            <div key={i} className="card product-card">
+              <span className="tag">FREE</span>
+              <h3>{p.tag}</h3>
+              <p>{p.desc}</p>
+              <Link href={p.href} className="btn-cta primary" style={{ marginTop: 16 }}>{p.cta}</Link>
+            </div>
+          ))}
+        </div>
+        <div className="card" style={{ marginBottom: 20, textAlign: 'center' }}>
           <img
             src="/images/intraday-report-preview.png"
             alt="일중 패턴 분석 PDF 리포트 예시 — 전환점 분석 그래프와 오늘의 분석 서술"
-            style={{ flex: '1 1 380px', maxWidth: 480, width: '100%', borderRadius: 10, border: '1px solid var(--border)', display: 'block' }}
+            style={{ maxWidth: 560, width: '100%', borderRadius: 10, border: '1px solid var(--border)', display: 'inline-block' }}
           />
-          <div style={{ flex: '1 1 280px', minWidth: 240 }}>
-            <p style={{ marginTop: 0 }}>
-              원하는 날짜(들)의 과거 시세를 겹쳐보고, 하루 중 언제 방향이 크게 바뀌었는지(전환점)와
-              언제 가장 많이 움직였는지(이동폭)를 분석해줘요.
-            </p>
-            <p>
-              날짜를 하나만 고르면 그날 실제로 있었던 일을 수치로 정리한 &quot;오늘의 분석&quot;도 함께 볼 수 있고,
-              전체 분석을 PDF 리포트로 다운로드할 수도 있어요.
-            </p>
-            <Link href="/backtest-intraday" className="btn-cta primary" style={{ marginTop: 8 }}>📈 일중 패턴 분석 보러가기</Link>
-          </div>
+          <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12, marginBottom: 0 }}>
+            일중 패턴 분석에서 날짜를 하나 고르면, 그날 실제로 있었던 일을 정리한 &quot;오늘의 분석&quot;과 함께 PDF 리포트로 받아볼 수 있어요.
+          </p>
         </div>
 
         <div className="section-title">

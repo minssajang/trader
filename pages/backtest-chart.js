@@ -1481,6 +1481,13 @@ export default function BacktestChart() {
                 })}
               </CollapsibleCard>
 
+              {/* 지금은 이평선/볼린저만 있지만, 스토캐스틱·MACD 등 원하는 보조지표는 자유게시판으로
+                  요청받아서 계속 추가할 예정(사용자 확인) - 안내 문구만 우선 넣어둠 */}
+              <p style={{ fontSize: 10.5, color: '#5a5f6a', lineHeight: 1.5, margin: '2px 2px 8px', maxWidth: 170 }}>
+                원하는 보조지표(스토캐스틱, MACD 등)가 있으면{' '}
+                <Link href="/board" style={{ color: '#4CAF50' }}>자유게시판</Link>에 요청해주세요 — 추가해드립니다.
+              </p>
+
               <CollapsibleCard title="크로스 신호" maxWidth={170}>
                 {renderCrossRow('골든크로스', goldenShape, setGoldenShape, goldenColor, setGoldenColor, goldenSize, setGoldenSize)}
                 {renderCrossRow('데드크로스', deadShape, setDeadShape, deadColor, setDeadColor, deadSize, setDeadSize)}
