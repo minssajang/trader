@@ -32,9 +32,10 @@ const DEFAULT_DEAD_COLOR = '#FF1744'
 // - NAS100(Cash): 계약크기 1, 틱당 가치 USD $1. 수수료/스프레드는 계산하지 않음.
 const POINT_VALUE_PER_LOT = { GOLD: 100, NASDAQ: 1 }
 const DEFAULT_STARTING_BALANCE = 10000
-// 볼린저 눌림 슬롯 기본값 - 예전에 5분↔15분으로 고정돼 있던 것과 같은 조합을 슬롯1 기본값으로 미리 채워둠
-// (슬롯 방식으로 바뀌어도 처음 켜보는 사용자가 예전과 똑같이 5분↔15분부터 시작하도록)
-const DEFAULT_BOLL_INNER_PAIR = { short: 'sma100', long: 'sma300', sell: false, buy: false } // 5분↔15분
+// "볼린저 눌림" 조건 고정 페어 - 크로스/더블비와 달리 이건 원래부터 5분↔15분으로 고정이었고
+// 슬롯/드롭다운으로 바꾸지 말라는 요청(사용자 확인) - 그대로 고정 유지.
+const BOLL_INNER_SHORT_ID = 'sma100' // 5분
+const BOLL_INNER_LONG_ID = 'sma300'  // 15분
 const EMPTY_PAIR_SLOTS = [{ a: '', b: '' }, { a: '', b: '' }, { a: '', b: '' }]
 // 더블비 슬롯 드롭다운에 쓰는 라인 옵션 목록 - 밴드 5개 × 상/중/하 = 15개, state에 안 의존하니 모듈 레벨에서 한 번만 계산
 const DOUBLE_B_LINE_OPTIONS = BOLLINGER_BANDS.flatMap(b =>
@@ -181,10 +182,10 @@ export default function BacktestChart() {
   const [doubleBShapeShort, setDoubleBShapeShortState] = useState('square')
   const [doubleBColorShort, setDoubleBColorShortState] = useState('#FF6D00')
   const [doubleBSizeShort, setDoubleBSizeShortState] = useState(1)
-  // 볼린저 눌림 신호(왼쪽 표시용) - 예전엔 5분↔15분으로 고정이었는데, 슬롯 1/2/3마다 단기/장기 볼린저를
-  // 드롭다운으로 직접 골라서(short가 long 안쪽으로 눌리면 상단눌림/하단눌림) 그 조합만 본다.
-  // 반자동/시뮬레이션의 눌림 조건과 슬롯 상태는 따로 관리하지만 계산 함수(computeBollInnerTouchForPair)는 공유.
-  const [bollInnerPairs, setBollInnerPairsState] = useState([DEFAULT_BOLL_INNER_PAIR, { short: '', long: '', sell: false, buy: false }, { short: '', long: '', sell: false, buy: false }])
+  // 볼린저 눌림 신호(왼쪽 표시용, 5분↔15분 고정) - 반자동/시뮬레이션의 볼린저 눌림 조건과 켜고 끄는 체크는
+  // 따로 관리하지만 계산 함수(computeBollInnerTouchForPair)는 공유한다.
+  const [bollInnerSignalSellEnabled, setBollInnerSignalSellEnabled] = useState(false) // 5분 상단선이 15분 상단선 안(아래)
+  const [bollInnerSignalBuyEnabled, setBollInnerSignalBuyEnabled] = useState(false)   // 5분 하단선이 15분 하단선 안(위)
   // 롱/숏 모양/색상/크기 - 더블비와 같은 이유로 탭 전환 없이 두 행을 항상 같이 보여준다
   const [bollInnerShapeLong, setBollInnerShapeLongState] = useState('circle')
   const [bollInnerColorLong, setBollInnerColorLongState] = useState('#26A69A')
@@ -198,21 +199,25 @@ export default function BacktestChart() {
   const [lotSize, setLotSize] = useState(0.01)
   const [positions, setPositions] = useState([]) // { id, side:'buy'|'sell', symbol, lot, entryPrice, entryTime }
   const [pnlDisplay, setPnlDisplay] = useState('dollar') // 'dollar' | 'point'
-  // 반자동진입 - 왼쪽 표시(crossPairs/doubleBPairs/bollInnerPairs)와 켜고 끄는 슬롯 상태는 따로 관리한다
-  // (화면엔 여러 개 띄워두고 그중 일부만 실전 진입 조건으로 쓸 수 있게). 계산 로직(findMACrossForPair /
-  // computeDoubleBTouchForPair / computeBollInnerTouchForPair)은 공유하므로, 왼쪽과 여기에 같은 조합을
-  // 골라두면 마커 표시 캔들 = 실제 진입 캔들이 항상 일치한다.
+  // 반자동진입 - 왼쪽 표시(크로스는 crossPairs, 더블비는 doubleBPairs 슬롯)와 켜고 끄는 슬롯 상태는
+  // 따로 관리한다(화면엔 여러 개 띄워두고 그중 일부만 실전 진입 조건으로 쓸 수 있게). 계산 로직
+  // (findMACrossForPair / computeDoubleBTouchForPair / computeBollInnerTouchForPair)은 공유하므로,
+  // 왼쪽과 여기에 같은 조합을 골라두면 마커 표시 캔들 = 실제 진입 캔들이 항상 일치한다.
+  // 볼린저 눌림은 크로스/더블비와 달리 원래부터 5분↔15분 고정이라 여기도 그대로 고정 유지.
   const [semiAutoEnabled, setSemiAutoEnabled] = useState(false)
   const [autoCrossPairs, setAutoCrossPairsState] = useState(EMPTY_PAIR_SLOTS)
   const [autoDoubleBPairs, setAutoDoubleBPairsState] = useState(EMPTY_PAIR_SLOTS)
-  const [autoBollInnerPairs, setAutoBollInnerPairsState] = useState([DEFAULT_BOLL_INNER_PAIR, { short: '', long: '', sell: false, buy: false }, { short: '', long: '', sell: false, buy: false }])
+  // "볼린저 눌림"(5분↔15분 고정) - 상단/하단 조건을 따로 켜고 끌 수 있다
+  const [autoBollInnerSellEnabled, setAutoBollInnerSellEnabled] = useState(false) // 5분 상단선이 15분 상단선 안(아래)일 때 매도
+  const [autoBollInnerBuyEnabled, setAutoBollInnerBuyEnabled] = useState(false)   // 5분 하단선이 15분 하단선 안(위)일 때 매수
 
   // 시뮬레이션 - 반자동과 조건 구성은 완전히 동일하되, 켜고 끄는 체크 상태와 트리거 타임라인은 독립적이라
   // 반자동과 시뮬레이션을 동시에 켜두고 서로 다른 조건 조합을 비교해볼 수 있다
   const [simulationEnabled, setSimulationEnabled] = useState(false)
   const [simCrossPairs, setSimCrossPairsState] = useState(EMPTY_PAIR_SLOTS)
   const [simDoubleBPairs, setSimDoubleBPairsState] = useState(EMPTY_PAIR_SLOTS)
-  const [simBollInnerPairs, setSimBollInnerPairsState] = useState([DEFAULT_BOLL_INNER_PAIR, { short: '', long: '', sell: false, buy: false }, { short: '', long: '', sell: false, buy: false }])
+  const [simBollInnerSellEnabled, setSimBollInnerSellEnabled] = useState(false)
+  const [simBollInnerBuyEnabled, setSimBollInnerBuyEnabled] = useState(false)
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -837,9 +842,10 @@ export default function BacktestChart() {
     return points
   }
 
-  // 크로스/더블비/눌림 슬롯 3개(pairs)를 각각 계산해서 하나의 이벤트 배열로 합치는 공용 헬퍼 -
-  // 반자동(refreshAutoEvents)과 시뮬레이션(refreshSimEvents)이 완전히 같은 구조라 여기서 공유한다.
-  const computePairEvents = (crossPairsArg, doubleBPairsArg, bollInnerPairsArg) => {
+  // 크로스/더블비 슬롯(pairs)과 볼린저 눌림(5분↔15분 고정, sell/buy 두 방향만 켜고 끔)을 각각 계산해서
+  // 하나의 이벤트 배열로 합치는 공용 헬퍼 - 반자동(refreshAutoEvents)과 시뮬레이션(refreshSimEvents)이
+  // 완전히 같은 구조라 여기서 공유한다.
+  const computePairEvents = (crossPairsArg, doubleBPairsArg, bollInnerSell, bollInnerBuy) => {
     const crossEvents = crossPairsArg
       .flatMap(({ a, b }) => (a && b && a !== b ? findMACrossForPair(a, b) : []))
       .map(p => ({ idx: p.idx, time: p.time, side: p.type === 'golden' ? 'buy' : 'sell', source: 'cross' }))
@@ -848,11 +854,8 @@ export default function BacktestChart() {
       .flatMap(({ a, b }) => (a && b && a !== b ? computeDoubleBTouchForPair(a, b) : []))
       .map(p => ({ ...p, source: 'doubleB' }))
 
-    const bollInnerEvents = bollInnerPairsArg
-      .flatMap(({ short, long, sell, buy }) => {
-        if (!short || !long || short === long) return []
-        return computeBollInnerTouchForPair(short, long).filter(p => (p.side === 'sell' && sell) || (p.side === 'buy' && buy))
-      })
+    const bollInnerEvents = computeBollInnerTouchForPair(BOLL_INNER_SHORT_ID, BOLL_INNER_LONG_ID)
+      .filter(p => (p.side === 'sell' && bollInnerSell) || (p.side === 'buy' && bollInnerBuy))
       .map(p => ({ ...p, source: 'bollInner' }))
 
     return [...crossEvents, ...doubleBEvents, ...bollInnerEvents].sort((a, b) => a.idx - b.idx)
@@ -862,15 +865,16 @@ export default function BacktestChart() {
   const refreshAutoEvents = (
     crossP = autoCrossPairs,
     doubleBP = autoDoubleBPairs,
-    bollInnerP = autoBollInnerPairs,
+    bollInnerSell = autoBollInnerSellEnabled,
+    bollInnerBuy = autoBollInnerBuyEnabled,
   ) => {
-    autoEventsRef.current = computePairEvents(crossP, doubleBP, bollInnerP)
+    autoEventsRef.current = computePairEvents(crossP, doubleBP, bollInnerSell, bollInnerBuy)
   }
 
   const setAutoCrossPair = (slotIndex, which, maId) => {
     setAutoCrossPairsState(prev => {
       const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: maId } : p))
-      refreshAutoEvents(next, autoDoubleBPairs, autoBollInnerPairs)
+      refreshAutoEvents(next, autoDoubleBPairs, autoBollInnerSellEnabled, autoBollInnerBuyEnabled)
       return next
     })
   }
@@ -878,15 +882,23 @@ export default function BacktestChart() {
   const setAutoDoubleBPair = (slotIndex, which, lineKey) => {
     setAutoDoubleBPairsState(prev => {
       const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: lineKey } : p))
-      refreshAutoEvents(autoCrossPairs, next, autoBollInnerPairs)
+      refreshAutoEvents(autoCrossPairs, next, autoBollInnerSellEnabled, autoBollInnerBuyEnabled)
       return next
     })
   }
 
-  const setAutoBollInnerPair = (slotIndex, which, value) => {
-    setAutoBollInnerPairsState(prev => {
-      const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: value } : p))
-      refreshAutoEvents(autoCrossPairs, autoDoubleBPairs, next)
+  const toggleAutoBollInnerSell = () => {
+    setAutoBollInnerSellEnabled(prev => {
+      const next = !prev
+      refreshAutoEvents(autoCrossPairs, autoDoubleBPairs, next, autoBollInnerBuyEnabled)
+      return next
+    })
+  }
+
+  const toggleAutoBollInnerBuy = () => {
+    setAutoBollInnerBuyEnabled(prev => {
+      const next = !prev
+      refreshAutoEvents(autoCrossPairs, autoDoubleBPairs, autoBollInnerSellEnabled, next)
       return next
     })
   }
@@ -895,15 +907,16 @@ export default function BacktestChart() {
   const refreshSimEvents = (
     crossP = simCrossPairs,
     doubleBP = simDoubleBPairs,
-    bollInnerP = simBollInnerPairs,
+    bollInnerSell = simBollInnerSellEnabled,
+    bollInnerBuy = simBollInnerBuyEnabled,
   ) => {
-    simEventsRef.current = computePairEvents(crossP, doubleBP, bollInnerP)
+    simEventsRef.current = computePairEvents(crossP, doubleBP, bollInnerSell, bollInnerBuy)
   }
 
   const setSimCrossPair = (slotIndex, which, maId) => {
     setSimCrossPairsState(prev => {
       const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: maId } : p))
-      refreshSimEvents(next, simDoubleBPairs, simBollInnerPairs)
+      refreshSimEvents(next, simDoubleBPairs, simBollInnerSellEnabled, simBollInnerBuyEnabled)
       return next
     })
   }
@@ -911,15 +924,23 @@ export default function BacktestChart() {
   const setSimDoubleBPair = (slotIndex, which, lineKey) => {
     setSimDoubleBPairsState(prev => {
       const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: lineKey } : p))
-      refreshSimEvents(simCrossPairs, next, simBollInnerPairs)
+      refreshSimEvents(simCrossPairs, next, simBollInnerSellEnabled, simBollInnerBuyEnabled)
       return next
     })
   }
 
-  const setSimBollInnerPair = (slotIndex, which, value) => {
-    setSimBollInnerPairsState(prev => {
-      const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: value } : p))
-      refreshSimEvents(simCrossPairs, simDoubleBPairs, next)
+  const toggleSimBollInnerSell = () => {
+    setSimBollInnerSellEnabled(prev => {
+      const next = !prev
+      refreshSimEvents(simCrossPairs, simDoubleBPairs, next, simBollInnerBuyEnabled)
+      return next
+    })
+  }
+
+  const toggleSimBollInnerBuy = () => {
+    setSimBollInnerBuyEnabled(prev => {
+      const next = !prev
+      refreshSimEvents(simCrossPairs, simDoubleBPairs, simBollInnerSellEnabled, next)
       return next
     })
   }
@@ -970,20 +991,26 @@ export default function BacktestChart() {
   const setBollInnerSizeShort = (v) => { setBollInnerSizeShortState(v); applyAllMarkers(indexRef.current, { bollInnerSizeShort: v }) }
 
   // 볼린저 눌림 신호(왼쪽 표시용) - computeBollInnerTouchForPair()는 반자동/시뮬레이션과 공유, 슬롯별 매도/매수 표시만 따로 켜고 끈다
-  const refreshBollInnerSignal = (pairs = bollInnerPairs) => {
-    const points = []
-    for (const { short, long, sell, buy } of pairs) {
-      if (!short || !long || short === long) continue
-      points.push(...computeBollInnerTouchForPair(short, long).filter(p => (p.side === 'sell' && sell) || (p.side === 'buy' && buy)))
-    }
-    bollInnerSignalPointsRef.current = points.sort((p, q) => p.idx - q.idx)
+  // 볼린저 눌림 신호(왼쪽 표시용) - computeBollInnerTouchForPair()는 반자동/시뮬레이션과 공유, 매도/매수 표시만 따로 켜고 끈다
+  const refreshBollInnerSignal = (sellEnabled = bollInnerSignalSellEnabled, buyEnabled = bollInnerSignalBuyEnabled) => {
+    bollInnerSignalPointsRef.current = computeBollInnerTouchForPair(BOLL_INNER_SHORT_ID, BOLL_INNER_LONG_ID)
+      .filter(p => (p.side === 'sell' && sellEnabled) || (p.side === 'buy' && buyEnabled))
+      .sort((p, q) => p.idx - q.idx)
     applyAllMarkers(indexRef.current)
   }
 
-  const setBollInnerPair = (slotIndex, which, value) => {
-    setBollInnerPairsState(prev => {
-      const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: value } : p))
-      refreshBollInnerSignal(next)
+  const toggleBollInnerSignalSell = () => {
+    setBollInnerSignalSellEnabled(prev => {
+      const next = !prev
+      refreshBollInnerSignal(next, bollInnerSignalBuyEnabled)
+      return next
+    })
+  }
+
+  const toggleBollInnerSignalBuy = () => {
+    setBollInnerSignalBuyEnabled(prev => {
+      const next = !prev
+      refreshBollInnerSignal(bollInnerSignalSellEnabled, next)
       return next
     })
   }
@@ -1079,38 +1106,6 @@ export default function BacktestChart() {
           </div>
         </div>
       ))}
-    </div>
-  )
-
-  // 볼린저 눌림 슬롯 공용 - 슬롯마다 단기/장기 볼린저를 드롭다운으로 고르고, 그 조합의 상단눌림(매도)/
-  // 하단눌림(매수)을 따로 켜고 끈다. 왼쪽 표시/반자동/시뮬레이션이 전부 이 헬퍼를 공유한다.
-  const renderBollInnerSlots = (pairs, setPair, namePrefix) => (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-      {pairs.map((pair, i) => {
-        // 라벨에 단기 쪽만 보이면 슬롯마다 장기를 다르게 골랐을 때 뭐랑 비교 중인지 안 보이는 문제가
-        // 있었다(사용자 지적) - 장기 밴드 이름도 같이 보여준다("5분B→15분B 상단눌림"식)
-        const shortLabel = BOLLINGER_BANDS.find(b => b.id === pair.short)?.label || '단기'
-        const longLabel = BOLLINGER_BANDS.find(b => b.id === pair.long)?.label || '장기'
-        return (
-          <div key={i} style={{ minWidth: 140 }}>
-            <div style={{ fontSize: 10, color: '#9aa0ab', marginBottom: 3 }}>{namePrefix}{i + 1}</div>
-            <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-              <PairSelect value={pair.short} onChange={v => setPair(i, 'short', v)} options={BOLLINGER_BANDS} placeholder="단기-" />
-              <PairSelect value={pair.long} onChange={v => setPair(i, 'long', v)} options={BOLLINGER_BANDS} placeholder="장기-" />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: pair.sell ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
-                <input type="checkbox" checked={!!pair.sell} onChange={() => setPair(i, 'sell', !pair.sell)} style={{ width: 12, height: 12, margin: 0, accentColor: '#ef5350', flexShrink: 0 }} />
-                {shortLabel}→{longLabel} 상단눌림 (매도)
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: pair.buy ? '#26a69a' : '#9aa0ab', cursor: 'pointer' }}>
-                <input type="checkbox" checked={!!pair.buy} onChange={() => setPair(i, 'buy', !pair.buy)} style={{ width: 12, height: 12, margin: 0, accentColor: '#26a69a', flexShrink: 0 }} />
-                {shortLabel}→{longLabel} 하단눌림 (매수)
-              </label>
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 
@@ -1391,7 +1386,26 @@ export default function BacktestChart() {
               <CollapsibleCard title="볼린저 눌림 신호" maxWidth={170}>
                 {renderCrossRow('눌림 롱', bollInnerShapeLong, setBollInnerShapeLong, bollInnerColorLong, setBollInnerColorLong, bollInnerSizeLong, setBollInnerSizeLong)}
                 {renderCrossRow('눌림 숏', bollInnerShapeShort, setBollInnerShapeShort, bollInnerColorShort, setBollInnerColorShort, bollInnerSizeShort, setBollInnerSizeShort)}
-                {renderBollInnerSlots(bollInnerPairs, setBollInnerPair, '눌림')}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: bollInnerSignalSellEnabled ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={bollInnerSignalSellEnabled}
+                      onChange={toggleBollInnerSignalSell}
+                      style={{ width: 12, height: 12, margin: 0, accentColor: '#ef5350', flexShrink: 0 }}
+                    />
+                    5분 상단 눌림 (매도)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: bollInnerSignalBuyEnabled ? '#26a69a' : '#9aa0ab', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={bollInnerSignalBuyEnabled}
+                      onChange={toggleBollInnerSignalBuy}
+                      style={{ width: 12, height: 12, margin: 0, accentColor: '#26a69a', flexShrink: 0 }}
+                    />
+                    5분 하단 눌림 (매수)
+                  </label>
+                </div>
               </CollapsibleCard>
             </div>
 
@@ -1580,9 +1594,18 @@ export default function BacktestChart() {
 
                   <div>
                     <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 볼린저 눌림 — 단기 볼린저가 장기 볼린저 안쪽으로 눌리면(상단선이 안쪽이면 매도, 하단선이 안쪽이면 매수) 유지되는 동안 매 캔들 계속 신호
+                      조건: 볼린저 눌림(5분↔15분 고정) — 5분 상단선이 15분 상단선 안(아래)이면 매도, 5분 하단선이 15분 하단선 안(위)이면 매수. 유지되는 동안 매 캔들 계속 신호
                     </div>
-                    {renderBollInnerSlots(autoBollInnerPairs, setAutoBollInnerPair, '눌림')}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: autoBollInnerSellEnabled ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={autoBollInnerSellEnabled} onChange={toggleAutoBollInnerSell} style={{ width: 13, height: 13, margin: 0, accentColor: '#ef5350' }} />
+                        5분 상단 눌림 → 매도
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: autoBollInnerBuyEnabled ? '#26a69a' : '#9aa0ab', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={autoBollInnerBuyEnabled} onChange={toggleAutoBollInnerBuy} style={{ width: 13, height: 13, margin: 0, accentColor: '#26a69a' }} />
+                        5분 하단 눌림 → 매수
+                      </label>
+                    </div>
                   </div>
                 </CollapsibleCard>
               </div>
@@ -1616,9 +1639,18 @@ export default function BacktestChart() {
 
                   <div>
                     <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 볼린저 눌림 — 단기 볼린저가 장기 볼린저 안쪽으로 눌리면(상단선이 안쪽이면 매도, 하단선이 안쪽이면 매수) 유지되는 동안 매 캔들 계속 신호
+                      조건: 볼린저 눌림(5분↔15분 고정) — 5분 상단선이 15분 상단선 안(아래)이면 매도, 5분 하단선이 15분 하단선 안(위)이면 매수. 유지되는 동안 매 캔들 계속 신호
                     </div>
-                    {renderBollInnerSlots(simBollInnerPairs, setSimBollInnerPair, '눌림')}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: simBollInnerSellEnabled ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={simBollInnerSellEnabled} onChange={toggleSimBollInnerSell} style={{ width: 13, height: 13, margin: 0, accentColor: '#ef5350' }} />
+                        5분 상단 눌림 → 매도
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: simBollInnerBuyEnabled ? '#26a69a' : '#9aa0ab', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={simBollInnerBuyEnabled} onChange={toggleSimBollInnerBuy} style={{ width: 13, height: 13, margin: 0, accentColor: '#26a69a' }} />
+                        5분 하단 눌림 → 매수
+                      </label>
+                    </div>
                   </div>
                 </CollapsibleCard>
               </div>
