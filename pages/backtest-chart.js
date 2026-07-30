@@ -962,6 +962,9 @@ export default function BacktestChart() {
 
   // RSI/MACD 창 위치 재계산 - 켜진 개수(0~2개)에 따라 차트 아래쪽 공간을 나눠 배정하고,
   // 캔들 가격축(right)은 그만큼 아래 여백을 늘려서 겹치지 않게 한다.
+  // lightweight-charts v4 공식 문서 - scaleMargins/visible 등은 chart.priceScale(id)가 아니라
+  // "그 스케일을 쓰는 시리즈 인스턴스".priceScale()로 적용해야 한다(공식 예제: series.priceScale().applyOptions(...)).
+  // 처음엔 chart.priceScale('rsi')/('macd')로 했다가 실제 배포에서 캔들 축이랑 뒤섞여 보이는 버그가 났음 - 이 방식으로 교체.
   const applyPaneLayout = (rsiOn, macdOn) => {
     if (!chartRef.current) return
     const paneCount = (rsiOn ? 1 : 0) + (macdOn ? 1 : 0)
@@ -969,14 +972,16 @@ export default function BacktestChart() {
     chartRef.current.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: mainBottom } })
     let cursorBottom = 0.02 // 맨 아래(0.02 여백)부터 위로 하나씩 쌓는다
     if (macdOn) {
-      chartRef.current.priceScale('macd').applyOptions({
+      // MACD1/MACD5가 같은 priceScaleId('macd')를 쓰므로 둘 중 있는 쪽 시리즈로 스케일에 접근하면 된다
+      const macdAnySeries = macdSeriesRef.current || macd5SeriesRef.current
+      macdAnySeries?.macd.priceScale().applyOptions({
         scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom },
         visible: true, borderVisible: true, borderColor: '#2a2e38',
       })
       cursorBottom += PANE_HEIGHT + PANE_GAP
     }
     if (rsiOn) {
-      chartRef.current.priceScale('rsi').applyOptions({
+      rsiSeriesRef.current?.priceScale().applyOptions({
         scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom },
         visible: true, borderVisible: true, borderColor: '#2a2e38',
       })
