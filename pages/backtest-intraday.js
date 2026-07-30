@@ -39,6 +39,12 @@ const SESSION_OPENS = [
   { label: '미장', minute: 22 * 60 + 30, color: '#BA68C8' },
 ]
 
+// "앞으로 최대 이동폭" 분석용 - 전환점(방향이 바뀌는 지점)이어야만 잡히는 위 분석의 빈틈을 메우는 것.
+// 방향이 안 바뀌고 계속 같은 쪽으로 크게 움직이는 구간은 전환점이 아니라서 위 분석에선 안 잡히는데
+// (사용자 지적), 이 지표는 전환점 여부를 아예 안 따지고 "여기서부터 15분/1시간/2시간/4시간 뒤
+// 각각의 가격과 비교해서 그중 가장 많이 움직인 폭"만 본다 - 반전이든 계속되는 흐름이든 다 잡힘.
+const FORWARD_WINDOWS_BUCKETS = [1, 4, 8, 16] // 15분/1시간/2시간/4시간 뒤(버킷 개수 기준)
+
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
 }
@@ -65,8 +71,10 @@ export default function BacktestIntraday() {
   const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
   // 지금 마우스가 어느 영역(본문/y축/x축) 위에 있는지에 따라 커서 모양을 바꿔서 뭘 할 수 있는지 알려준다
   const [cursorStyle, setCursorStyle] = useState('grab')
-  // "시간대별 변동성 분석" 버튼 결과 - null(아직 안 돌림) | {ranked, dayCount, missingBuckets} | {error}
+  // "시간대별 변동성 분석"(전환점 기준) 버튼 결과 - null(아직 안 돌림) | {ranked, dayCount, missingBuckets} | {error}
   const [hourlyAnalysis, setHourlyAnalysis] = useState(null)
+  // "앞으로 최대 이동폭 분석"(전환점 무관) 버튼 결과 - 위와 같은 모양, 전환점 분석과 별도로 둘 다 볼 수 있게 함
+  const [forwardAnalysis, setForwardAnalysis] = useState(null)
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
@@ -84,7 +92,7 @@ export default function BacktestIntraday() {
   }, [symbol])
 
   // 심볼이 바뀌면 이전 심볼 기준으로 돌려둔 분석 결과는 더 이상 유효하지 않으니 지운다
-  useEffect(() => { setHourlyAnalysis(null) }, [symbol])
+  useEffect(() => { setHourlyAnalysis(null); setForwardAnalysis(null) }, [symbol])
 
   const navigateMonth = (delta) => setViewMonth(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
@@ -160,6 +168,7 @@ export default function BacktestIntraday() {
           dayRowsRef.current = nextDayRows
           setSelectedDates([]) // 달/심볼이 바뀌면 이전에 골라둔 날짜는 더 이상 유효하지 않을 수 있으니 초기화
           setHourlyAnalysis(null)
+          setForwardAnalysis(null)
           if (nextDays.length === 0) setError('이 달엔 완전한 거래일 데이터가 없습니다')
         }
       } catch (e) {
@@ -547,14 +556,142 @@ export default function BacktestIntraday() {
     setHourlyAnalysis({ ranked, dayCount: selectedDates.length, missingBuckets })
   }, [selectedDates])
 
+  // "⏱ 앞으로 최대 이동폭 분석" - 위 전환점 분석의 빈틈(방향이 안 바뀌고 계속 같은 쪽으로 크게
+  // 움직이는 구간은 전환점이 아니라서 안 잡히는 문제 - 사용자 지적)을 메우는 두 번째 지표.
+  // 전환점 여부를 아예 안 따지고, 모든 15분 버킷에 대해 "여기서부터 15분/1시간/2시간/4시간 뒤
+  // 가격과 비교해서 그중 가장 많이 움직인 폭"만 본다 - 반전이든 계속되는 흐름이든 다 잡힌다.
+  // (2026-07-01 나스닥 실측으로 검증 - 09:00~10:15 전 구간과 15:00 모두 0 아닌 값으로 잡힘,
+  // 전환점 지표에서 09:30 한 칸만 잡히던 것보다 훨씬 넓게 커버함)
+  const findForwardMoveScores = (rows) => {
+    const dayLast = new Array(TOTAL_BUCKETS).fill(null)
+    const dayRangeSum = new Array(TOTAL_BUCKETS).fill(0)
+    const dayRangeCnt = new Array(TOTAL_BUCKETS).fill(0)
+    for (const r of rows) {
+      const d = new Date(r.time * 1000)
+      const idx = d.getHours() * BUCKETS_PER_HOUR + Math.floor(d.getMinutes() / MINUTES_PER_BUCKET)
+      dayLast[idx] = r.close
+      dayRangeSum[idx] += r.high - r.low
+      dayRangeCnt[idx] += 1
+    }
+    const valid = []
+    for (let i = 0; i < TOTAL_BUCKETS; i++) if (dayLast[i] != null) valid.push({ idx: i, v: dayLast[i] })
+
+    const score = new Array(TOTAL_BUCKETS).fill(0)
+    for (let i = 0; i < valid.length; i++) {
+      let best = 0
+      for (const w of FORWARD_WINDOWS_BUCKETS) {
+        if (i + w >= valid.length) break // 창이 오름차순이라 하나 못 맞추면 더 큰 창도 다 못 맞춘다
+        const move = Math.abs(valid[i + w].v - valid[i].v)
+        if (move > best) best = move
+      }
+      score[valid[i].idx] = best
+    }
+    return { score, dayRangeSum, dayRangeCnt }
+  }
+
+  const runForwardMoveAnalysis = useCallback(() => {
+    if (selectedDates.length === 0) return
+
+    const bucketRangeSum = new Array(TOTAL_BUCKETS).fill(0)
+    const bucketRangeCnt = new Array(TOTAL_BUCKETS).fill(0)
+    const bucketScore = new Array(TOTAL_BUCKETS).fill(0)
+
+    for (const date of selectedDates) {
+      const rows = dayRowsRef.current[date]
+      if (!rows || rows.length === 0) continue
+      const { score, dayRangeSum, dayRangeCnt } = findForwardMoveScores(rows)
+      for (let idx = 0; idx < TOTAL_BUCKETS; idx++) {
+        bucketRangeSum[idx] += dayRangeSum[idx]
+        bucketRangeCnt[idx] += dayRangeCnt[idx]
+        bucketScore[idx] += score[idx]
+      }
+    }
+
+    const grandTotal = bucketScore.reduce((a, b) => a + b, 0)
+    const missingBuckets = []
+    const ranked = []
+    for (let idx = 0; idx < TOTAL_BUCKETS; idx++) {
+      if (bucketRangeCnt[idx] === 0) { missingBuckets.push(idx); continue }
+      if (bucketScore[idx] === 0) continue
+      ranked.push({
+        bucket: idx,
+        sharePct: grandTotal ? (bucketScore[idx] / grandTotal * 100) : 0,
+        avgRange: bucketRangeSum[idx] / bucketRangeCnt[idx],
+      })
+    }
+    ranked.sort((a, b) => b.sharePct - a.sharePct)
+    setForwardAnalysis({ ranked, dayCount: selectedDates.length, missingBuckets })
+  }, [selectedDates])
+
   // 고른 날짜 목록이 바뀌면(날짜 추가/제거, 전체 지우기) 이전 분석 결과는 더 이상 지금 선택과
   // 안 맞으니 지운다 - 버튼을 다시 눌러야 최신 선택 기준으로 갱신됨
-  useEffect(() => { setHourlyAnalysis(null) }, [selectedDates])
+  useEffect(() => { setHourlyAnalysis(null); setForwardAnalysis(null) }, [selectedDates])
 
   const finalDevs = selectedSeries.map(d => d.points[d.points.length - 1][1])
   const upDays = finalDevs.filter(v => v > 0).length
   const avgFinal = finalDevs.length ? finalDevs.reduce((a, b) => a + b, 0) / finalDevs.length : 0
   const maxAbs = selectedSeries.length ? Math.max(...selectedSeries.flatMap(d => d.points.map(p => Math.abs(p[1])))) : 0
+
+  // 전환점 분석/앞으로 최대 이동폭 분석 둘 다 결과 모양이 같아서(ranked/dayCount/missingBuckets) 막대
+  // 그리는 부분을 공유한다 - caption만 호출하는 쪽에서 다르게 넘긴다.
+  const renderBucketAnalysisPanel = (analysis, captionNode) => {
+    const maxShare = Math.max(...analysis.ranked.map(r => r.sharePct), 0.0001)
+    const byBucket = new Map(analysis.ranked.map((r, i) => [r.bucket, { ...r, rank: i + 1 }]))
+    return (
+      <div style={{ marginTop: 14, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20 }}>
+        <div style={{ fontSize: 12.5, color: '#9aa0ab', marginBottom: 18 }}>{captionNode}</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 0, height: 200 }}>
+          {Array.from({ length: 24 }, (_, hour) => {
+            const sessionHere = SESSION_OPENS.find(s => Math.floor(s.minute / 60) === hour)
+            return (
+              <div
+                key={hour}
+                style={{
+                  flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  borderLeft: hour !== 0 ? '1px solid #2a2e38' : 'none', paddingLeft: hour !== 0 ? 3 : 0,
+                }}
+              >
+                {/* 1시간마다 세로선으로 구분 - 그 시간의 15분 버킷 4개를 한 그룹으로 묶어서 아래 시간 숫자가 정가운데에 오게 한다 */}
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, width: '100%', height: 180 }}>
+                  {Array.from({ length: BUCKETS_PER_HOUR }, (_, quarter) => {
+                    const idx = hour * BUCKETS_PER_HOUR + quarter
+                    const info = byBucket.get(idx)
+                    const barH = info ? Math.max(3, (info.sharePct / maxShare) * 158) : 0
+                    const top3 = !!info && info.rank <= 3
+                    const label = `${String(hour).padStart(2, '0')}:${String(quarter * MINUTES_PER_BUCKET).padStart(2, '0')}`
+                    return (
+                      <div key={idx} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+                        <span style={{
+                          fontSize: 8, fontWeight: top3 ? 800 : 400, color: top3 ? '#4CAF50' : '#5a5f6a',
+                          marginBottom: 2, writingMode: 'vertical-rl', textOrientation: 'mixed', lineHeight: 1, height: 20,
+                        }}>
+                          {info ? info.rank : ''}
+                        </span>
+                        <div
+                          title={info ? `${label} - ${info.sharePct.toFixed(1)}% (평균 레인지 ${info.avgRange.toFixed(1)}pt)` : `${label} - 데이터 없음`}
+                          style={{
+                            width: '100%', height: barH,
+                            background: top3 ? '#4CAF50' : (info ? '#3a4152' : 'transparent'),
+                            borderRadius: '2px 2px 0 0',
+                          }}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+                <span style={{ fontSize: 9.5, color: sessionHere ? sessionHere.color : '#5a5f6a', fontWeight: sessionHere ? 800 : 400, marginTop: 5 }}>
+                  {String(hour).padStart(2, '0')}
+                </span>
+                {sessionHere && (
+                  <span style={{ fontSize: 8, color: sessionHere.color, marginTop: 1 }}>{sessionHere.label}</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <>
@@ -598,69 +735,51 @@ export default function BacktestIntraday() {
             )}
 
             {hourlyAnalysis && !hourlyAnalysis.error && (() => {
-              const maxShare = Math.max(...hourlyAnalysis.ranked.map(r => r.sharePct), 0.0001)
-              const byBucket = new Map(hourlyAnalysis.ranked.map((r, i) => [r.bucket, { ...r, rank: i + 1 }]))
-              // 안내 문구용 - 15분 단위 그대로 나열하면 너무 길어지니 "그 시간(들) 중 일부 구간은 데이터 없음" 식으로 시간 단위로 묶어서 보여준다
               const missingHoursSet = new Set(hourlyAnalysis.missingBuckets.map(idx => Math.floor(idx / BUCKETS_PER_HOUR)))
-              return (
-                <div style={{ marginTop: 14, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20 }}>
-                  <div style={{ fontSize: 12.5, color: '#9aa0ab', marginBottom: 18 }}>
-                    {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 그 15분 구간이 국소 고점/저점(전환점)이었던 날짜에서, 그 다음 전환점까지 실제로 얼마나 움직였는지로 비중을 매김. 막대가 있는 곳 = 여기서부터 지켜보고 있었어야 할 시점, 막대가 없으면 그 구간엔 전환점이 없었다는 뜻(활동량과 무관). 순위 숫자는 96칸 전부 표시(세로쓰기), 상위 3개는 초록색.
-                    {missingHoursSet.size > 0 && (
-                      <> · {[...missingHoursSet].sort((a, b) => a - b).map(h => `${String(h).padStart(2, '0')}시`).join(', ')} 구간엔 데이터 없음</>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 0, height: 200 }}>
-                    {Array.from({ length: 24 }, (_, hour) => {
-                      const sessionHere = SESSION_OPENS.find(s => Math.floor(s.minute / 60) === hour)
-                      return (
-                        <div
-                          key={hour}
-                          style={{
-                            flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
-                            borderLeft: hour !== 0 ? '1px solid #2a2e38' : 'none', paddingLeft: hour !== 0 ? 3 : 0,
-                          }}
-                        >
-                          {/* 1시간마다 세로선으로 구분 - 그 시간의 15분 버킷 4개를 한 그룹으로 묶어서 아래 시간 숫자가 정가운데에 오게 한다 */}
-                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, width: '100%', height: 180 }}>
-                            {Array.from({ length: BUCKETS_PER_HOUR }, (_, quarter) => {
-                              const idx = hour * BUCKETS_PER_HOUR + quarter
-                              const info = byBucket.get(idx)
-                              const barH = info ? Math.max(3, (info.sharePct / maxShare) * 158) : 0
-                              const top3 = !!info && info.rank <= 3
-                              const label = `${String(hour).padStart(2, '0')}:${String(quarter * MINUTES_PER_BUCKET).padStart(2, '0')}`
-                              return (
-                                <div key={idx} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
-                                  <span style={{
-                                    fontSize: 8, fontWeight: top3 ? 800 : 400, color: top3 ? '#4CAF50' : '#5a5f6a',
-                                    marginBottom: 2, writingMode: 'vertical-rl', textOrientation: 'mixed', lineHeight: 1, height: 20,
-                                  }}>
-                                    {info ? info.rank : ''}
-                                  </span>
-                                  <div
-                                    title={info ? `${label} - ${info.sharePct.toFixed(1)}% (평균 레인지 ${info.avgRange.toFixed(1)}pt)` : `${label} - 데이터 없음`}
-                                    style={{
-                                      width: '100%', height: barH,
-                                      background: top3 ? '#4CAF50' : (info ? '#3a4152' : 'transparent'),
-                                      borderRadius: '2px 2px 0 0',
-                                    }}
-                                  />
-                                </div>
-                              )
-                            })}
-                          </div>
-                          <span style={{ fontSize: 9.5, color: sessionHere ? sessionHere.color : '#5a5f6a', fontWeight: sessionHere ? 800 : 400, marginTop: 5 }}>
-                            {String(hour).padStart(2, '0')}
-                          </span>
-                          {sessionHere && (
-                            <span style={{ fontSize: 8, color: sessionHere.color, marginTop: 1 }}>{sessionHere.label}</span>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
+              const caption = (
+                <>
+                  {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 그 15분 구간이 국소 고점/저점(전환점)이었던 날짜에서, 그 다음 전환점까지 실제로 얼마나 움직였는지로 비중을 매김. 막대가 있는 곳 = 여기서부터 지켜보고 있었어야 할 시점, 막대가 없으면 그 구간엔 전환점이 없었다는 뜻(활동량과 무관). 순위 숫자는 96칸 전부 표시(세로쓰기), 상위 3개는 초록색.
+                  {missingHoursSet.size > 0 && (
+                    <> · {[...missingHoursSet].sort((a, b) => a - b).map(h => `${String(h).padStart(2, '0')}시`).join(', ')} 구간엔 데이터 없음</>
+                  )}
+                </>
               )
+              return renderBucketAnalysisPanel(hourlyAnalysis, caption)
+            })()}
+
+            {/* 위 전환점 분석의 빈틈(방향이 안 바뀌고 계속 같은 쪽으로 크게 움직이는 구간은 안 잡히는 문제)을
+                메우는 두 번째 지표 - 전환점 여부와 상관없이 "여기서부터 15분/1시간/2시간/4시간 뒤 중
+                가장 멀리 움직인 폭"만 본다. 기존 전환점 분석은 그대로 두고 그 아래에 추가한 것(사용자 요청). */}
+            <button
+              type="button"
+              onClick={runForwardMoveAnalysis}
+              disabled={selectedDates.length === 0}
+              style={{
+                marginTop: 14,
+                background: 'none', border: '1px solid #4CAF50', color: '#4CAF50', borderRadius: 9,
+                padding: '9px 16px', fontSize: 13, fontWeight: 700,
+                cursor: selectedDates.length === 0 ? 'default' : 'pointer',
+                opacity: selectedDates.length === 0 ? 0.5 : 1,
+              }}
+            >
+              ⏱ 고른 날짜 앞으로 최대 이동폭 분석(전환점 무관){selectedDates.length > 0 ? ` (${selectedDates.length}일)` : ''}
+            </button>
+
+            {forwardAnalysis && forwardAnalysis.error && (
+              <div style={{ marginTop: 10, color: '#F44336', fontSize: 13 }}>❌ {forwardAnalysis.error}</div>
+            )}
+
+            {forwardAnalysis && !forwardAnalysis.error && (() => {
+              const missingHoursSet = new Set(forwardAnalysis.missingBuckets.map(idx => Math.floor(idx / BUCKETS_PER_HOUR)))
+              const caption = (
+                <>
+                  {SYMBOL_LABEL[symbol]} · 고른 날짜 {forwardAnalysis.dayCount}일 기준 - 전환점 여부와 무관하게, 이 15분 구간에서부터 15분/1시간/2시간/4시간 뒤 가격들과 비교해 그중 가장 많이 움직인 폭으로 비중을 매김. 방향이 안 바뀌고 계속 같은 쪽으로 크게 움직이는 구간도 여기선 잡힘. 순위 숫자는 96칸 전부 표시(세로쓰기), 상위 3개는 초록색.
+                  {missingHoursSet.size > 0 && (
+                    <> · {[...missingHoursSet].sort((a, b) => a - b).map(h => `${String(h).padStart(2, '0')}시`).join(', ')} 구간엔 데이터 없음</>
+                  )}
+                </>
+              )
+              return renderBucketAnalysisPanel(forwardAnalysis, caption)
             })()}
           </div>
 
