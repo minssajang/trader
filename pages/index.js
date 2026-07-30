@@ -56,6 +56,10 @@ const GLOSSARY = [
   { term: 'CFD', label: '차액결제거래', desc: '실제 자산을 소유하지 않고 가격 변동분만 정산하는 파생상품이에요. 거래소가 아니라 브로커를 통해 거래되고, MetaTrader 5가 주로 다루는 방식이에요.' },
 ]
 
+// 랜딩페이지 히어로 배경 영상 - Pexels 무료 상업이용 라이선스(저작자 표시 불필요) 원본을
+// 720p/30fps/무음으로 압축해서 슈퍼베이스 site-assets 버킷(공개)에 올려둔 것.
+const HERO_VIDEO_URL = 'https://ztrdgcebsxbhtckstlhn.supabase.co/storage/v1/object/public/site-assets/finance_chart_bg.mp4'
+
 function DownloadButton({ info, app, onNotReadyClick }) {
   if (info) {
     return (
@@ -141,16 +145,35 @@ export default function Home() {
 
         <AdSlot slot={topSlot} label="상단 배너" style={{ marginBottom: 20 }} />
 
-        <section className="hero">
-          <span className="hero-badge">🎉 베타 오픈 기념 · 일주일 무료체험</span>
-          <h1>그냥, 손쉬운<br />예약매매 시스템</h1>
-          <p>
-            실시간 연동에 손쉬운 손절 익절까지 — 복잡한 설정 없이 그냥 쓰면 돼요.
-            지금 베타 오픈 기간 동안 일주일 무료체험으로 먼저 경험해보세요.
-          </p>
-          <div className="hero-ctas">
-            <Link href="/apply" className="btn-cta primary">🎁 일주일 무료체험 신청</Link>
-            <Link href="/blog" className="btn-cta ghost">블로그 둘러보기</Link>
+        <section className="hero" style={{ position: 'relative', overflow: 'hidden' }}>
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            style={{
+              position: 'absolute', inset: 0, width: '100%', height: '100%',
+              objectFit: 'cover', zIndex: 0, opacity: 0.35, pointerEvents: 'none',
+            }}
+          >
+            <source src={HERO_VIDEO_URL} type="video/mp4" />
+          </video>
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 1,
+            background: 'linear-gradient(180deg, rgba(15,17,21,0.55) 0%, rgba(15,17,21,0.88) 100%)',
+          }} />
+          <div style={{ position: 'relative', zIndex: 2 }}>
+            <span className="hero-badge">🎉 베타 오픈 기념 · 일주일 무료체험</span>
+            <h1>그냥, 손쉬운<br />예약매매 시스템</h1>
+            <p>
+              실시간 연동에 손쉬운 손절 익절까지 — 복잡한 설정 없이 그냥 쓰면 돼요.
+              지금 베타 오픈 기간 동안 일주일 무료체험으로 먼저 경험해보세요.
+            </p>
+            <div className="hero-ctas">
+              <Link href="/apply" className="btn-cta primary">🎁 일주일 무료체험 신청</Link>
+              <Link href="/blog" className="btn-cta ghost">블로그 둘러보기</Link>
+            </div>
           </div>
         </section>
 
