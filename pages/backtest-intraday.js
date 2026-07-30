@@ -12,6 +12,16 @@ const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 const DAY_COLORS = ['#4FC3F7', '#FFB74D', '#BA68C8', '#81C784', '#F06292', '#FFD54F', '#4DB6AC', '#E57373']
 function dayColor(i) { return DAY_COLORS[i % DAY_COLORS.length] }
 
+// 하루 전체(0~1439분)를 한 화면에 우겨넣지 말고 12시간 구간만 보여주고, 아래 슬라이드바로 그 구간을
+// 앞뒤로 이동한다(사용자 요청) - 슬라이드바는 "지금 보는 위치"가 아니라 "몇 시부터 보여줄지"를 정한다.
+const DAY_MIN = 0
+const DAY_MAX = 24 * 60 - 1
+const WINDOW_MIN = 12 * 60
+
+// 한국 시간 기준 실제 거래 시작은 00:00이 아니라 07:00(브로커 01시=한국 07시, candleCsv.js 오프셋
+// 규칙 참고) - x축(00:00~23:59)은 그대로 두고, 시가(0선) 기준만 07:00 시점 가격으로 삼는다(사용자 요청).
+const REFERENCE_MIN = 7 * 60 // 07:00
+
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
 }
@@ -25,7 +35,7 @@ export default function BacktestIntraday() {
   const [days, setDays] = useState([]) // [{date, points:[[minute, deviation]]}]
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [hoverInfo, setHoverInfo] = useState(null) // {x, minute, avg, up, down}
+  const [hoverInfo, setHoverInfo] = useState(null) // {minute, avg, up, down}
   // 달력에서 클릭해서 고른 날짜들만 겹쳐 그린다 - 처음엔 아무것도 안 골랐으니 차트가 비어있다
   // (예전엔 그 달 전체를 자동으로 다 그렸는데, "왜 선이 미리 그려져 있냐"는 피드백으로 사용자가
   // 직접 고른 날짜만 그리는 방식으로 바꿈)
@@ -33,6 +43,8 @@ export default function BacktestIntraday() {
   // 평균선은 기본으로 자동으로 안 그리고, 이 버튼을 켜야만 그린다(사용자 요청 - 시키지 않은 걸
   // 자동으로 하지 말고 옵션 버튼으로 빼둘 것)
   const [showAverage, setShowAverage] = useState(false)
+  // 지금 보고 있는 12시간 구간의 시작(분) - 아래 슬라이드바로 조절
+  const [windowStart, setWindowStart] = useState(0)
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
@@ -94,9 +106,16 @@ export default function BacktestIntraday() {
 
         const nextDays = []
         for (const [date, rows] of [...byDate.entries()].sort()) {
-          // 완전한 하루가 아니어도(데이터 경계에 걸려 일부 시간대만 있어도) 있는 부분만 그린다 -
-          // 시가는 그날 실제로 가진 첫 캔들의 open을 기준으로 삼는다.
-          const dayOpen = rows[0].open
+          // 완전한 하루가 아니어도(데이터 경계에 걸려 일부 시간대만 있어도) 있는 부분만 그린다.
+          // 시가(0선) 기준은 07:00 시점 가격 - 정확히 07:00 캔들이 있으면 그걸 쓰고, 없으면(경계에
+          // 걸려 07:00 근처가 비어있으면) 그날 안에서 07:00에 가장 가까운 캔들로 대체한다.
+          let refRow = null, refDist = Infinity
+          for (const r of rows) {
+            const d = new Date(r.time * 1000)
+            const dist = Math.abs((d.getHours() * 60 + d.getMinutes()) - REFERENCE_MIN)
+            if (dist < refDist) { refRow = r; refDist = dist }
+          }
+          const dayOpen = (refRow || rows[0]).open
           const points = rows.map(r => {
             const d = new Date(r.time * 1000)
             const minutes = d.getHours() * 60 + d.getMinutes()
@@ -130,35 +149,36 @@ export default function BacktestIntraday() {
     [selectedDates]
   )
 
+  // y축 범위는 지금 보이는 12시간 구간 안의 값만 기준으로 삼는다(창을 옮기면 세로 스케일도 그 구간에 맞게 다시 잡힘)
+  const windowEnd = windowStart + WINDOW_MIN - 1
   const { yLo, yHi } = useMemo(() => {
-    if (selectedSeries.length === 0) return { yLo: -1, yHi: 1 }
     let lo = Infinity, hi = -Infinity
     for (const d of selectedSeries) {
-      for (const [, v] of d.points) {
+      for (const [mnt, v] of d.points) {
+        if (mnt < windowStart || mnt > windowEnd) continue
         if (v < lo) lo = v
         if (v > hi) hi = v
       }
     }
+    if (!Number.isFinite(lo)) return { yLo: -1, yHi: 1 }
     const pad = (hi - lo) * 0.08 || 1
     return { yLo: lo - pad, yHi: hi + pad }
-  }, [selectedSeries])
+  }, [selectedSeries, windowStart, windowEnd])
 
   // "평균선 표시" 버튼을 켰을 때만 계산 - 기본은 안 켜져 있으니 매번 계산 안 해도 됨
   const avgMap = useMemo(() => {
     if (!showAverage || selectedSeries.length < 2) return new Map()
     const sums = new Map()
     for (const d of selectedSeries) {
-      for (const [m, v] of d.points) {
-        const e = sums.get(m) || { s: 0, n: 0 }
+      for (const [mnt, v] of d.points) {
+        const e = sums.get(mnt) || { s: 0, n: 0 }
         e.s += v; e.n += 1
-        sums.set(m, e)
+        sums.set(mnt, e)
       }
     }
-    return new Map([...sums.entries()].map(([m, e]) => [m, e.s / e.n]))
+    return new Map([...sums.entries()].map(([mnt, e]) => [mnt, e.s / e.n]))
   }, [showAverage, selectedSeries])
   const avgSeries = useMemo(() => [...avgMap.entries()].sort((a, b) => a[0] - b[0]), [avgMap])
-
-  const MIN_MIN = 0, MAX_MIN = 24 * 60 - 1
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -171,8 +191,9 @@ export default function BacktestIntraday() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     const W = rect.width, H = rect.height
 
-    const px = m => 56 + (m - MIN_MIN) / (MAX_MIN - MIN_MIN) * (W - 56 - 20)
+    const px = mnt => 56 + (mnt - windowStart) / (WINDOW_MIN - 1) * (W - 56 - 20)
     const py = v => 16 + (1 - (v - yLo) / (yHi - yLo)) * (H - 16 - 34)
+    const inWindow = mnt => mnt >= windowStart && mnt <= windowEnd
 
     ctx.clearRect(0, 0, W, H)
     if (selectedSeries.length === 0) {
@@ -186,11 +207,13 @@ export default function BacktestIntraday() {
     ctx.font = '11px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif'
     ctx.strokeStyle = '#232733'
     ctx.fillStyle = '#9aa0ab'
-    for (let h = 0; h <= 22; h += 2) {
+    const firstHour = Math.ceil(windowStart / 60)
+    const lastHour = Math.floor(windowEnd / 60)
+    for (let h = firstHour; h <= lastHour; h++) {
       const x = px(h * 60)
       ctx.beginPath(); ctx.moveTo(x, 16); ctx.lineTo(x, H - 34); ctx.stroke()
       ctx.textAlign = 'center'
-      ctx.fillText(`${String(h).padStart(2, '0')}:00`, x, H - 16)
+      ctx.fillText(`${String(h % 24).padStart(2, '0')}:00`, x, H - 16)
     }
     for (let i = 0; i <= 5; i++) {
       const v = yLo + (yHi - yLo) * (i / 5)
@@ -208,18 +231,19 @@ export default function BacktestIntraday() {
     ctx.beginPath(); ctx.moveTo(56, zeroY); ctx.lineTo(W - 20, zeroY); ctx.stroke()
     ctx.setLineDash([])
     ctx.textAlign = 'left'
-    ctx.fillText('시가(0)', 58, zeroY - 5)
+    ctx.fillText('시가(07:00, 0)', 58, zeroY - 5)
 
-    // 고른 날짜들만 그린다(순서대로 옅은 색→진한 색). 색상 팔레트를 돌아가며 써서 어떤 선이
-    // 어떤 날짜인지 구분되게 하고, 왼쪽 날짜 칩 목록의 색과도 맞춘다(dayColor 참고).
+    // 고른 날짜들만, 지금 보이는 12시간 구간에 해당하는 부분만 그린다
     const n = selectedSeries.length
     selectedSeries.forEach((d, i) => {
       ctx.strokeStyle = dayColor(i)
       ctx.lineWidth = 1.8
       ctx.beginPath()
-      d.points.forEach(([m, v], idx) => {
-        const x = px(m), y = py(v)
-        if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+      let started = false
+      d.points.forEach(([mnt, v]) => {
+        if (!inWindow(mnt)) return
+        const x = px(mnt), y = py(v)
+        if (!started) { ctx.moveTo(x, y); started = true } else ctx.lineTo(x, y)
       })
       ctx.stroke()
     })
@@ -229,22 +253,24 @@ export default function BacktestIntraday() {
       ctx.lineWidth = 2.6
       ctx.setLineDash([6, 4])
       ctx.beginPath()
-      avgSeries.forEach(([m, v], idx) => {
-        const x = px(m), y = py(v)
-        if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+      let started = false
+      avgSeries.forEach(([mnt, v]) => {
+        if (!inWindow(mnt)) return
+        const x = px(mnt), y = py(v)
+        if (!started) { ctx.moveTo(x, y); started = true } else ctx.lineTo(x, y)
       })
       ctx.stroke()
       ctx.setLineDash([])
     }
 
-    if (hoverInfo) {
+    if (hoverInfo && inWindow(hoverInfo.minute)) {
       const hx = px(hoverInfo.minute)
       ctx.strokeStyle = '#e8eaed'
       ctx.globalAlpha = 0.35
       ctx.beginPath(); ctx.moveTo(hx, 16); ctx.lineTo(hx, H - 34); ctx.stroke()
       ctx.globalAlpha = 1
     }
-  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo])
+  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd])
 
   useEffect(() => {
     draw()
@@ -253,12 +279,11 @@ export default function BacktestIntraday() {
     return () => window.removeEventListener('resize', onResize)
   }, [draw])
 
-  // 마우스 호버든 아래쪽 슬라이드바든 둘 다 이 함수로 같은 crosshair/HUD를 갱신한다
   const updateHoverForMinute = (minute) => {
     if (selectedSeries.length === 0) return
     let up = 0, down = 0
     for (const d of selectedSeries) {
-      const p = d.points.find(([m]) => m === minute)
+      const p = d.points.find(([mnt]) => mnt === minute)
       if (p) { if (p[1] >= 0) up++; else down++ }
     }
     setHoverInfo({ minute, avg: avgMap.get(minute), up, down })
@@ -271,11 +296,11 @@ export default function BacktestIntraday() {
     const mx = e.clientX - rect.left
     if (mx < 56 || mx > rect.width - 20) { setHoverInfo(null); return }
     const t = (mx - 56) / (rect.width - 56 - 20)
-    const minute = Math.max(MIN_MIN, Math.min(MAX_MIN, Math.round(MIN_MIN + t * (MAX_MIN - MIN_MIN))))
+    const minute = Math.max(windowStart, Math.min(windowEnd, Math.round(windowStart + t * (WINDOW_MIN - 1))))
     updateHoverForMinute(minute)
   }
 
-  const fmtHM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+  const fmtHM = (mnt) => `${String(Math.floor((mnt % 1440 + 1440) % 1440 / 60)).padStart(2, '0')}:${String(mnt % 60).padStart(2, '0')}`
 
   // 달력 클릭 = 그 날짜를 선택 목록에 넣거나 뺀다(토글). availableDates는 데이터셋 범위 전체 기준이라
   // 주말이나 (경계에 걸려 잘려서) 오버레이에서 빠진 날도 "데이터 있음"으로 클릭 가능하게 나올 수 있어서,
@@ -309,7 +334,7 @@ export default function BacktestIntraday() {
         <main style={{ maxWidth: 1200, margin: '0 auto', padding: '28px 20px 60px' }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>일중 패턴 — 시가 대비 편차 오버레이</h1>
           <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 20 }}>
-            왼쪽 달력에서 날짜를 하나씩 클릭해서 겹쳐볼 날짜를 골라주세요. 고른 날짜의 종가에서 그날 시가(01:00 기준)를 뺀 값을 시간대별로 겹쳐 그립니다 - 0선이 그날 시가입니다.
+            왼쪽 달력에서 날짜를 하나씩 클릭해서 겹쳐볼 날짜를 골라주세요. 고른 날짜의 종가에서 그날 시가(한국시간 07:00 기준 - 실제 거래 시작 시점)를 뺀 값을 시간대별로 겹쳐 그립니다 - 0선이 07:00 가격입니다. 한 화면엔 12시간만 보이고, 아래 슬라이드바로 구간을 옮길 수 있습니다.
           </p>
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -362,6 +387,7 @@ export default function BacktestIntraday() {
                       평균선 표시
                     </label>
                   )}
+                  <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#e8eaed' }}>{fmtHM(windowStart)} ~ {fmtHM(windowEnd + 1)}</span>
                 </div>
                 <div ref={wrapRef} style={{ position: 'relative' }}>
                   <canvas
@@ -391,17 +417,20 @@ export default function BacktestIntraday() {
                     </div>
                   )}
                 </div>
-                {selectedSeries.length > 0 && (
+                {/* 아래 슬라이드바 - 지금 보는 12시간 구간의 시작 시각을 옮긴다(하루 전체를 한 화면에 우겨넣지 않기 위함) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+                  <span style={{ fontSize: 11, color: '#9aa0ab', width: 38 }}>00:00</span>
                   <input
                     type="range"
-                    min={MIN_MIN}
-                    max={MAX_MIN}
-                    step={1}
-                    value={hoverInfo ? hoverInfo.minute : MIN_MIN}
-                    onChange={e => updateHoverForMinute(Number(e.target.value))}
-                    style={{ width: '100%', marginTop: 14, accentColor: '#26a69a' }}
+                    min={DAY_MIN}
+                    max={DAY_MAX - WINDOW_MIN + 1}
+                    step={30}
+                    value={windowStart}
+                    onChange={e => setWindowStart(Number(e.target.value))}
+                    style={{ flex: 1, accentColor: '#26a69a' }}
                   />
-                )}
+                  <span style={{ fontSize: 11, color: '#9aa0ab', width: 38, textAlign: 'right' }}>12:00</span>
+                </div>
               </div>
 
               {selectedSeries.length > 0 && (
@@ -421,7 +450,7 @@ export default function BacktestIntraday() {
               )}
 
               <p style={{ color: '#9aa0ab', fontSize: 12, marginTop: 14 }}>
-                시간은 브로커 서버 기준(서머타임 적용). 데이터 경계에 걸쳐 일부 시간대만 있는 날은 있는 부분만 그려집니다.
+                시간은 브로커 서버 기준(서머타임 적용). 데이터 경계에 걸쳐 일부 시간대만 있는 날은 있는 부분만 그려집니다. 통계 카드는 고른 날짜 전체(보이는 구간 제한 없이) 기준입니다.
               </p>
             </div>
           </div>
