@@ -41,6 +41,7 @@ export default function Check() {
             <Link href="/">소개</Link>
             <Link href="/blog">블로그</Link>
             <Link href="/backtest-chart">📊 백테스팅</Link>
+            <Link href="/backtest-intraday">📈 일중패턴</Link>
             <Link href="/apply">신청</Link>
           </nav>
         </header>

@@ -9,7 +9,6 @@ const FEATURES = [
   { icon: '⚡', title: '실시간 연동', desc: '실시간 시세를 그대로 받아와서 바로바로 반영돼요.' },
   { icon: '🎯', title: '예약매매', desc: '미리 정해둔 조건대로 알아서 진입해요.' },
   { icon: '🛡️', title: '손쉬운 손절 익절', desc: '복잡한 설정 없이 손절·익절을 자동으로 처리해요.' },
-  { icon: '📈', title: '일중 패턴 분석', desc: '원하는 날짜의 과거 시세를 겹쳐보고 전환점·변동성을 분석해서 PDF 리포트로 받아볼 수 있어요.' },
 ]
 
 const STEPS = [
@@ -154,6 +153,29 @@ export default function Home() {
               <p>{f.desc}</p>
             </div>
           ))}
+        </div>
+
+        <div className="section-title" style={{ marginTop: 48 }}>
+          <h2>📈 일중 패턴 분석</h2>
+          <p>과거 데이터로 언제 크게 움직였는지 확인하고, PDF 리포트로도 받아보세요</p>
+        </div>
+        <div className="card" style={{ display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap', marginBottom: 20 }}>
+          <img
+            src="/images/intraday-report-preview.png"
+            alt="일중 패턴 분석 PDF 리포트 예시 — 전환점 분석 그래프와 오늘의 분석 서술"
+            style={{ flex: '1 1 380px', maxWidth: 480, width: '100%', borderRadius: 10, border: '1px solid var(--border)', display: 'block' }}
+          />
+          <div style={{ flex: '1 1 280px', minWidth: 240 }}>
+            <p style={{ marginTop: 0 }}>
+              원하는 날짜(들)의 과거 시세를 겹쳐보고, 하루 중 언제 방향이 크게 바뀌었는지(전환점)와
+              언제 가장 많이 움직였는지(이동폭)를 분석해줘요.
+            </p>
+            <p>
+              날짜를 하나만 고르면 그날 실제로 있었던 일을 수치로 정리한 &quot;오늘의 분석&quot;도 함께 볼 수 있고,
+              전체 분석을 PDF 리포트로 다운로드할 수도 있어요.
+            </p>
+            <Link href="/backtest-intraday" className="btn-cta primary" style={{ marginTop: 8 }}>📈 일중 패턴 분석 보러가기</Link>
+          </div>
         </div>
 
         <div className="section-title">
