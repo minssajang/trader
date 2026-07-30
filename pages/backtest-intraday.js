@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import BrandLogo from '../components/BrandLogo'
+import { MonthCalendar, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
@@ -39,8 +40,8 @@ export default function BacktestIntraday() {
     return () => { ignore = true }
   }, [symbol])
 
-  const monthLabel = `${viewMonth.getFullYear()}년 ${viewMonth.getMonth() + 1}월`
   const navigateMonth = (delta) => setViewMonth(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
+  const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
   useEffect(() => {
     let ignore = false
@@ -48,7 +49,14 @@ export default function BacktestIntraday() {
     const monthStart = `${y}-${String(m + 1).padStart(2, '0')}-01`
     const monthEnd = `${y}-${String(m + 1).padStart(2, '0')}-31`
 
-    const ds = datasets.find(d => d.date_from <= monthEnd && d.date_to >= monthStart)
+    // 데이터 파일들이 서로 겹치는 구간이 많아서(예: "5/29~7/1"과 "6/29~7/29" 둘 다 7월 일부를 포함),
+    // 그냥 첫 번째로 겹치는 파일을 고르면 날짜 범위(date_from ascending 정렬)상 먼저 오는 쪽이 뽑혀서
+    // 실제로는 그 달 극히 일부만 담긴 파일이 선택되는 버그가 있었다 - 겹치는 파일들 중 그 달을 가장
+    // 많이 담고 있는(date_to가 가장 늦은) 파일을 고르도록 수정.
+    const overlapping = datasets.filter(d => d.date_from <= monthEnd && d.date_to >= monthStart)
+    const ds = overlapping.length
+      ? overlapping.reduce((best, d) => (d.date_to > best.date_to ? d : best))
+      : null
     if (!ds) {
       setDays([])
       setError(datasets.length ? '이 달에는 데이터가 없습니다' : '')
@@ -245,83 +253,90 @@ export default function BacktestIntraday() {
             선택한 달의 모든 거래일을 겹쳐서, 그날 시가(01:00 기준) 대비 가격이 시간대별로 어떻게 움직였는지 봅니다. 0선이 그날 시가입니다.
           </p>
 
-          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 16 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
-                <button key={sym} onClick={() => setSymbol(sym)} style={{
-                  background: symbol === sym ? '#4CAF50' : 'none', color: symbol === sym ? '#fff' : '#9aa0ab',
-                  border: `1px solid ${symbol === sym ? '#4CAF50' : '#2a2e38'}`, borderRadius: 9,
-                  padding: '8px 16px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-                }}>{label}</button>
-              ))}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button type="button" onClick={() => navigateMonth(-1)} style={{ background: 'none', border: '1px solid #2a2e38', color: '#9aa0ab', borderRadius: 8, width: 30, height: 30, cursor: 'pointer' }}>‹</button>
-              <div style={{ fontWeight: 700, fontSize: 15, minWidth: 90, textAlign: 'center' }}>{monthLabel}</div>
-              <button type="button" onClick={() => navigateMonth(1)} style={{ background: 'none', border: '1px solid #2a2e38', color: '#9aa0ab', borderRadius: 8, width: 30, height: 30, cursor: 'pointer' }}>›</button>
-            </div>
-            {loading && <div style={{ color: '#9aa0ab', fontSize: 13 }}>불러오는 중...</div>}
-            {error && <div style={{ color: '#F44336', fontSize: 13 }}>❌ {error}</div>}
-          </div>
-
-          <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20, position: 'relative' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14, flexWrap: 'wrap', fontSize: 12.5, color: '#9aa0ab' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 18, height: 2, display: 'inline-block', background: '#6b8fb0', opacity: 0.55 }} />
-                개별 거래일 ({days.length}일, 옅을수록 이른 날짜)
-              </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 18, height: 3, display: 'inline-block', background: '#26a69a' }} />
-                전체 평균 편차
-              </span>
-            </div>
-            <div ref={wrapRef} style={{ position: 'relative' }}>
-              <canvas
-                ref={canvasRef}
-                onMouseMove={onMouseMove}
-                onMouseLeave={() => setHoverInfo(null)}
-                style={{ display: 'block', width: '100%', height: 460, cursor: 'crosshair' }}
+          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            {/* 왼쪽: 심볼 선택 + 달력(그 달에 데이터 있는 날짜 확인용, 클릭은 안 됨 - 이 페이지는 달 전체를 겹쳐 보여줌) */}
+            <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
+                  <button key={sym} onClick={() => setSymbol(sym)} style={{
+                    flex: 1, background: symbol === sym ? '#4CAF50' : 'none', color: symbol === sym ? '#fff' : '#9aa0ab',
+                    border: `1px solid ${symbol === sym ? '#4CAF50' : '#2a2e38'}`, borderRadius: 9,
+                    padding: '8px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                  }}>{label}</button>
+                ))}
+              </div>
+              <MonthCalendar
+                viewDate={viewMonth}
+                onNavigate={navigateMonth}
+                availableDates={availableDates}
+                maxWidth={220}
               />
-              {hoverInfo && (
-                <div style={{
-                  position: 'absolute', top: 0, right: 0, background: '#171a21', border: '1px solid #2a2e38',
-                  borderRadius: 10, padding: '10px 14px', fontSize: 12.5, lineHeight: 1.6, minWidth: 150,
-                  pointerEvents: 'none', boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
-                }}>
-                  <div style={{ color: '#9aa0ab', fontSize: 11, marginBottom: 4 }}>{fmtHM(hoverInfo.minute)}</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                    <span>평균 편차</span><b>{hoverInfo.avg != null ? hoverInfo.avg.toFixed(1) + 'pt' : '-'}</b>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                    <span>시가 위</span><b>{hoverInfo.up}일</b>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                    <span>시가 아래</span><b>{hoverInfo.down}일</b>
-                  </div>
+              {loading && <div style={{ color: '#9aa0ab', fontSize: 13 }}>불러오는 중...</div>}
+              {error && <div style={{ color: '#F44336', fontSize: 13 }}>❌ {error}</div>}
+            </div>
+
+            {/* 오른쪽: 오버레이 차트 */}
+            <div style={{ flex: 1, minWidth: 280 }}>
+              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20, position: 'relative' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14, flexWrap: 'wrap', fontSize: 12.5, color: '#9aa0ab' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 18, height: 2, display: 'inline-block', background: '#6b8fb0', opacity: 0.55 }} />
+                    개별 거래일 ({days.length}일, 옅을수록 이른 날짜)
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 18, height: 3, display: 'inline-block', background: '#26a69a' }} />
+                    전체 평균 편차
+                  </span>
+                </div>
+                <div ref={wrapRef} style={{ position: 'relative' }}>
+                  <canvas
+                    ref={canvasRef}
+                    onMouseMove={onMouseMove}
+                    onMouseLeave={() => setHoverInfo(null)}
+                    style={{ display: 'block', width: '100%', height: 460, cursor: 'crosshair' }}
+                  />
+                  {hoverInfo && (
+                    <div style={{
+                      position: 'absolute', top: 0, right: 0, background: '#171a21', border: '1px solid #2a2e38',
+                      borderRadius: 10, padding: '10px 14px', fontSize: 12.5, lineHeight: 1.6, minWidth: 150,
+                      pointerEvents: 'none', boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
+                    }}>
+                      <div style={{ color: '#9aa0ab', fontSize: 11, marginBottom: 4 }}>{fmtHM(hoverInfo.minute)}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span>평균 편차</span><b>{hoverInfo.avg != null ? hoverInfo.avg.toFixed(1) + 'pt' : '-'}</b>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span>시가 위</span><b>{hoverInfo.up}일</b>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span>시가 아래</span><b>{hoverInfo.down}일</b>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {days.length > 0 && (
+                <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+                  {[
+                    ['분석 거래일 수', `${days.length}일`],
+                    ['마감이 시가보다 높은 날', `${upDays} / ${days.length}일`],
+                    ['평균 마감 편차(시가 대비)', `${avgFinal.toFixed(1)}pt`],
+                    ['일중 최대 편차폭', `${maxAbs.toFixed(0)}pt`],
+                  ].map(([k, v]) => (
+                    <div key={k} style={{ flex: '1 1 140px', background: '#171a21', border: '1px solid #2a2e38', borderRadius: 10, padding: '12px 14px' }}>
+                      <div style={{ color: '#9aa0ab', fontSize: 11.5, marginBottom: 4 }}>{k}</div>
+                      <div style={{ fontSize: 17, fontWeight: 700 }}>{v}</div>
+                    </div>
+                  ))}
                 </div>
               )}
+
+              <p style={{ color: '#9aa0ab', fontSize: 12, marginTop: 14 }}>
+                시간은 브로커 서버 기준(서머타임 적용). 완전한 하루(캔들 {MIN_CANDLES_PER_DAY}개 이상)만 포함하며, 주말·데이터 경계에 걸친 날은 제외됩니다.
+              </p>
             </div>
           </div>
-
-          {days.length > 0 && (
-            <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-              {[
-                ['분석 거래일 수', `${days.length}일`],
-                ['마감이 시가보다 높은 날', `${upDays} / ${days.length}일`],
-                ['평균 마감 편차(시가 대비)', `${avgFinal.toFixed(1)}pt`],
-                ['일중 최대 편차폭', `${maxAbs.toFixed(0)}pt`],
-              ].map(([k, v]) => (
-                <div key={k} style={{ flex: '1 1 140px', background: '#171a21', border: '1px solid #2a2e38', borderRadius: 10, padding: '12px 14px' }}>
-                  <div style={{ color: '#9aa0ab', fontSize: 11.5, marginBottom: 4 }}>{k}</div>
-                  <div style={{ fontSize: 17, fontWeight: 700 }}>{v}</div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <p style={{ color: '#9aa0ab', fontSize: 12, marginTop: 14 }}>
-            시간은 브로커 서버 기준(서머타임 적용). 완전한 하루(캔들 {MIN_CANDLES_PER_DAY}개 이상)만 포함하며, 주말·데이터 경계에 걸친 날은 제외됩니다.
-          </p>
         </main>
       </div>
     </>
