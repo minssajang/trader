@@ -218,6 +218,11 @@ export default function BacktestChart() {
   const [simDoubleBPairs, setSimDoubleBPairsState] = useState(EMPTY_PAIR_SLOTS)
   const [simBollInnerSellEnabled, setSimBollInnerSellEnabled] = useState(false)
   const [simBollInnerBuyEnabled, setSimBollInnerBuyEnabled] = useState(false)
+  // 시뮬레이션 결과 저장 - 청산된 거래를 여기 쌓아뒀다가 "결과 저장" 누르면 한 번에 DB로 보낸다.
+  // (Claude가 나중에 MCP run_sql로 simulation_results 테이블을 조회해서 분석해줄 수 있게 하는 용도 -
+  // 사이트 화면 어디에도 노출 안 되는, 세션에서만 쓰는 백엔드 기록)
+  const [closedTradesCount, setClosedTradesCount] = useState(0)
+  const [savingResults, setSavingResults] = useState(false)
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -237,6 +242,7 @@ export default function BacktestChart() {
   const doubleBSignalPointsRef = useRef([]) // 더블비 신호(표시용) 전체 [{idx, time, side}]
   const bollInnerSignalPointsRef = useRef([]) // 볼린저 눌림 신호(표시용) 전체 [{idx, time, side}]
   const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
+  const closedTradesRef = useRef([]) // 청산된 거래 전체(수동/반자동/시뮬레이션 다 포함, source로 구분) - "결과 저장" 누르면 DB로 보냄
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
 
@@ -1073,14 +1079,67 @@ export default function BacktestChart() {
     }])
   }
 
+  // 포지션 id의 접두어로 어디서 생긴 거래인지 구분한다 - 반자동/시뮬레이션은 applyIncrement에서
+  // `auto_...`/`sim_...`로 접두어를 붙여서 만들고, 수동 BUY/SELL(openPosition)은 접두어가 없다.
+  const tradeSource = (id) => {
+    if (id.startsWith('sim_')) return 'sim'
+    if (id.startsWith('auto_')) return 'auto'
+    return 'manual'
+  }
+
   const closePosition = (id) => {
     const pos = positions.find(p => p.id === id)
     if (!pos) return
     if (currentPrice != null) {
-      const { dollars } = calcPnl(pos, currentPrice)
+      const { points, dollars } = calcPnl(pos, currentPrice)
       setBalance(b => b + dollars)
+      closedTradesRef.current.push({
+        source: tradeSource(pos.id), side: pos.side, symbol: pos.symbol, lot: pos.lot,
+        entryPrice: pos.entryPrice, entryTime: pos.entryTime,
+        exitPrice: currentPrice, exitTime: rowsRef.current[playIndex - 1]?.time ?? null,
+        points, dollars,
+      })
+      setClosedTradesCount(c => c + 1)
     }
     setPositions(prev => prev.filter(p => p.id !== id))
+  }
+
+  // 시뮬레이션에서 나온 청산 거래만 모아서 DB에 저장 - 화면엔 노출 안 되고, 나중에 Claude가
+  // MCP(run_sql)로 simulation_results 테이블을 조회해서 분석해주는 용도로만 씀.
+  const saveSimulationResults = async () => {
+    const trades = closedTradesRef.current.filter(t => t.source === 'sim')
+    if (trades.length === 0) {
+      alert('저장할 시뮬레이션 거래(청산된 것)가 없습니다. 시뮬레이션을 켜고 재생하면서 포지션을 청산해보세요.')
+      return
+    }
+    setSavingResults(true)
+    try {
+      const res = await fetch('/api/simulation-results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol,
+          date_from: selectedDate,
+          date_to: selectedDateTo || selectedDate,
+          starting_balance: startingBalance,
+          ending_balance: balance,
+          config: {
+            crossPairs: simCrossPairs,
+            doubleBPairs: simDoubleBPairs,
+            bollInnerSellEnabled: simBollInnerSellEnabled,
+            bollInnerBuyEnabled: simBollInnerBuyEnabled,
+          },
+          trades,
+        }),
+      })
+      if (!res.ok) throw new Error()
+      closedTradesRef.current = closedTradesRef.current.filter(t => t.source !== 'sim')
+      setClosedTradesCount(closedTradesRef.current.length)
+      alert(`시뮬레이션 결과 ${trades.length}건 저장했습니다.`)
+    } catch {
+      alert('저장에 실패했습니다.')
+    }
+    setSavingResults(false)
   }
 
   const applyStartingBalance = (value) => {
@@ -1622,6 +1681,22 @@ export default function BacktestChart() {
                     />
                     시뮬레이션 사용하기
                   </label>
+
+                  {/* 화면에 노출되는 "분석" 기능은 아니고, 청산된 시뮬레이션 거래를 DB에 쌓아뒀다가
+                      나중에 대화 중 요청하면 그 기록을 조회해서 분석해주는 용도의 저장 버튼 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '8px 10px', background: '#0f1115', borderRadius: 8 }}>
+                    <span style={{ fontSize: 12, color: '#9aa0ab' }}>청산된 시뮬레이션 거래 {closedTradesCount}건</span>
+                    <button
+                      type="button"
+                      onClick={saveSimulationResults}
+                      disabled={savingResults}
+                      style={{
+                        fontSize: 12, padding: '5px 12px', borderRadius: 6, cursor: savingResults ? 'default' : 'pointer',
+                        border: '1px solid #4CAF50', background: '#4CAF5022', color: '#4CAF50', fontWeight: 700,
+                        opacity: savingResults ? 0.6 : 1,
+                      }}
+                    >{savingResults ? '저장 중...' : '결과 저장'}</button>
+                  </div>
 
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
