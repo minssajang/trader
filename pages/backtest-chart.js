@@ -637,7 +637,9 @@ export default function BacktestChart() {
       }
       const fullRows = Array.from(mergedByTime.values()).sort((a, b) => a.time - b.time)
 
-      let startIdx = fullRows.findIndex(r => toLocalDateStr(r.time) === fromStr)
+      // fromStr 그 날짜에 캔들이 하나도 없어도(주말/휴장일) 통째로 실패시키지 않고, 그 날짜 이후
+      // 첫 캔들부터 시작한다 - 범위 중간의 주말은 원래도 그냥 건너뛰어지므로, 시작일도 같은 방식으로 맞춤.
+      let startIdx = fullRows.findIndex(r => toLocalDateStr(r.time) >= fromStr)
       let endIdx = startIdx
       if (startIdx >= 0) {
         endIdx = startIdx
