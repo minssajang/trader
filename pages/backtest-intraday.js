@@ -12,11 +12,11 @@ const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 const DAY_COLORS = ['#4FC3F7', '#FFB74D', '#BA68C8', '#81C784', '#F06292', '#FFD54F', '#4DB6AC', '#E57373']
 function dayColor(i) { return DAY_COLORS[i % DAY_COLORS.length] }
 
-// 하루 전체(0~1439분)를 한 화면에 우겨넣지 말고 12시간 구간만 보여주고, 아래 슬라이드바로 그 구간을
-// 앞뒤로 이동한다(사용자 요청) - 슬라이드바는 "지금 보는 위치"가 아니라 "몇 시부터 보여줄지"를 정한다.
-const DAY_MIN = 0
-const DAY_MAX = 24 * 60 - 1
-const WINDOW_MIN = 12 * 60
+// 하루 전체(0~1439분)를 한 화면에 우겨넣지 않고, 트레이딩뷰처럼 드래그로 좌우 이동 + 휠로 확대/축소한다
+// (사용자 요청 - 아래 슬라이드바 대신 차트를 직접 끌고 스크롤하는 방식).
+const DEFAULT_WINDOW_MIN = 12 * 60 // 처음엔 12시간만 보이게 시작
+const MIN_WINDOW_MIN = 60   // 최대로 확대하면 1시간까지만
+const MAX_WINDOW_MIN = 24 * 60 // 최대로 축소하면 하루 전체
 
 // 한국 시간 기준 실제 거래 시작은 00:00이 아니라 07:00(브로커 01시=한국 07시, candleCsv.js 오프셋
 // 규칙 참고) - x축(00:00~23:59)은 그대로 두고, 시가(0선) 기준만 07:00 시점 가격으로 삼는다(사용자 요청).
@@ -43,11 +43,13 @@ export default function BacktestIntraday() {
   // 평균선은 기본으로 자동으로 안 그리고, 이 버튼을 켜야만 그린다(사용자 요청 - 시키지 않은 걸
   // 자동으로 하지 말고 옵션 버튼으로 빼둘 것)
   const [showAverage, setShowAverage] = useState(false)
-  // 지금 보고 있는 12시간 구간의 시작(분) - 아래 슬라이드바로 조절
+  // 지금 보고 있는 구간 - 드래그(팬)로 시작 위치를, 휠(줌)로 폭을 바꾼다
   const [windowStart, setWindowStart] = useState(0)
+  const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
+  const dragRef = useRef(null) // {startClientX, startWindowStart} - 드래그 중일 때만 값이 있음
   const datasetCacheRef = useRef({}) // dataset.id -> parsed rows(전체) 캐시
 
   useEffect(() => {
@@ -115,7 +117,10 @@ export default function BacktestIntraday() {
             const dist = Math.abs((d.getHours() * 60 + d.getMinutes()) - REFERENCE_MIN)
             if (dist < refDist) { refRow = r; refDist = dist }
           }
-          const dayOpen = (refRow || rows[0]).open
+          // .open이 아니라 .close를 기준으로 삼아야, 모든 점을 "그 캔들의 close - 기준"으로 계산할 때
+          // 07:00 캔들 자기 자신의 점도 정확히 0이 된다(그래야 겹쳐 그린 모든 날짜가 07:00에서 전부
+          // 같은 점(0)에서 만난다 - 사용자 확인).
+          const dayOpen = (refRow || rows[0]).close
           const points = rows.map(r => {
             const d = new Date(r.time * 1000)
             const minutes = d.getHours() * 60 + d.getMinutes()
@@ -149,8 +154,8 @@ export default function BacktestIntraday() {
     [selectedDates]
   )
 
-  // y축 범위는 지금 보이는 12시간 구간 안의 값만 기준으로 삼는다(창을 옮기면 세로 스케일도 그 구간에 맞게 다시 잡힘)
-  const windowEnd = windowStart + WINDOW_MIN - 1
+  // y축 범위는 지금 보이는 구간 안의 값만 기준으로 삼는다(창을 옮기거나 확대/축소하면 세로 스케일도 다시 잡힘)
+  const windowEnd = windowStart + windowSize - 1
   const { yLo, yHi } = useMemo(() => {
     let lo = Infinity, hi = -Infinity
     for (const d of selectedSeries) {
@@ -191,7 +196,7 @@ export default function BacktestIntraday() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     const W = rect.width, H = rect.height
 
-    const px = mnt => 56 + (mnt - windowStart) / (WINDOW_MIN - 1) * (W - 56 - 20)
+    const px = mnt => 56 + (mnt - windowStart) / (windowSize - 1) * (W - 56 - 20)
     const py = v => 16 + (1 - (v - yLo) / (yHi - yLo)) * (H - 16 - 34)
     const inWindow = mnt => mnt >= windowStart && mnt <= windowEnd
 
@@ -207,9 +212,11 @@ export default function BacktestIntraday() {
     ctx.font = '11px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif'
     ctx.strokeStyle = '#232733'
     ctx.fillStyle = '#9aa0ab'
-    const firstHour = Math.ceil(windowStart / 60)
+    // 확대할수록(구간이 좁을수록) 1시간 간격, 축소할수록(구간이 넓을수록) 라벨이 겹치지 않게 2시간 간격
+    const hourStep = windowSize / 60 > 12 ? 2 : 1
+    const firstHour = Math.ceil(windowStart / 60 / hourStep) * hourStep
     const lastHour = Math.floor(windowEnd / 60)
-    for (let h = firstHour; h <= lastHour; h++) {
+    for (let h = firstHour; h <= lastHour; h += hourStep) {
       const x = px(h * 60)
       ctx.beginPath(); ctx.moveTo(x, 16); ctx.lineTo(x, H - 34); ctx.stroke()
       ctx.textAlign = 'center'
@@ -270,7 +277,7 @@ export default function BacktestIntraday() {
       ctx.beginPath(); ctx.moveTo(hx, 16); ctx.lineTo(hx, H - 34); ctx.stroke()
       ctx.globalAlpha = 1
     }
-  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd])
+  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd, windowSize])
 
   useEffect(() => {
     draw()
@@ -289,16 +296,62 @@ export default function BacktestIntraday() {
     setHoverInfo({ minute, avg: avgMap.get(minute), up, down })
   }
 
+  // 트레이딩뷰처럼 드래그로 좌우 이동 - 마우스다운 한 지점을 기억해두고, 움직인 픽셀만큼을
+  // 지금 보이는 구간(windowSize) 비율로 환산해서 windowStart를 옮긴다(사용자 요청 - 슬라이드바 대신).
+  const onMouseDown = (e) => {
+    if (selectedSeries.length === 0) return
+    dragRef.current = { startClientX: e.clientX, startWindowStart: windowStart }
+  }
+
+  const onMouseUp = () => { dragRef.current = null }
+
   const onMouseMove = (e) => {
     const canvas = canvasRef.current
-    if (!canvas || selectedSeries.length === 0) return
+    if (!canvas) return
     const rect = canvas.getBoundingClientRect()
+    const plotW = rect.width - 56 - 20
+
+    if (dragRef.current) {
+      const deltaPx = e.clientX - dragRef.current.startClientX
+      const deltaMin = -(deltaPx / plotW) * windowSize
+      const maxStart = Math.max(0, 1440 - windowSize)
+      const next = Math.max(0, Math.min(maxStart, Math.round(dragRef.current.startWindowStart + deltaMin)))
+      setWindowStart(next)
+      setHoverInfo(null)
+      return
+    }
+
+    if (selectedSeries.length === 0) return
     const mx = e.clientX - rect.left
     if (mx < 56 || mx > rect.width - 20) { setHoverInfo(null); return }
-    const t = (mx - 56) / (rect.width - 56 - 20)
-    const minute = Math.max(windowStart, Math.min(windowEnd, Math.round(windowStart + t * (WINDOW_MIN - 1))))
+    const t = (mx - 56) / plotW
+    const minute = Math.max(windowStart, Math.min(windowEnd, Math.round(windowStart + t * (windowSize - 1))))
     updateHoverForMinute(minute)
   }
+
+  // 마우스 휠로 확대/축소 - 마우스 커서가 가리키는 시각을 고정한 채로 구간 폭(windowSize)만 줄이거나 늘린다
+  const onWheel = (e) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    e.preventDefault()
+    const rect = canvas.getBoundingClientRect()
+    const plotW = rect.width - 56 - 20
+    const mx = e.clientX - rect.left
+    const t = Math.max(0, Math.min(1, (mx - 56) / plotW))
+    const cursorMinute = windowStart + t * (windowSize - 1)
+    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15
+    const nextSize = Math.max(MIN_WINDOW_MIN, Math.min(MAX_WINDOW_MIN, Math.round(windowSize * factor)))
+    const maxStart = Math.max(0, 1440 - nextSize)
+    const nextStart = Math.max(0, Math.min(maxStart, Math.round(cursorMinute - t * (nextSize - 1))))
+    setWindowSize(nextSize)
+    setWindowStart(nextStart)
+  }
+
+  // 드래그 도중 마우스가 캔버스 밖으로 나가서 놓일 수도 있으니 window 전체에 mouseup을 걸어둔다
+  useEffect(() => {
+    window.addEventListener('mouseup', onMouseUp)
+    return () => window.removeEventListener('mouseup', onMouseUp)
+  }, [])
 
   const fmtHM = (mnt) => `${String(Math.floor((mnt % 1440 + 1440) % 1440 / 60)).padStart(2, '0')}:${String(mnt % 60).padStart(2, '0')}`
 
@@ -334,7 +387,7 @@ export default function BacktestIntraday() {
         <main style={{ maxWidth: 1200, margin: '0 auto', padding: '28px 20px 60px' }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>일중 패턴 — 시가 대비 편차 오버레이</h1>
           <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 20 }}>
-            왼쪽 달력에서 날짜를 하나씩 클릭해서 겹쳐볼 날짜를 골라주세요. 고른 날짜의 종가에서 그날 시가(한국시간 07:00 기준 - 실제 거래 시작 시점)를 뺀 값을 시간대별로 겹쳐 그립니다 - 0선이 07:00 가격입니다. 한 화면엔 12시간만 보이고, 아래 슬라이드바로 구간을 옮길 수 있습니다.
+            왼쪽 달력에서 날짜를 하나씩 클릭해서 겹쳐볼 날짜를 골라주세요. 고른 날짜의 종가에서 그날 시가(한국시간 07:00 기준 - 실제 거래 시작 시점)를 뺀 값을 시간대별로 겹쳐 그립니다 - 0선이 07:00 가격입니다. 차트를 드래그하면 좌우로 이동하고, 마우스 휠로 확대/축소할 수 있습니다.
           </p>
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -392,9 +445,11 @@ export default function BacktestIntraday() {
                 <div ref={wrapRef} style={{ position: 'relative' }}>
                   <canvas
                     ref={canvasRef}
+                    onMouseDown={onMouseDown}
                     onMouseMove={onMouseMove}
                     onMouseLeave={() => setHoverInfo(null)}
-                    style={{ display: 'block', width: '100%', height: 460, cursor: 'crosshair' }}
+                    onWheel={onWheel}
+                    style={{ display: 'block', width: '100%', height: 460, cursor: 'grab', touchAction: 'none' }}
                   />
                   {hoverInfo && (
                     <div style={{
@@ -417,20 +472,9 @@ export default function BacktestIntraday() {
                     </div>
                   )}
                 </div>
-                {/* 아래 슬라이드바 - 지금 보는 12시간 구간의 시작 시각을 옮긴다(하루 전체를 한 화면에 우겨넣지 않기 위함) */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
-                  <span style={{ fontSize: 11, color: '#9aa0ab', width: 38 }}>00:00</span>
-                  <input
-                    type="range"
-                    min={DAY_MIN}
-                    max={DAY_MAX - WINDOW_MIN + 1}
-                    step={30}
-                    value={windowStart}
-                    onChange={e => setWindowStart(Number(e.target.value))}
-                    style={{ flex: 1, accentColor: '#26a69a' }}
-                  />
-                  <span style={{ fontSize: 11, color: '#9aa0ab', width: 38, textAlign: 'right' }}>12:00</span>
-                </div>
+                <p style={{ color: '#5a5f6a', fontSize: 11, marginTop: 10, marginBottom: 0 }}>
+                  차트를 드래그하면 좌우로 이동, 마우스 휠로 확대/축소됩니다.
+                </p>
               </div>
 
               {selectedSeries.length > 0 && (
