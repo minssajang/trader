@@ -20,11 +20,17 @@ const RSI_PERIOD = 14
 const MACD_FAST = 12
 const MACD_SLOW = 26
 const MACD_SIGNAL = 9
+// MACD5 = "5분" MACD - 볼린저/이평선과 같은 멀티 타임프레임 치환 규칙(1분봉 기준 기간 × 5)을 그대로 적용
+const MACD5_FAST = 60
+const MACD5_SLOW = 130
+const MACD5_SIGNAL = 45
 const DEFAULT_RSI_COLOR = '#FFB74D'
 const DEFAULT_MACD_LINE_COLOR = '#42A5F5'
 const DEFAULT_MACD_SIGNAL_COLOR = '#FF7043'
 const DEFAULT_MACD_HIST_UP = '#26A69A'
 const DEFAULT_MACD_HIST_DOWN = '#EF5350'
+const DEFAULT_MACD5_LINE_COLOR = '#AB47BC'
+const DEFAULT_MACD5_SIGNAL_COLOR = '#FFCA28'
 // RSI(0~100)/MACD(진동값)는 캔들 가격축과 스케일이 전혀 달라 같은 축에 못 그림.
 // lightweight-charts v4는 pane API가 없어서 별도 priceScaleId + scaleMargins로
 // 차트 아래쪽에 squeeze해서 그리는 방식(applyPaneLayout) - 켜진 개수만큼 아래 공간을 나눠 배정.
@@ -185,6 +191,9 @@ export default function BacktestChart() {
   const [enabledMACD, setEnabledMACD] = useState(false)
   const [macdLineColor, setMacdLineColorState] = useState(DEFAULT_MACD_LINE_COLOR)
   const [macdSignalColor, setMacdSignalColorState] = useState(DEFAULT_MACD_SIGNAL_COLOR)
+  const [enabledMACD5, setEnabledMACD5] = useState(false)
+  const [macd5LineColor, setMacd5LineColorState] = useState(DEFAULT_MACD5_LINE_COLOR)
+  const [macd5SignalColor, setMacd5SignalColorState] = useState(DEFAULT_MACD5_SIGNAL_COLOR)
   const [upColor, setUpColorState] = useState(DEFAULT_UP_COLOR)
   const [downColor, setDownColorState] = useState(DEFAULT_DOWN_COLOR)
   // 왼쪽 "크로스/더블비/눌림 신호" 표시 - 예전엔 체크박스를 여러 개 켜면 그 안에서 가능한 모든 조합을
@@ -269,6 +278,8 @@ export default function BacktestChart() {
   const rsiSeriesRef = useRef(null)
   const macdDataRef = useRef({ macd: [], signal: [], hist: [] }) // 각각 [{time,value}|null]
   const macdSeriesRef = useRef(null) // { macd, signal, hist } lightweight-charts 시리즈 3개
+  const macd5DataRef = useRef({ macd: [], signal: [], hist: [] })
+  const macd5SeriesRef = useRef(null)
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
   const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
@@ -312,6 +323,8 @@ export default function BacktestChart() {
     syncRSI(0)
     macdDataRef.current = { macd: [], signal: [], hist: [] }
     syncMACD(0)
+    macd5DataRef.current = { macd: [], signal: [], hist: [] }
+    syncMACD5(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -441,6 +454,16 @@ export default function BacktestChart() {
   }
   const syncMACD = (idx) => applyMACDIndex(idx)
 
+  const applyMACD5Index = (idx) => {
+    const s = macd5SeriesRef.current
+    const d = macd5DataRef.current
+    if (!s) return
+    s.macd.setData(d.macd.slice(0, idx).filter(Boolean))
+    s.signal.setData(d.signal.slice(0, idx).filter(Boolean))
+    s.hist.setData(d.hist.slice(0, idx).filter(Boolean))
+  }
+  const syncMACD5 = (idx) => applyMACD5Index(idx)
+
   // 크로스/더블비 신호 마커 둘 다 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 지점 중
   // 아직 재생 안 지난 구간은 걸러서 캔들 시리즈 마커 하나로 합쳐서 얹는다
   // (setMarkers는 호출할 때마다 통째로 교체되므로 두 종류를 항상 같이 계산해서 넘겨야 함).
@@ -503,6 +526,7 @@ export default function BacktestChart() {
     syncMA(idx)
     syncRSI(idx)
     syncMACD(idx)
+    syncMACD5(idx)
     applyAllMarkers(idx)
     indexRef.current = idx
     setPlayIndex(idx)
@@ -519,6 +543,7 @@ export default function BacktestChart() {
     syncMA(to)
     syncRSI(to)
     syncMACD(to)
+    syncMACD5(to)
     applyAllMarkers(to)
     // 반자동진입 - 재생(자동 진행)으로 새로 드러난 구간에서만 조건을 확인한다.
     // 슬라이더로 수동 스크럽할 때는 안 걸리게(applyIndex가 아니라 여기서만 체크)
@@ -582,6 +607,8 @@ export default function BacktestChart() {
     syncRSI(0)
     macdDataRef.current = { macd: [], signal: [], hist: [] }
     syncMACD(0)
+    macd5DataRef.current = { macd: [], signal: [], hist: [] }
+    syncMACD5(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -666,6 +693,16 @@ export default function BacktestChart() {
           histPoints.push(histogram[i] != null ? { time: t, value: histogram[i], color: histogram[i] >= 0 ? DEFAULT_MACD_HIST_UP : DEFAULT_MACD_HIST_DOWN } : null)
         }
         macdDataRef.current = { macd: macdPoints, signal: signalPoints, hist: histPoints }
+
+        const macd5 = rollingMACD(closes, MACD5_FAST, MACD5_SLOW, MACD5_SIGNAL)
+        const macd5Points = [], signal5Points = [], hist5Points = []
+        for (let i = startIdx; i < endIdx; i++) {
+          const t = fullRows[i].time
+          macd5Points.push(macd5.macdLine[i] != null ? { time: t, value: macd5.macdLine[i] } : null)
+          signal5Points.push(macd5.signalLine[i] != null ? { time: t, value: macd5.signalLine[i] } : null)
+          hist5Points.push(macd5.histogram[i] != null ? { time: t, value: macd5.histogram[i], color: macd5.histogram[i] >= 0 ? DEFAULT_MACD_HIST_UP : DEFAULT_MACD_HIST_DOWN } : null)
+        }
+        macd5DataRef.current = { macd: macd5Points, signal: signal5Points, hist: hist5Points }
 
         refreshCross()
         refreshDoubleBSignal()
@@ -917,12 +954,12 @@ export default function BacktestChart() {
         })
         bumpMarkerLayer()
       }
-      applyPaneLayout(true, enabledMACD)
+      applyPaneLayout(true, enabledMACD || enabledMACD5)
       applyRSIIndex(indexRef.current)
     } else {
       if (rsiSeriesRef.current && chartRef.current) chartRef.current.removeSeries(rsiSeriesRef.current)
       rsiSeriesRef.current = null
-      applyPaneLayout(false, enabledMACD)
+      applyPaneLayout(false, enabledMACD || enabledMACD5)
     }
   }
 
@@ -959,7 +996,7 @@ export default function BacktestChart() {
         chartRef.current.removeSeries(s.hist)
       }
       macdSeriesRef.current = null
-      applyPaneLayout(enabledRSI, false)
+      applyPaneLayout(enabledRSI, enabledMACD5)
     }
   }
 
@@ -971,6 +1008,49 @@ export default function BacktestChart() {
   const setMacdSignalColor = (color) => {
     setMacdSignalColorState(color)
     macdSeriesRef.current?.signal.applyOptions({ color })
+  }
+
+  // MACD5 - "5분" MACD(기간 ×5). MACD1과 같은 'macd' 축(priceScaleId)을 공유해서 한 창에 같이 그린다.
+  const toggleMACD5 = () => {
+    const turningOn = !enabledMACD5
+    setEnabledMACD5(turningOn)
+    if (turningOn) {
+      if (!macd5SeriesRef.current && chartRef.current) {
+        macd5SeriesRef.current = {
+          hist: chartRef.current.addHistogramSeries({
+            lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+          }),
+          macd: chartRef.current.addLineSeries({
+            color: macd5LineColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+          }),
+          signal: chartRef.current.addLineSeries({
+            color: macd5SignalColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+          }),
+        }
+        bumpMarkerLayer()
+      }
+      applyPaneLayout(enabledRSI, true)
+      applyMACD5Index(indexRef.current)
+    } else {
+      const s = macd5SeriesRef.current
+      if (s && chartRef.current) {
+        chartRef.current.removeSeries(s.macd)
+        chartRef.current.removeSeries(s.signal)
+        chartRef.current.removeSeries(s.hist)
+      }
+      macd5SeriesRef.current = null
+      applyPaneLayout(enabledRSI, enabledMACD)
+    }
+  }
+
+  const setMacd5LineColor = (color) => {
+    setMacd5LineColorState(color)
+    macd5SeriesRef.current?.macd.applyOptions({ color })
+  }
+
+  const setMacd5SignalColor = (color) => {
+    setMacd5SignalColorState(color)
+    macd5SeriesRef.current?.signal.applyOptions({ color })
   }
 
   // 체크한 이평선들 중 기간이 짧은 쪽을 단기선, 긴 쪽을 장기선으로 보고
@@ -1710,7 +1790,7 @@ export default function BacktestChart() {
                       onChange={toggleMACD}
                       style={{ width: 13, height: 13, margin: 0, accentColor: macdLineColor, flexShrink: 0 }}
                     />
-                    <span style={{ flex: 1 }}>MACD(12,26,9)</span>
+                    <span style={{ flex: 1 }}>MACD1</span>
                   </label>
                   {enabledMACD && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
@@ -1733,12 +1813,38 @@ export default function BacktestChart() {
                     </div>
                   )}
                 </div>
+                <div style={{ padding: '3px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={enabledMACD5}
+                      onChange={toggleMACD5}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: macd5LineColor, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>MACD5</span>
+                  </label>
+                  {enabledMACD5 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                      <span>MACD</span>
+                      <input
+                        type="color"
+                        value={macd5LineColor}
+                        onChange={e => setMacd5LineColor(e.target.value)}
+                        title="MACD선 색상"
+                        style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                      <span>시그널</span>
+                      <input
+                        type="color"
+                        value={macd5SignalColor}
+                        onChange={e => setMacd5SignalColor(e.target.value)}
+                        title="시그널선 색상"
+                        style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                    </div>
+                  )}
+                </div>
               </CollapsibleCard>
-
-              <p style={{ fontSize: 10.5, color: '#5a5f6a', lineHeight: 1.5, margin: '2px 2px 8px', maxWidth: 170 }}>
-                다른 보조지표(스토캐스틱 등)가 필요하면{' '}
-                <Link href="/board" style={{ color: '#4CAF50' }}>자유게시판</Link>에 요청해주세요 — 추가해드립니다.
-              </p>
 
               <CollapsibleCard title="크로스 신호" maxWidth={170}>
                 {renderCrossRow('골든크로스', goldenShape, setGoldenShape, goldenColor, setGoldenColor, goldenSize, setGoldenSize)}
