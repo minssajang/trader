@@ -5,7 +5,7 @@ import { createChart, CrosshairMode } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
-import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, computeMA } from '../lib/indicators'
+import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, computeMA, rollingRSI, rollingMACD } from '../lib/indicators'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
@@ -16,6 +16,20 @@ const SPEEDS = [0.25, 0.5, 1, 2, 3, 5, 20, 60, 100, 200, 300]
 const REALTIME_MS = 60000
 const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
 const MA_WIDTHS = [1, 2, 3, 4]
+const RSI_PERIOD = 14
+const MACD_FAST = 12
+const MACD_SLOW = 26
+const MACD_SIGNAL = 9
+const DEFAULT_RSI_COLOR = '#FFB74D'
+const DEFAULT_MACD_LINE_COLOR = '#42A5F5'
+const DEFAULT_MACD_SIGNAL_COLOR = '#FF7043'
+const DEFAULT_MACD_HIST_UP = '#26A69A'
+const DEFAULT_MACD_HIST_DOWN = '#EF5350'
+// RSI(0~100)/MACD(진동값)는 캔들 가격축과 스케일이 전혀 달라 같은 축에 못 그림.
+// lightweight-charts v4는 pane API가 없어서 별도 priceScaleId + scaleMargins로
+// 차트 아래쪽에 squeeze해서 그리는 방식(applyPaneLayout) - 켜진 개수만큼 아래 공간을 나눠 배정.
+const PANE_HEIGHT = 0.16
+const PANE_GAP = 0.02
 const DEFAULT_UP_COLOR = '#38BDF8'   // 상승 기본색 - 스카이블루
 const DEFAULT_DOWN_COLOR = '#FF69B4' // 하락 기본색 - 밝은 핑크
 // lightweight-charts 마커가 네이티브로 지원하는 모양만 사용(삼각형은 화살표로 표현)
@@ -165,6 +179,12 @@ export default function BacktestChart() {
   const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
   // 기본 셋팅 - 위 6개 이평선 전부 두께 3
   const [maWidths, setMaWidths] = useState({ hma60: 3, hma100: 3, hma300: 3, wma17_1m: 3, wma17_5m: 3, wma4_1h: 3 }) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
+  // RSI/MACD - 기간은 표준값(14 / 12,26,9)으로 고정, 색상만 커스터마이징 가능. 기본은 꺼짐(체크해야 나옴)
+  const [enabledRSI, setEnabledRSI] = useState(false)
+  const [rsiColor, setRsiColorState] = useState(DEFAULT_RSI_COLOR)
+  const [enabledMACD, setEnabledMACD] = useState(false)
+  const [macdLineColor, setMacdLineColorState] = useState(DEFAULT_MACD_LINE_COLOR)
+  const [macdSignalColor, setMacdSignalColorState] = useState(DEFAULT_MACD_SIGNAL_COLOR)
   const [upColor, setUpColorState] = useState(DEFAULT_UP_COLOR)
   const [downColor, setDownColorState] = useState(DEFAULT_DOWN_COLOR)
   // 왼쪽 "크로스/더블비/눌림 신호" 표시 - 예전엔 체크박스를 여러 개 켜면 그 안에서 가능한 모든 조합을
@@ -245,6 +265,10 @@ export default function BacktestChart() {
   const bandSeriesRef = useRef({})   // bandId -> { upper, middle, lower } lightweight-charts 라인 시리즈
   const maDataRef = useRef({})       // maId -> [{time,value}|null] - 선택한 날짜분, 워밍업 포함해서 계산됨
   const maSeriesRef = useRef({})     // maId -> lightweight-charts 라인 시리즈 (밴드와 달리 선 1개)
+  const rsiDataRef = useRef([])      // [{time,value}|null] - 선택한 날짜분
+  const rsiSeriesRef = useRef(null)
+  const macdDataRef = useRef({ macd: [], signal: [], hist: [] }) // 각각 [{time,value}|null]
+  const macdSeriesRef = useRef(null) // { macd, signal, hist } lightweight-charts 시리즈 3개
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
   const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
@@ -279,6 +303,10 @@ export default function BacktestChart() {
     syncBands(0)
     maDataRef.current = {}
     syncMA(0)
+    rsiDataRef.current = []
+    syncRSI(0)
+    macdDataRef.current = { macd: [], signal: [], hist: [] }
+    syncMACD(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -309,12 +337,12 @@ export default function BacktestChart() {
     if (!containerRef.current) return
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 640,
+      height: 860,
       layout: { background: { color: '#0f1115' }, textColor: '#9aa0ab' },
       grid: { vertLines: { color: '#1c2028' }, horzLines: { color: '#1c2028' } },
       crosshair: { mode: CrosshairMode.Normal },
       timeScale: { borderColor: '#2a2e38', timeVisible: true, secondsVisible: false, tickMarkFormatter: localTickMarkFormatter },
-      rightPriceScale: { borderColor: '#2a2e38' },
+      rightPriceScale: { borderColor: '#2a2e38', scaleMargins: { top: 0.05, bottom: 0.05 } },
       localization: { timeFormatter: localTimeFormatter },
     })
     const series = chart.addCandlestickSeries({
@@ -391,6 +419,23 @@ export default function BacktestChart() {
     Object.keys(maSeriesRef.current).forEach(maId => applyMAIndex(maId, idx))
   }
 
+  // RSI/MACD도 재생 위치(idx)를 앞서가면 안 되는 건 볼린저/이평선과 동일
+  const applyRSIIndex = (idx) => {
+    if (!rsiSeriesRef.current) return
+    rsiSeriesRef.current.setData(rsiDataRef.current.slice(0, idx).filter(Boolean))
+  }
+  const syncRSI = (idx) => applyRSIIndex(idx)
+
+  const applyMACDIndex = (idx) => {
+    const s = macdSeriesRef.current
+    const d = macdDataRef.current
+    if (!s) return
+    s.macd.setData(d.macd.slice(0, idx).filter(Boolean))
+    s.signal.setData(d.signal.slice(0, idx).filter(Boolean))
+    s.hist.setData(d.hist.slice(0, idx).filter(Boolean))
+  }
+  const syncMACD = (idx) => applyMACDIndex(idx)
+
   // 크로스/더블비 신호 마커 둘 다 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 지점 중
   // 아직 재생 안 지난 구간은 걸러서 캔들 시리즈 마커 하나로 합쳐서 얹는다
   // (setMarkers는 호출할 때마다 통째로 교체되므로 두 종류를 항상 같이 계산해서 넘겨야 함).
@@ -451,6 +496,8 @@ export default function BacktestChart() {
     markerSeriesRef.current?.setData(dayRows.map(r => ({ time: r.time, value: r.close })))
     syncBands(idx)
     syncMA(idx)
+    syncRSI(idx)
+    syncMACD(idx)
     applyAllMarkers(idx)
     indexRef.current = idx
     setPlayIndex(idx)
@@ -465,6 +512,8 @@ export default function BacktestChart() {
     }
     syncBands(to)
     syncMA(to)
+    syncRSI(to)
+    syncMACD(to)
     applyAllMarkers(to)
     // 반자동진입 - 재생(자동 진행)으로 새로 드러난 구간에서만 조건을 확인한다.
     // 슬라이더로 수동 스크럽할 때는 안 걸리게(applyIndex가 아니라 여기서만 체크)
@@ -521,6 +570,10 @@ export default function BacktestChart() {
     syncBands(0)
     maDataRef.current = {}
     syncMA(0)
+    rsiDataRef.current = []
+    syncRSI(0)
+    macdDataRef.current = { macd: [], signal: [], hist: [] }
+    syncMACD(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -579,6 +632,25 @@ export default function BacktestChart() {
           newMaData[ma.id] = points
         }
         maDataRef.current = newMaData
+
+        // RSI/MACD도 이평선처럼 그 구간 데이터만으론 워밍업이 부족할 수 있어 파일 전체로 계산 후 표시 구간만 자름
+        const rsiVals = rollingRSI(closes, RSI_PERIOD)
+        const rsiPoints = []
+        for (let i = startIdx; i < endIdx; i++) {
+          rsiPoints.push(rsiVals[i] != null ? { time: fullRows[i].time, value: rsiVals[i] } : null)
+        }
+        rsiDataRef.current = rsiPoints
+
+        const { macdLine, signalLine, histogram } = rollingMACD(closes, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
+        const macdPoints = [], signalPoints = [], histPoints = []
+        for (let i = startIdx; i < endIdx; i++) {
+          const t = fullRows[i].time
+          macdPoints.push(macdLine[i] != null ? { time: t, value: macdLine[i] } : null)
+          signalPoints.push(signalLine[i] != null ? { time: t, value: signalLine[i] } : null)
+          histPoints.push(histogram[i] != null ? { time: t, value: histogram[i], color: histogram[i] >= 0 ? DEFAULT_MACD_HIST_UP : DEFAULT_MACD_HIST_DOWN } : null)
+        }
+        macdDataRef.current = { macd: macdPoints, signal: signalPoints, hist: histPoints }
+
         refreshCross()
         refreshDoubleBSignal()
         refreshBollInnerSignal()
@@ -780,6 +852,91 @@ export default function BacktestChart() {
       if (s && chartRef.current) chartRef.current.removeSeries(s)
       delete maSeriesRef.current[maId]
     }
+  }
+
+  // RSI/MACD 창 위치 재계산 - 켜진 개수(0~2개)에 따라 차트 아래쪽 공간을 나눠 배정하고,
+  // 캔들 가격축(right)은 그만큼 아래 여백을 늘려서 겹치지 않게 한다.
+  const applyPaneLayout = (rsiOn, macdOn) => {
+    if (!chartRef.current) return
+    const paneCount = (rsiOn ? 1 : 0) + (macdOn ? 1 : 0)
+    const mainBottom = paneCount === 0 ? 0.05 : paneCount * PANE_HEIGHT + paneCount * PANE_GAP + 0.02
+    chartRef.current.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: mainBottom } })
+    let cursorBottom = 0.02 // 맨 아래(0.02 여백)부터 위로 하나씩 쌓는다
+    if (macdOn) {
+      chartRef.current.priceScale('macd').applyOptions({ scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom } })
+      cursorBottom += PANE_HEIGHT + PANE_GAP
+    }
+    if (rsiOn) {
+      chartRef.current.priceScale('rsi').applyOptions({ scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom } })
+    }
+  }
+
+  const toggleRSI = () => {
+    const turningOn = !enabledRSI
+    setEnabledRSI(turningOn)
+    if (turningOn) {
+      if (!rsiSeriesRef.current && chartRef.current) {
+        rsiSeriesRef.current = chartRef.current.addLineSeries({
+          color: rsiColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'rsi',
+        })
+        chartRef.current.priceScale('rsi').applyOptions({ borderColor: '#2a2e38' })
+        bumpMarkerLayer()
+      }
+      applyPaneLayout(true, enabledMACD)
+      applyRSIIndex(indexRef.current)
+    } else {
+      if (rsiSeriesRef.current && chartRef.current) chartRef.current.removeSeries(rsiSeriesRef.current)
+      rsiSeriesRef.current = null
+      applyPaneLayout(false, enabledMACD)
+    }
+  }
+
+  const setRsiColor = (color) => {
+    setRsiColorState(color)
+    rsiSeriesRef.current?.applyOptions({ color })
+  }
+
+  const toggleMACD = () => {
+    const turningOn = !enabledMACD
+    setEnabledMACD(turningOn)
+    if (turningOn) {
+      if (!macdSeriesRef.current && chartRef.current) {
+        macdSeriesRef.current = {
+          hist: chartRef.current.addHistogramSeries({
+            lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+          }),
+          macd: chartRef.current.addLineSeries({
+            color: macdLineColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+          }),
+          signal: chartRef.current.addLineSeries({
+            color: macdSignalColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
+          }),
+        }
+        chartRef.current.priceScale('macd').applyOptions({ borderColor: '#2a2e38' })
+        bumpMarkerLayer()
+      }
+      applyPaneLayout(enabledRSI, true)
+      applyMACDIndex(indexRef.current)
+    } else {
+      const s = macdSeriesRef.current
+      if (s && chartRef.current) {
+        chartRef.current.removeSeries(s.macd)
+        chartRef.current.removeSeries(s.signal)
+        chartRef.current.removeSeries(s.hist)
+      }
+      macdSeriesRef.current = null
+      applyPaneLayout(enabledRSI, false)
+    }
+  }
+
+  const setMacdLineColor = (color) => {
+    setMacdLineColorState(color)
+    macdSeriesRef.current?.macd.applyOptions({ color })
+  }
+
+  const setMacdSignalColor = (color) => {
+    setMacdSignalColorState(color)
+    macdSeriesRef.current?.signal.applyOptions({ color })
   }
 
   // 체크한 이평선들 중 기간이 짧은 쪽을 단기선, 긴 쪽을 장기선으로 보고
@@ -1481,10 +1638,61 @@ export default function BacktestChart() {
                 })}
               </CollapsibleCard>
 
-              {/* 지금은 이평선/볼린저만 있지만, 스토캐스틱·MACD 등 원하는 보조지표는 자유게시판으로
-                  요청받아서 계속 추가할 예정(사용자 확인) - 안내 문구만 우선 넣어둠 */}
+              <CollapsibleCard title="보조지표" maxWidth={170}>
+                <div style={{ padding: '3px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={enabledRSI}
+                      onChange={toggleRSI}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: rsiColor, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>RSI(14)</span>
+                    <input
+                      type="color"
+                      value={rsiColor}
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => setRsiColor(e.target.value)}
+                      title="색상변경 가능"
+                      style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                    />
+                  </label>
+                </div>
+                <div style={{ padding: '3px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={enabledMACD}
+                      onChange={toggleMACD}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: macdLineColor, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>MACD(12,26,9)</span>
+                  </label>
+                  {enabledMACD && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                      <span>MACD</span>
+                      <input
+                        type="color"
+                        value={macdLineColor}
+                        onChange={e => setMacdLineColor(e.target.value)}
+                        title="MACD선 색상"
+                        style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                      <span>시그널</span>
+                      <input
+                        type="color"
+                        value={macdSignalColor}
+                        onChange={e => setMacdSignalColor(e.target.value)}
+                        title="시그널선 색상"
+                        style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </CollapsibleCard>
+
               <p style={{ fontSize: 10.5, color: '#5a5f6a', lineHeight: 1.5, margin: '2px 2px 8px', maxWidth: 170 }}>
-                원하는 보조지표(스토캐스틱, MACD 등)가 있으면{' '}
+                다른 보조지표(스토캐스틱 등)가 필요하면{' '}
                 <Link href="/board" style={{ color: '#4CAF50' }}>자유게시판</Link>에 요청해주세요 — 추가해드립니다.
               </p>
 
@@ -1554,7 +1762,7 @@ export default function BacktestChart() {
               </div>
 
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16 }}>
-                <div ref={containerRef} style={{ width: '100%', height: 640 }} />
+                <div ref={containerRef} style={{ width: '100%', height: 860 }} />
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', marginTop: 16 }}>
