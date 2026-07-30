@@ -121,7 +121,7 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
         {WEEKDAY_LABEL.map(w => <div key={w}>{w}</div>)}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
-        {cells.map(({ day, dateStr, otherMonth }, i) => {
+        {cells.map(({ day, dateStr }, i) => {
           const has = availableDates.has(dateStr)
           const isEndpoint = dateStr === selectedDate || dateStr === selectedDateTo
           const inRange = !!selectedDateTo && dateStr > rangeFrom && dateStr < rangeTo
@@ -136,7 +136,6 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
               style={{
                 padding: '8px 0', borderRadius: 6, fontSize: 12,
                 cursor: clickable ? 'pointer' : 'default',
-                opacity: otherMonth ? 0.4 : 1,
                 border: isEndpoint ? '1px solid #4CAF50' : '1px solid transparent',
                 background: isEndpoint ? '#4CAF50' : inRange ? 'rgba(76,175,80,0.4)' : has ? 'rgba(76,175,80,0.15)' : 'transparent',
                 color: isEndpoint ? '#fff' : has ? '#e8eaed' : '#3a3f4a',
