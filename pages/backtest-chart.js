@@ -42,6 +42,14 @@ const EMPTY_PAIR_SLOTS = [{ a: '', b: '' }, { a: '', b: '' }, { a: '', b: '' }]
 const DOUBLE_B_LINE_OPTIONS = BOLLINGER_BANDS.flatMap(b =>
   [['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => ({ id: `${b.id}:${which}`, label: `${b.label} ${wlabel}` }))
 )
+// 세계 3대 시장 개장 시각 - 전부 이 차트/일중패턴 차트의 시간 라벨(브로커 서버+서머타임 오프셋,
+// candleCsv.js 기준 한국시간과 동일) 기준 분(minute-of-day)이다. 유럽(런던)은 서머타임(BST) 기준
+// 08:00 런던시각=07:00 UTC=16:00 이 시간 라벨(사용자 확인) - 겨울(GMT)엔 17:00으로 밀림.
+const SESSION_OPENS = [
+  { label: '아시아', minute: 7 * 60, color: '#64B5F6' },
+  { label: '유럽', minute: 16 * 60, color: '#FFD54F' },
+  { label: '미장', minute: 22 * 60 + 30, color: '#BA68C8' },
+]
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
@@ -242,6 +250,7 @@ export default function BacktestChart() {
   const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
   const doubleBSignalPointsRef = useRef([]) // 더블비 신호(표시용) 전체 [{idx, time, side}]
   const bollInnerSignalPointsRef = useRef([]) // 볼린저 눌림 신호(표시용) 전체 [{idx, time, side}]
+  const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
   const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
   const closedTradesRef = useRef([]) // 청산된 거래 전체(수동/반자동/시뮬레이션 다 포함, source로 구분) - "결과 저장" 누르면 DB로 보냄
 
@@ -275,6 +284,7 @@ export default function BacktestChart() {
     simEventsRef.current = []
     doubleBSignalPointsRef.current = []
     bollInnerSignalPointsRef.current = []
+    sessionPointsRef.current = []
     markerSeriesRef.current?.setMarkers([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
@@ -427,7 +437,12 @@ export default function BacktestChart() {
         ? { time: p.time, position: 'inBar', color: iColorLong, shape: iShapeLong, size: iSizeLong, text: '' }
         : { time: p.time, position: 'inBar', color: iColorShort, shape: iShapeShort, size: iSizeShort, text: '' })
 
-    markerSeriesRef.current.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers].sort((a, b) => a.time - b.time))
+    // 세계 3대 시장 개장 시각 - 매매 신호가 아니라 항상 고정으로 보여주는 참고 마커(텍스트로 세션 이름 표시)
+    const sessionMarkers = sessionPointsRef.current
+      .filter(p => p.idx < idx)
+      .map(p => ({ time: p.time, position: 'aboveBar', color: p.color, shape: 'circle', size: 1, text: p.label }))
+
+    markerSeriesRef.current.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers].sort((a, b) => a.time - b.time))
   }
 
   const applyIndex = (idx) => {
@@ -511,6 +526,7 @@ export default function BacktestChart() {
     simEventsRef.current = []
     doubleBSignalPointsRef.current = []
     bollInnerSignalPointsRef.current = []
+    sessionPointsRef.current = []
     markerSeriesRef.current?.setMarkers([])
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
@@ -568,6 +584,7 @@ export default function BacktestChart() {
         refreshBollInnerSignal()
         refreshAutoEvents()
         refreshSimEvents()
+        refreshSessionMarkers()
       }
 
       if (dayRows.length === 0) setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
@@ -788,6 +805,35 @@ export default function BacktestChart() {
       points.push({ idx: i, time: f1.time, type: d1 > 0 ? 'golden' : 'dead' })
     }
     return points
+  }
+
+  // 세계 3대 시장(아시아/유럽/미장) 개장 시각 표시 - 매매 신호가 아니라 항상 켜져 있는 고정 참고선.
+  // 로드된 구간이 여러 날(범위 선택)이면 날짜별로 각각 찾는다. 그 날 데이터에 해당 시각 근처
+  // 캔들이 실제로 있을 때만 표시(데이터 경계에 잘린 날은 해당 세션이 아예 없을 수 있어서 스킵).
+  const refreshSessionMarkers = () => {
+    const rows = rowsRef.current
+    if (!rows.length) { sessionPointsRef.current = []; return }
+    const idxByDate = new Map()
+    rows.forEach((r, idx) => {
+      const d = toLocalDateStr(r.time)
+      if (!idxByDate.has(d)) idxByDate.set(d, [])
+      idxByDate.get(d).push(idx)
+    })
+    const points = []
+    for (const idxList of idxByDate.values()) {
+      for (const session of SESSION_OPENS) {
+        let bestIdx = null, bestDist = Infinity
+        for (const idx of idxList) {
+          const d = new Date(rows[idx].time * 1000)
+          const dist = Math.abs((d.getHours() * 60 + d.getMinutes()) - session.minute)
+          if (dist < bestDist) { bestDist = dist; bestIdx = idx }
+        }
+        if (bestIdx != null && bestDist <= 10) {
+          points.push({ idx: bestIdx, time: rows[bestIdx].time, label: session.label, color: session.color })
+        }
+      }
+    }
+    sessionPointsRef.current = points.sort((a, b) => a.idx - b.idx)
   }
 
   // 왼쪽 "크로스 신호" 표시 - 크로스1/2/3 슬롯에 명시적으로 고른 쌍만 본다(반자동/시뮬레이션도 이제

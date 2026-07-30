@@ -23,6 +23,12 @@ const MAX_WINDOW_MIN = 24 * 60 // 최대로 축소하면 하루 전체
 // 규칙 참고) - x축(00:00~23:59)은 그대로 두고, 시가(0선) 기준만 07:00 시점 가격으로 삼는다(사용자 요청).
 const REFERENCE_MIN = 7 * 60 // 07:00
 
+// "시간대별 변동성 분석" 막대그래프의 세분화 단위 - 1시간 하나로는 뭉뚱그려져서 15분 단위(1시간=4칸)로
+// 쪼개달라는 요청(사용자)에 맞춘 것. 하루 24시간 = 96개 15분 버킷.
+const MINUTES_PER_BUCKET = 15
+const BUCKETS_PER_HOUR = 60 / MINUTES_PER_BUCKET
+const TOTAL_BUCKETS = 24 * BUCKETS_PER_HOUR
+
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
 }
@@ -49,7 +55,7 @@ export default function BacktestIntraday() {
   const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
   // 지금 마우스가 어느 영역(본문/y축/x축) 위에 있는지에 따라 커서 모양을 바꿔서 뭘 할 수 있는지 알려준다
   const [cursorStyle, setCursorStyle] = useState('grab')
-  // "시간대별 변동성 분석" 버튼 결과 - null(아직 안 돌림) | {ranked, dayCount, missingHours} | {error}
+  // "시간대별 변동성 분석" 버튼 결과 - null(아직 안 돌림) | {ranked, dayCount, missingBuckets} | {error}
   const [hourlyAnalysis, setHourlyAnalysis] = useState(null)
 
   const canvasRef = useRef(null)
@@ -433,45 +439,47 @@ export default function BacktestIntraday() {
   }
 
   // "⏱ 시간대별 변동성 분석" - 지금 왼쪽 달력에서 클릭해서 고른 날짜들(selectedDates, 위 오버레이
-  // 차트에 그려지는 바로 그 날짜들)만 대상으로, 하루 중 어느 시간대(00~23시, 위 차트와 같은 브로커
-  // 서버+서머타임 오프셋 기준 라벨)에 변동이 몰리는지 계산한다 - "24시간 중 언제 자리를 지키고
-  // 있어야 하는지" 물어본 데서 나온 기능. 원본 행(dayRowsRef)은 편차가 아니라 실제 open/high/low/close라
+  // 차트에 그려지는 바로 그 날짜들)만 대상으로, 하루 중 어느 15분 구간에 변동이 몰리는지 계산한다 -
+  // "24시간 중 언제 자리를 지키고 있어야 하는지" 물어본 데서 나온 기능. 처음엔 1시간 단위(24칸)로
+  // 만들었는데 "1시간은 너무 뭉뚱그려진다, 15분에 하나씩(1시간=4칸)으로 쪼개달라"는 요청으로 96개
+  // 15분 버킷 단위로 세분화함. 원본 행(dayRowsRef)은 편차가 아니라 실제 open/high/low/close라
   // 이 계산에 필요한 레인지(고가-저가)·직전 종가 대비 변동폭을 그대로 쓸 수 있다.
-  // 지표: 그 시간대 1분봉들의 (종가 - 직전 종가) 절대값을 하루 안에서만 누적한 값 - 고른 날짜 전체의
-  // 총 변동 중 이 시간대가 차지하는 비중(%)으로 순위를 매긴다.
+  // 지표: 그 15분 구간 1분봉들의 (종가 - 직전 종가) 절대값을 하루 안에서만 누적한 값 - 고른 날짜 전체의
+  // 총 변동 중 이 구간이 차지하는 비중(%)으로 순위를 매긴다.
   const runHourlyAnalysis = useCallback(() => {
     if (selectedDates.length === 0) return
 
-    const hourRangeSum = new Array(24).fill(0)
-    const hourRangeCnt = new Array(24).fill(0)
-    const hourMoveSum = new Array(24).fill(0)
+    const bucketRangeSum = new Array(TOTAL_BUCKETS).fill(0)
+    const bucketRangeCnt = new Array(TOTAL_BUCKETS).fill(0)
+    const bucketMoveSum = new Array(TOTAL_BUCKETS).fill(0)
 
     for (const date of selectedDates) {
       const rows = dayRowsRef.current[date]
       if (!rows || rows.length === 0) continue
       let prevClose = null
       for (const r of rows) {
-        const hh = new Date(r.time * 1000).getHours()
-        hourRangeSum[hh] += r.high - r.low
-        hourRangeCnt[hh] += 1
-        if (prevClose != null) hourMoveSum[hh] += Math.abs(r.close - prevClose)
+        const d = new Date(r.time * 1000)
+        const idx = d.getHours() * BUCKETS_PER_HOUR + Math.floor(d.getMinutes() / MINUTES_PER_BUCKET)
+        bucketRangeSum[idx] += r.high - r.low
+        bucketRangeCnt[idx] += 1
+        if (prevClose != null) bucketMoveSum[idx] += Math.abs(r.close - prevClose)
         prevClose = r.close
       }
     }
 
-    const grandTotal = hourMoveSum.reduce((a, b) => a + b, 0)
-    const missingHours = []
+    const grandTotal = bucketMoveSum.reduce((a, b) => a + b, 0)
+    const missingBuckets = []
     const ranked = []
-    for (let hh = 0; hh < 24; hh++) {
-      if (hourRangeCnt[hh] === 0) { missingHours.push(hh); continue }
+    for (let idx = 0; idx < TOTAL_BUCKETS; idx++) {
+      if (bucketRangeCnt[idx] === 0) { missingBuckets.push(idx); continue }
       ranked.push({
-        hour: hh,
-        sharePct: grandTotal ? (hourMoveSum[hh] / grandTotal * 100) : 0,
-        avgRange: hourRangeSum[hh] / hourRangeCnt[hh],
+        bucket: idx,
+        sharePct: grandTotal ? (bucketMoveSum[idx] / grandTotal * 100) : 0,
+        avgRange: bucketRangeSum[idx] / bucketRangeCnt[idx],
       })
     }
     ranked.sort((a, b) => b.sharePct - a.sharePct)
-    setHourlyAnalysis({ ranked, dayCount: selectedDates.length, missingHours })
+    setHourlyAnalysis({ ranked, dayCount: selectedDates.length, missingBuckets })
   }, [selectedDates])
 
   // 고른 날짜 목록이 바뀌면(날짜 추가/제거, 전체 지우기) 이전 분석 결과는 더 이상 지금 선택과
@@ -501,7 +509,7 @@ export default function BacktestIntraday() {
             왼쪽 달력에서 날짜를 하나씩 클릭해서 겹쳐볼 날짜를 골라주세요. 고른 날짜의 종가에서 그날 시가(한국시간 07:00 기준 - 실제 거래 시작 시점)를 뺀 값을 시간대별로 겹쳐 그립니다 - 0선이 07:00 가격입니다. 차트를 드래그하면 좌우로 이동하고, 마우스 휠로 확대/축소할 수 있습니다.
           </p>
 
-          {/* 하루 24시간 중 언제 변동이 몰리는지(=언제 자리를 지키고 있어야 하는지) 별도 분석 */}
+          {/* 하루 24시간(15분 단위 96칸) 중 언제 변동이 몰리는지(=언제 자리를 지키고 있어야 하는지) 별도 분석 */}
           <div style={{ marginBottom: 20 }}>
             <button
               type="button"
@@ -526,34 +534,48 @@ export default function BacktestIntraday() {
 
             {hourlyAnalysis && !hourlyAnalysis.error && (() => {
               const maxShare = Math.max(...hourlyAnalysis.ranked.map(r => r.sharePct), 0.0001)
-              const byHour = new Map(hourlyAnalysis.ranked.map((r, i) => [r.hour, { ...r, rank: i + 1 }]))
+              const byBucket = new Map(hourlyAnalysis.ranked.map((r, i) => [r.bucket, { ...r, rank: i + 1 }]))
+              // 안내 문구용 - 15분 단위 그대로 나열하면 너무 길어지니 "그 시간(들) 중 일부 구간은 데이터 없음" 식으로 시간 단위로 묶어서 보여준다
+              const missingHoursSet = new Set(hourlyAnalysis.missingBuckets.map(idx => Math.floor(idx / BUCKETS_PER_HOUR)))
               return (
                 <div style={{ marginTop: 14, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20 }}>
                   <div style={{ fontSize: 12.5, color: '#9aa0ab', marginBottom: 18 }}>
-                    {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 하루 총 변동(1분봉 종가 변화 절대값을 하루 안에서 누적) 중 그 시간대가 차지하는 비중. 막대 위 숫자는 순위(1위=가장 바쁜 시간대).
-                    {hourlyAnalysis.missingHours.length > 0 && (
-                      <> · {hourlyAnalysis.missingHours.map(h => `${String(h).padStart(2, '0')}시`).join(', ')}는 데이터 없음</>
+                    {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 15분 단위로 쪼갠 구간별 총 변동(1분봉 종가 변화 절대값을 하루 안에서 누적) 비중. 막대 위 숫자는 순위(1위=가장 바쁜 구간, 상위 3개만 표시).
+                    {missingHoursSet.size > 0 && (
+                      <> · {[...missingHoursSet].sort((a, b) => a - b).map(h => `${String(h).padStart(2, '0')}시`).join(', ')} 구간엔 데이터 없음</>
                     )}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 200 }}>
-                    {Array.from({ length: 24 }, (_, hh) => {
-                      const info = byHour.get(hh)
-                      const barH = info ? Math.max(4, (info.sharePct / maxShare) * 168) : 0
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 200 }}>
+                    {Array.from({ length: TOTAL_BUCKETS }, (_, idx) => {
+                      const info = byBucket.get(idx)
+                      const barH = info ? Math.max(3, (info.sharePct / maxShare) * 168) : 0
                       const top3 = !!info && info.rank <= 3
+                      const hour = Math.floor(idx / BUCKETS_PER_HOUR)
+                      const quarter = idx % BUCKETS_PER_HOUR
+                      const label = `${String(hour).padStart(2, '0')}:${String(quarter * MINUTES_PER_BUCKET).padStart(2, '0')}`
                       return (
-                        <div key={hh} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
-                          <span style={{ fontSize: 10, fontWeight: top3 ? 800 : 400, color: top3 ? '#4CAF50' : '#5a5f6a', marginBottom: 3 }}>
-                            {info ? info.rank : ''}
+                        <div
+                          key={idx}
+                          style={{
+                            flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'flex-end', height: '100%',
+                            marginLeft: quarter === 0 && idx !== 0 ? 4 : 0, // 매 정각마다 살짝 띄워서 시간 단위 구분이 보이게
+                          }}
+                        >
+                          <span style={{ fontSize: 9, fontWeight: 800, color: '#4CAF50', marginBottom: 2, visibility: top3 ? 'visible' : 'hidden' }}>
+                            {top3 ? info.rank : '·'}
                           </span>
                           <div
-                            title={info ? `${String(hh).padStart(2, '0')}시 - ${info.sharePct.toFixed(1)}% (평균 레인지 ${info.avgRange.toFixed(1)}pt)` : `${String(hh).padStart(2, '0')}시 - 데이터 없음`}
+                            title={info ? `${label} - ${info.sharePct.toFixed(1)}% (평균 레인지 ${info.avgRange.toFixed(1)}pt)` : `${label} - 데이터 없음`}
                             style={{
                               width: '100%', height: barH,
                               background: top3 ? '#4CAF50' : (info ? '#3a4152' : 'transparent'),
-                              borderRadius: '3px 3px 0 0',
+                              borderRadius: '2px 2px 0 0',
                             }}
                           />
-                          <span style={{ fontSize: 9.5, color: '#5a5f6a', marginTop: 5 }}>{String(hh).padStart(2, '0')}</span>
+                          {quarter === 0 && (
+                            <span style={{ fontSize: 9.5, color: '#5a5f6a', marginTop: 5 }}>{String(hour).padStart(2, '0')}</span>
+                          )}
                         </div>
                       )
                     })}
