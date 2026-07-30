@@ -969,7 +969,9 @@ export default function BacktestChart() {
     if (!chartRef.current) return
     const paneCount = (rsiOn ? 1 : 0) + (macdOn ? 1 : 0)
     const mainBottom = paneCount === 0 ? 0.05 : paneCount * PANE_HEIGHT + paneCount * PANE_GAP + 0.02
-    chartRef.current.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: mainBottom } })
+    // 캔들 시리즈 자신을 통해 'right' 스케일에 접근 - chart.priceScale('right')로도 될 것 같았지만
+    // 실제 배포에서 마진이 전혀 안 먹혔던 걸 보면 이것도 시리즈 경유로 해야 하는 것으로 보임
+    seriesRef.current?.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: mainBottom } })
     let cursorBottom = 0.02 // 맨 아래(0.02 여백)부터 위로 하나씩 쌓는다
     if (macdOn) {
       // MACD1/MACD5가 같은 priceScaleId('macd')를 쓰므로 둘 중 있는 쪽 시리즈로 스케일에 접근하면 된다
