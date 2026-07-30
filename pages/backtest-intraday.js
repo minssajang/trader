@@ -29,6 +29,14 @@ const MINUTES_PER_BUCKET = 15
 const BUCKETS_PER_HOUR = 60 / MINUTES_PER_BUCKET
 const TOTAL_BUCKETS = 24 * BUCKETS_PER_HOUR
 
+// 세계 3대 시장 개장 시각 - backtest-chart.js와 동일한 시간 라벨(브로커 서버+서머타임 오프셋) 기준
+// 분(minute-of-day). 유럽(런던)은 서머타임(BST) 기준 07:00 UTC=16:00 이 라벨(겨울엔 17:00).
+const SESSION_OPENS = [
+  { label: '아시아', minute: 7 * 60, color: '#64B5F6' },
+  { label: '유럽', minute: 16 * 60, color: '#FFD54F' },
+  { label: '미장', minute: 22 * 60 + 30, color: '#BA68C8' },
+]
+
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
 }
@@ -265,6 +273,22 @@ export default function BacktestIntraday() {
     ctx.setLineDash([])
     ctx.textAlign = 'left'
     ctx.fillText('시가(07:00, 0)', 58, zeroY - 5)
+
+    // 세계 3대 시장 개장 시각 - 지금 보이는 구간 안에 있을 때만 세로 점선 + 라벨로 표시
+    ctx.font = '10px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif'
+    for (const session of SESSION_OPENS) {
+      if (!inWindow(session.minute)) continue
+      const sx = px(session.minute)
+      ctx.strokeStyle = session.color
+      ctx.globalAlpha = 0.5
+      ctx.setLineDash([3, 3])
+      ctx.beginPath(); ctx.moveTo(sx, 16); ctx.lineTo(sx, H - 34); ctx.stroke()
+      ctx.setLineDash([])
+      ctx.globalAlpha = 1
+      ctx.fillStyle = session.color
+      ctx.textAlign = 'center'
+      ctx.fillText(session.label, sx, 27)
+    }
 
     // 고른 날짜들만, 지금 보이는 12시간 구간에 해당하는 부분만 그린다
     const n = selectedSeries.length
@@ -540,41 +564,55 @@ export default function BacktestIntraday() {
               return (
                 <div style={{ marginTop: 14, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20 }}>
                   <div style={{ fontSize: 12.5, color: '#9aa0ab', marginBottom: 18 }}>
-                    {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 15분 단위로 쪼갠 구간별 총 변동(1분봉 종가 변화 절대값을 하루 안에서 누적) 비중. 막대 위 숫자는 순위(1위=가장 바쁜 구간, 상위 3개만 표시).
+                    {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 15분 단위로 쪼갠 구간별 총 변동(1분봉 종가 변화 절대값을 하루 안에서 누적) 비중. 막대 위 숫자는 순위(1위=가장 바쁜 구간, 96칸 전부 표시 - 세로쓰기), 상위 3개는 초록색으로 강조.
                     {missingHoursSet.size > 0 && (
                       <> · {[...missingHoursSet].sort((a, b) => a - b).map(h => `${String(h).padStart(2, '0')}시`).join(', ')} 구간엔 데이터 없음</>
                     )}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 200 }}>
-                    {Array.from({ length: TOTAL_BUCKETS }, (_, idx) => {
-                      const info = byBucket.get(idx)
-                      const barH = info ? Math.max(3, (info.sharePct / maxShare) * 168) : 0
-                      const top3 = !!info && info.rank <= 3
-                      const hour = Math.floor(idx / BUCKETS_PER_HOUR)
-                      const quarter = idx % BUCKETS_PER_HOUR
-                      const label = `${String(hour).padStart(2, '0')}:${String(quarter * MINUTES_PER_BUCKET).padStart(2, '0')}`
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 0, height: 200 }}>
+                    {Array.from({ length: 24 }, (_, hour) => {
+                      const sessionHere = SESSION_OPENS.find(s => Math.floor(s.minute / 60) === hour)
                       return (
                         <div
-                          key={idx}
+                          key={hour}
                           style={{
                             flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
-                            justifyContent: 'flex-end', height: '100%',
-                            marginLeft: quarter === 0 && idx !== 0 ? 4 : 0, // 매 정각마다 살짝 띄워서 시간 단위 구분이 보이게
+                            borderLeft: hour !== 0 ? '1px solid #2a2e38' : 'none', paddingLeft: hour !== 0 ? 3 : 0,
                           }}
                         >
-                          <span style={{ fontSize: 9, fontWeight: 800, color: '#4CAF50', marginBottom: 2, visibility: top3 ? 'visible' : 'hidden' }}>
-                            {top3 ? info.rank : '·'}
+                          {/* 1시간마다 세로선으로 구분 - 그 시간의 15분 버킷 4개를 한 그룹으로 묶어서 아래 시간 숫자가 정가운데에 오게 한다 */}
+                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, width: '100%', height: 180 }}>
+                            {Array.from({ length: BUCKETS_PER_HOUR }, (_, quarter) => {
+                              const idx = hour * BUCKETS_PER_HOUR + quarter
+                              const info = byBucket.get(idx)
+                              const barH = info ? Math.max(3, (info.sharePct / maxShare) * 158) : 0
+                              const top3 = !!info && info.rank <= 3
+                              const label = `${String(hour).padStart(2, '0')}:${String(quarter * MINUTES_PER_BUCKET).padStart(2, '0')}`
+                              return (
+                                <div key={idx} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+                                  <span style={{
+                                    fontSize: 8, fontWeight: top3 ? 800 : 400, color: top3 ? '#4CAF50' : '#5a5f6a',
+                                    marginBottom: 2, writingMode: 'vertical-rl', textOrientation: 'mixed', lineHeight: 1, height: 20,
+                                  }}>
+                                    {info ? info.rank : ''}
+                                  </span>
+                                  <div
+                                    title={info ? `${label} - ${info.sharePct.toFixed(1)}% (평균 레인지 ${info.avgRange.toFixed(1)}pt)` : `${label} - 데이터 없음`}
+                                    style={{
+                                      width: '100%', height: barH,
+                                      background: top3 ? '#4CAF50' : (info ? '#3a4152' : 'transparent'),
+                                      borderRadius: '2px 2px 0 0',
+                                    }}
+                                  />
+                                </div>
+                              )
+                            })}
+                          </div>
+                          <span style={{ fontSize: 9.5, color: sessionHere ? sessionHere.color : '#5a5f6a', fontWeight: sessionHere ? 800 : 400, marginTop: 5 }}>
+                            {String(hour).padStart(2, '0')}
                           </span>
-                          <div
-                            title={info ? `${label} - ${info.sharePct.toFixed(1)}% (평균 레인지 ${info.avgRange.toFixed(1)}pt)` : `${label} - 데이터 없음`}
-                            style={{
-                              width: '100%', height: barH,
-                              background: top3 ? '#4CAF50' : (info ? '#3a4152' : 'transparent'),
-                              borderRadius: '2px 2px 0 0',
-                            }}
-                          />
-                          {quarter === 0 && (
-                            <span style={{ fontSize: 9.5, color: '#5a5f6a', marginTop: 5 }}>{String(hour).padStart(2, '0')}</span>
+                          {sessionHere && (
+                            <span style={{ fontSize: 8, color: sessionHere.color, marginTop: 1 }}>{sessionHere.label}</span>
                           )}
                         </div>
                       )
