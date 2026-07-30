@@ -81,9 +81,22 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
   const startWeekday = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
 
+  // 1일 이전 빈칸을 그냥 비워두면, 달 경계를 넘는 범위(예: 7월 29일~8월 2일)를 선택할 때 이전/다음 달로
+  // 갔다가 다시 돌아와야 하는 불편이 있었다(사용자 지적) - 그 칸에 실제 이전 달 날짜를 흐리게 채워서
+  // 데이터가 있으면 그 자리에서 바로 클릭할 수 있게 한다. new Date(y, -1, d)는 자동으로 전년도 12월로
+  // 넘어가므로 month가 0(1월)이어도 별도 분기 없이 그대로 계산된다.
   const cells = []
-  for (let i = 0; i < startWeekday; i++) cells.push(null)
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+  const prevMonthLastDay = new Date(year, month, 0).getDate()
+  for (let i = 0; i < startWeekday; i++) {
+    const day = prevMonthLastDay - startWeekday + 1 + i
+    const dt = new Date(year, month - 1, day)
+    const dateStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+    cells.push({ day, dateStr, otherMonth: true })
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    cells.push({ day: d, dateStr, otherMonth: false })
+  }
 
   const navBtn = {
     background: 'none', border: '1px solid #2a2e38', color: '#9aa0ab', borderRadius: 8,
@@ -108,9 +121,7 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
         {WEEKDAY_LABEL.map(w => <div key={w}>{w}</div>)}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
-        {cells.map((d, i) => {
-          if (d == null) return <div key={i} />
-          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        {cells.map(({ day, dateStr, otherMonth }, i) => {
           const has = availableDates.has(dateStr)
           const isEndpoint = dateStr === selectedDate || dateStr === selectedDateTo
           const inRange = !!selectedDateTo && dateStr > rangeFrom && dateStr < rangeTo
@@ -125,12 +136,13 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
               style={{
                 padding: '8px 0', borderRadius: 6, fontSize: 12,
                 cursor: clickable ? 'pointer' : 'default',
+                opacity: otherMonth ? 0.4 : 1,
                 border: isEndpoint ? '1px solid #4CAF50' : '1px solid transparent',
                 background: isEndpoint ? '#4CAF50' : inRange ? 'rgba(76,175,80,0.4)' : has ? 'rgba(76,175,80,0.15)' : 'transparent',
                 color: isEndpoint ? '#fff' : has ? '#e8eaed' : '#3a3f4a',
                 fontWeight: has ? 700 : 400,
               }}
-            >{d}</button>
+            >{day}</button>
           )
         })}
       </div>
