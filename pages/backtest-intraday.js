@@ -11,9 +11,6 @@ const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 // 사용자가 직접 고른 날짜별 색상 - 순서대로 고정 팔레트를 돌려써서 차트 선과 왼쪽 날짜 칩의 색이 항상 일치하게 한다
 const DAY_COLORS = ['#4FC3F7', '#FFB74D', '#BA68C8', '#81C784', '#F06292', '#FFD54F', '#4DB6AC', '#E57373']
 function dayColor(i) { return DAY_COLORS[i % DAY_COLORS.length] }
-// 하루 캔들이 이 개수 미만이면(주말/휴장일 또는 데이터 파일 경계에 걸쳐 잘린 날) 오버레이에서 제외 -
-// 정상적인 하루는 01:00~23:59, 1분봉 1380개
-const MIN_CANDLES_PER_DAY = 1300
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
@@ -33,6 +30,9 @@ export default function BacktestIntraday() {
   // (예전엔 그 달 전체를 자동으로 다 그렸는데, "왜 선이 미리 그려져 있냐"는 피드백으로 사용자가
   // 직접 고른 날짜만 그리는 방식으로 바꿈)
   const [selectedDates, setSelectedDates] = useState([])
+  // 평균선은 기본으로 자동으로 안 그리고, 이 버튼을 켜야만 그린다(사용자 요청 - 시키지 않은 걸
+  // 자동으로 하지 말고 옵션 버튼으로 빼둘 것)
+  const [showAverage, setShowAverage] = useState(false)
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
@@ -94,7 +94,8 @@ export default function BacktestIntraday() {
 
         const nextDays = []
         for (const [date, rows] of [...byDate.entries()].sort()) {
-          if (rows.length < MIN_CANDLES_PER_DAY) continue
+          // 완전한 하루가 아니어도(데이터 경계에 걸려 일부 시간대만 있어도) 있는 부분만 그린다 -
+          // 시가는 그날 실제로 가진 첫 캔들의 open을 기준으로 삼는다.
           const dayOpen = rows[0].open
           const points = rows.map(r => {
             const d = new Date(r.time * 1000)
@@ -123,26 +124,41 @@ export default function BacktestIntraday() {
     [days, selectedDates]
   )
 
-  const { yLo, yHi, avgSeries, avgMap } = useMemo(() => {
-    if (selectedSeries.length === 0) return { yLo: -1, yHi: 1, avgSeries: [], avgMap: new Map() }
+  // 달력에서 고른 날짜별로 다른 색을 쓰고, 그 색을 달력 강조에도 그대로 넘긴다(선-달력 색 일치)
+  const dateColors = useMemo(
+    () => Object.fromEntries(selectedDates.map((d, i) => [d, dayColor(i)])),
+    [selectedDates]
+  )
+
+  const { yLo, yHi } = useMemo(() => {
+    if (selectedSeries.length === 0) return { yLo: -1, yHi: 1 }
     let lo = Infinity, hi = -Infinity
+    for (const d of selectedSeries) {
+      for (const [, v] of d.points) {
+        if (v < lo) lo = v
+        if (v > hi) hi = v
+      }
+    }
+    const pad = (hi - lo) * 0.08 || 1
+    return { yLo: lo - pad, yHi: hi + pad }
+  }, [selectedSeries])
+
+  // "평균선 표시" 버튼을 켰을 때만 계산 - 기본은 안 켜져 있으니 매번 계산 안 해도 됨
+  const avgMap = useMemo(() => {
+    if (!showAverage || selectedSeries.length < 2) return new Map()
     const sums = new Map()
     for (const d of selectedSeries) {
       for (const [m, v] of d.points) {
-        if (v < lo) lo = v
-        if (v > hi) hi = v
         const e = sums.get(m) || { s: 0, n: 0 }
         e.s += v; e.n += 1
         sums.set(m, e)
       }
     }
-    const pad = (hi - lo) * 0.08 || 1
-    const mins = [...sums.keys()].sort((a, b) => a - b)
-    const series = mins.map(m => [m, sums.get(m).s / sums.get(m).n])
-    return { yLo: lo - pad, yHi: hi + pad, avgSeries: series, avgMap: new Map(series) }
-  }, [selectedSeries])
+    return new Map([...sums.entries()].map(([m, e]) => [m, e.s / e.n]))
+  }, [showAverage, selectedSeries])
+  const avgSeries = useMemo(() => [...avgMap.entries()].sort((a, b) => a[0] - b[0]), [avgMap])
 
-  const MIN_MIN = 60, MAX_MIN = 24 * 60 - 1
+  const MIN_MIN = 0, MAX_MIN = 24 * 60 - 1
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -170,7 +186,7 @@ export default function BacktestIntraday() {
     ctx.font = '11px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif'
     ctx.strokeStyle = '#232733'
     ctx.fillStyle = '#9aa0ab'
-    for (let h = 2; h <= 22; h += 2) {
+    for (let h = 0; h <= 22; h += 2) {
       const x = px(h * 60)
       ctx.beginPath(); ctx.moveTo(x, 16); ctx.lineTo(x, H - 34); ctx.stroke()
       ctx.textAlign = 'center'
@@ -208,7 +224,7 @@ export default function BacktestIntraday() {
       ctx.stroke()
     })
 
-    if (n >= 2) {
+    if (showAverage && n >= 2) {
       ctx.strokeStyle = '#e8eaed'
       ctx.lineWidth = 2.6
       ctx.setLineDash([6, 4])
@@ -222,12 +238,13 @@ export default function BacktestIntraday() {
     }
 
     if (hoverInfo) {
+      const hx = px(hoverInfo.minute)
       ctx.strokeStyle = '#e8eaed'
       ctx.globalAlpha = 0.35
-      ctx.beginPath(); ctx.moveTo(hoverInfo.x, 16); ctx.lineTo(hoverInfo.x, H - 34); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(hx, 16); ctx.lineTo(hx, H - 34); ctx.stroke()
       ctx.globalAlpha = 1
     }
-  }, [selectedSeries, yLo, yHi, avgSeries, hoverInfo])
+  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo])
 
   useEffect(() => {
     draw()
@@ -235,6 +252,17 @@ export default function BacktestIntraday() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [draw])
+
+  // 마우스 호버든 아래쪽 슬라이드바든 둘 다 이 함수로 같은 crosshair/HUD를 갱신한다
+  const updateHoverForMinute = (minute) => {
+    if (selectedSeries.length === 0) return
+    let up = 0, down = 0
+    for (const d of selectedSeries) {
+      const p = d.points.find(([m]) => m === minute)
+      if (p) { if (p[1] >= 0) up++; else down++ }
+    }
+    setHoverInfo({ minute, avg: avgMap.get(minute), up, down })
+  }
 
   const onMouseMove = (e) => {
     const canvas = canvasRef.current
@@ -244,12 +272,7 @@ export default function BacktestIntraday() {
     if (mx < 56 || mx > rect.width - 20) { setHoverInfo(null); return }
     const t = (mx - 56) / (rect.width - 56 - 20)
     const minute = Math.max(MIN_MIN, Math.min(MAX_MIN, Math.round(MIN_MIN + t * (MAX_MIN - MIN_MIN))))
-    let up = 0, down = 0
-    for (const d of selectedSeries) {
-      const p = d.points.find(([m]) => m === minute)
-      if (p) { if (p[1] >= 0) up++; else down++ }
-    }
-    setHoverInfo({ x: mx, minute, avg: avgMap.get(minute), up, down })
+    updateHoverForMinute(minute)
   }
 
   const fmtHM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
@@ -305,6 +328,7 @@ export default function BacktestIntraday() {
                 viewDate={viewMonth}
                 onNavigate={navigateMonth}
                 availableDates={availableDates}
+                dateColors={dateColors}
                 onSelect={handleDayClick}
                 maxWidth={220}
               />
@@ -333,10 +357,10 @@ export default function BacktestIntraday() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14, flexWrap: 'wrap', fontSize: 12.5, color: '#9aa0ab' }}>
                   <span>고른 날짜별로 색이 다릅니다(왼쪽 목록 참고)</span>
                   {selectedSeries.length >= 2 && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ width: 18, height: 0, borderTop: '3px dashed #e8eaed', display: 'inline-block' }} />
-                      고른 날짜들의 평균
-                    </span>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={showAverage} onChange={e => setShowAverage(e.target.checked)} style={{ width: 13, height: 13, margin: 0 }} />
+                      평균선 표시
+                    </label>
                   )}
                 </div>
                 <div ref={wrapRef} style={{ position: 'relative' }}>
@@ -353,9 +377,11 @@ export default function BacktestIntraday() {
                       pointerEvents: 'none', boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
                     }}>
                       <div style={{ color: '#9aa0ab', fontSize: 11, marginBottom: 4 }}>{fmtHM(hoverInfo.minute)}</div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                        <span>평균 편차</span><b>{hoverInfo.avg != null ? hoverInfo.avg.toFixed(1) + 'pt' : '-'}</b>
-                      </div>
+                      {showAverage && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <span>평균 편차</span><b>{hoverInfo.avg != null ? hoverInfo.avg.toFixed(1) + 'pt' : '-'}</b>
+                        </div>
+                      )}
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                         <span>시가 위</span><b>{hoverInfo.up}일</b>
                       </div>
@@ -365,6 +391,17 @@ export default function BacktestIntraday() {
                     </div>
                   )}
                 </div>
+                {selectedSeries.length > 0 && (
+                  <input
+                    type="range"
+                    min={MIN_MIN}
+                    max={MAX_MIN}
+                    step={1}
+                    value={hoverInfo ? hoverInfo.minute : MIN_MIN}
+                    onChange={e => updateHoverForMinute(Number(e.target.value))}
+                    style={{ width: '100%', marginTop: 14, accentColor: '#26a69a' }}
+                  />
+                )}
               </div>
 
               {selectedSeries.length > 0 && (
@@ -384,7 +421,7 @@ export default function BacktestIntraday() {
               )}
 
               <p style={{ color: '#9aa0ab', fontSize: 12, marginTop: 14 }}>
-                시간은 브로커 서버 기준(서머타임 적용). 완전한 하루(캔들 {MIN_CANDLES_PER_DAY}개 이상)만 포함하며, 주말·데이터 경계에 걸친 날은 제외됩니다.
+                시간은 브로커 서버 기준(서머타임 적용). 데이터 경계에 걸쳐 일부 시간대만 있는 날은 있는 부분만 그려집니다.
               </p>
             </div>
           </div>

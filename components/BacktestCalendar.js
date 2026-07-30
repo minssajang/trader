@@ -74,8 +74,11 @@ function Chevron({ direction }) {
 // onSelect를 안 넘기면 클릭 불가능한 읽기 전용 달력(admin의 "빈 날짜 확인용")으로 동작한다.
 // bare=true면 카드 껍데기(배경/테두리/패딩) 없이 내용만 렌더링 - CollapsibleCard 안에 넣을 때 씀.
 // selectedDateTo를 같이 넘기면 selectedDate~selectedDateTo 구간 전체를 옅게 하이라이트한다(범위 선택 표시용).
+// dateColors({dateStr: color})를 넘기면 그 날짜들을 각자 지정한 색으로 강조한다 - backtest-intraday.js처럼
+// 여러 날짜를 각각 다른 색으로 다중 선택해서 보여줘야 할 때 씀(selectedDate/selectedDateTo의 단일/범위
+// 하이라이트와는 별개 - 동시에 써도 dateColors가 우선한다).
 // onSelect는 (dateStr, shiftKey)로 호출된다 - Shift+클릭인지 호출하는 쪽에서 구분해서 범위 선택에 쓸 수 있게.
-export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDate, selectedDateTo, onSelect, maxWidth = 340, bare = false }) {
+export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDate, selectedDateTo, dateColors, onSelect, maxWidth = 340, bare = false }) {
   const year = viewDate.getFullYear()
   const month = viewDate.getMonth()
   const startWeekday = new Date(year, month, 1).getDay()
@@ -125,6 +128,7 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
           const has = availableDates.has(dateStr)
           const isEndpoint = dateStr === selectedDate || dateStr === selectedDateTo
           const inRange = !!selectedDateTo && dateStr > rangeFrom && dateStr < rangeTo
+          const customColor = dateColors && dateColors[dateStr]
           const clickable = has && !!onSelect
           return (
             <button
@@ -136,10 +140,10 @@ export function MonthCalendar({ viewDate, onNavigate, availableDates, selectedDa
               style={{
                 padding: '8px 0', borderRadius: 6, fontSize: 12,
                 cursor: clickable ? 'pointer' : 'default',
-                border: isEndpoint ? '1px solid #4CAF50' : '1px solid transparent',
-                background: isEndpoint ? '#4CAF50' : inRange ? 'rgba(76,175,80,0.4)' : has ? 'rgba(76,175,80,0.15)' : 'transparent',
-                color: isEndpoint ? '#fff' : has ? '#e8eaed' : '#3a3f4a',
-                fontWeight: has ? 700 : 400,
+                border: customColor ? `2px solid ${customColor}` : (isEndpoint ? '1px solid #4CAF50' : '1px solid transparent'),
+                background: customColor ? `${customColor}2E` : (isEndpoint ? '#4CAF50' : inRange ? 'rgba(76,175,80,0.4)' : has ? 'rgba(76,175,80,0.15)' : 'transparent'),
+                color: customColor ? customColor : (isEndpoint ? '#fff' : has ? '#e8eaed' : '#3a3f4a'),
+                fontWeight: (has || customColor) ? 700 : 400,
               }}
             >{day}</button>
           )
