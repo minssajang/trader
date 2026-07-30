@@ -468,6 +468,19 @@ export default function BacktestIntraday() {
   const fmtHM = (mnt) => `${String(Math.floor((mnt % 1440 + 1440) % 1440 / 60)).padStart(2, '0')}:${String(mnt % 60).padStart(2, '0')}`
   const fmtBucket = (idx) => `${String(Math.floor(idx / BUCKETS_PER_HOUR)).padStart(2, '0')}:${String((idx % BUCKETS_PER_HOUR) * MINUTES_PER_BUCKET).padStart(2, '0')}`
 
+  // PDF 리포트 제목/파일명에 쓰는 날짜 라벨 - "3일"처럼 개수만 보여주면 어느 날짜인지 알 수 없다는
+  // 지적(사용자)으로, 실제 고른 날짜(들)를 그대로 보여주게 고침. selectedDates는 항상 오름차순
+  // 정렬된 상태로 유지되므로(handleDayClick에서 .sort()) 첫/마지막만 보면 범위를 알 수 있다.
+  const fmtKoreanDate = (dateStr) => {
+    const [, m, d] = dateStr.split('-').map(Number)
+    return `${m}월${d}일`
+  }
+  const formatDateRangeLabel = (dates) => {
+    if (!dates || dates.length === 0) return ''
+    if (dates.length === 1) return fmtKoreanDate(dates[0])
+    return `${fmtKoreanDate(dates[0])}~${fmtKoreanDate(dates[dates.length - 1])}`
+  }
+
   // 달력 클릭 = 그 날짜를 선택 목록에 넣거나 뺀다(토글). availableDates는 데이터셋 범위 전체 기준이라
   // 주말이나 (경계에 걸려 잘려서) 오버레이에서 빠진 날도 "데이터 있음"으로 클릭 가능하게 나올 수 있어서,
   // 실제로 days 안에 있는(완전한 거래일인) 날짜만 선택 가능하게 막는다.
@@ -859,8 +872,16 @@ export default function BacktestIntraday() {
         const html2canvas = (await import('html2canvas')).default
         const { jsPDF } = await import('jspdf')
 
-        const canvas = await html2canvas(pdfContainerRef.current, {
+        // 캡처 영역을 이 컨테이너의 실제 크기로 못박아서(x/y/width/height/windowWidth/windowHeight)
+        // html2canvas가 문서 전체 스크롤 크기를 기준으로 캔버스를 잡는 걸 막는다 - 216페이지짜리
+        // PDF가 나왔던 원인이 바로 이거였다(화면 밖 -99999px 오프셋과 맞물려 캔버스가 수십만 px로 부풀었음).
+        const target = pdfContainerRef.current
+        const targetWidth = target.scrollWidth
+        const targetHeight = target.scrollHeight
+        const canvas = await html2canvas(target, {
           backgroundColor: '#0f1115', scale: 2, useCORS: true,
+          x: 0, y: 0, width: targetWidth, height: targetHeight,
+          windowWidth: targetWidth, windowHeight: targetHeight,
         })
         const imgData = canvas.toDataURL('image/png')
         const pdf = new jsPDF('p', 'mm', 'a4')
@@ -877,7 +898,7 @@ export default function BacktestIntraday() {
           pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
           heightLeft -= pageHeight
         }
-        const dateLabel = pdfReportData.series.length === 1 ? pdfReportData.series[0].date : `${pdfReportData.series.length}일`
+        const dateLabel = formatDateRangeLabel(pdfReportData.series.map(d => d.date))
         pdf.save(`easytrade_일중패턴_${pdfReportData.symbol}_${dateLabel}.pdf`)
       } catch (e) {
         if (!cancelled) setError(`PDF 생성 실패: ${e.message}`)
@@ -1106,8 +1127,12 @@ export default function BacktestIntraday() {
         </main>
       </div>
 
-      {/* PDF 캡처 전용 - 화면엔 안 보이지만(화면 밖으로 밀어둠) html2canvas는 캡처할 수 있게 display:none은 안 씀 */}
-      <div style={{ position: 'fixed', top: 0, left: -99999, width: 900, zIndex: -1 }}>
+      {/* PDF 캡처 전용 - 화면엔 안 보이지만(화면 밖으로 밀어둠) html2canvas는 캡처할 수 있게 display:none은 안 씀.
+          예전엔 left:-99999px처럼 극단적으로 멀리 밀어뒀는데, html2canvas가 문서 전체 크기를 그 좌표까지
+          포함해서 계산해버려서 캔버스가 수십만 px로 부풀고 PDF가 200페이지 넘게 나오는 버그가 있었다
+          (사용자가 받아본 파일이 216페이지/21MB였음) - 오프셋을 화면 밖으로 나가기에 충분한 정도(-3000px)로만
+          줄이고, html2canvas 호출에도 캡처 영역을 이 컨테이너 크기로 명시해서 문서 전체를 못 훑게 막는다. */}
+      <div style={{ position: 'fixed', top: 0, left: -3000, zIndex: -1 }}>
         <div
           ref={pdfContainerRef}
           style={{
@@ -1118,7 +1143,7 @@ export default function BacktestIntraday() {
           {pdfReportData && (() => {
             const { hourly, forward, series, symbol: sym, upDays: pUp, avgFinal: pAvg, maxAbs: pMax, missingHoursSet } = pdfReportData
             const today = buildTodayAnalysis(hourly, forward, series, sym)
-            const dateLabel = series.length === 1 ? series[0].date : `${series.length}일 선택`
+            const dateLabel = formatDateRangeLabel(series.map(d => d.date))
             return (
               <>
                 <h1 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 6px' }}>EasyTrade 백테스팅 — 일중 패턴 분석 리포트</h1>
