@@ -279,6 +279,11 @@ export default function BacktestChart() {
   const closedTradesRef = useRef([]) // 청산된 거래 전체(수동/반자동/시뮬레이션 다 포함, source로 구분) - "결과 저장" 누르면 DB로 보냄
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
+  // '전체선택' 체크박스용 - 지금 보고 있는 달(viewDate) 안에서 데이터 있는 날짜만 정렬해서 뽑아둠
+  const monthAvailableDates = useMemo(() => {
+    const prefix = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`
+    return Array.from(availableDates).filter(d => d.startsWith(prefix)).sort()
+  }, [availableDates, viewDate])
 
   // 심볼 바뀌면 그 심볼의 데이터셋 목록을 불러온다
   useEffect(() => {
@@ -556,10 +561,13 @@ export default function BacktestChart() {
 
     // symbol 전환 직후엔 datasets state가 아직 이전 심볼 목록일 수 있다(비동기 fetch가 덜 끝난 사이 클릭한 경우) -
     // d.symbol 체크 없이 날짜 범위만 보면 그 사이에 이전 심볼(예: GOLD) 파일을 잘못 불러오는 버그가 있었다.
-    // 범위 선택도 같은 이유로, 시작~끝 날짜가 전부 같은 데이터 파일 안에 있어야 한다.
-    const ds = datasets.find(d => d.symbol === symbol && d.date_from <= fromStr && toStr <= d.date_to)
-    if (!ds) {
-      setError(fromStr === toStr ? '해당 날짜의 데이터를 찾을 수 없습니다' : '선택한 범위가 같은 데이터 파일 안에 있지 않습니다 (더 좁게 선택해보세요)')
+    // 예전엔 시작~끝 날짜가 전부 같은 파일 안에 있어야 했는데(파일이 월 단위로 나뉘어 있어서 여러 달
+    // 걸치면 에러가 났음), 주말에 캔들이 비어도 자연스럽게 넘어가는 것처럼 파일 경계도 신경 안 쓰게
+    // 해달라는 요청(사용자) - 그 심볼의 파일을 전부 모아 시간 기준으로 병합해서 하나의 연속 시계열로 씀.
+    const symbolDatasets = datasets.filter(d => d.symbol === symbol)
+    const overlapping = symbolDatasets.filter(d => d.date_from <= toStr && fromStr <= d.date_to)
+    if (overlapping.length === 0) {
+      setError(fromStr === toStr ? '해당 날짜의 데이터를 찾을 수 없습니다' : '선택한 범위의 데이터를 찾을 수 없습니다')
       return
     }
 
@@ -585,14 +593,22 @@ export default function BacktestChart() {
     indexRef.current = 0
     setPlayIndex(0)
     try {
-      let fullRows = datasetCacheRef.current[ds.id]
-      if (!fullRows) {
-        const res = await fetch(publicUrl(ds.storage_path))
-        if (!res.ok) throw new Error(`파일을 가져오지 못했습니다 (${res.status})`)
-        const text = await res.text()
-        fullRows = parseCandleCsv(text, summerTime ? BROKER_OFFSET_SECONDS.summer : BROKER_OFFSET_SECONDS.winter).rows
-        datasetCacheRef.current[ds.id] = fullRows
+      // 아직 캐시 안 된 파일만 병렬로 받아온다 (캐시된 건 재요청 안 함)
+      const toFetch = symbolDatasets.filter(d => !datasetCacheRef.current[d.id])
+      if (toFetch.length > 0) {
+        await Promise.all(toFetch.map(async d => {
+          const res = await fetch(publicUrl(d.storage_path))
+          if (!res.ok) throw new Error(`파일을 가져오지 못했습니다 (${res.status})`)
+          const csvText = await res.text()
+          datasetCacheRef.current[d.id] = parseCandleCsv(csvText, summerTime ? BROKER_OFFSET_SECONDS.summer : BROKER_OFFSET_SECONDS.winter).rows
+        }))
       }
+      // 같은 시각 캔들이 여러 파일에 겹쳐 있을 수 있어 시간을 키로 병합(뒤에 처리한 파일이 있으면 덮어씀) 후 정렬
+      const mergedByTime = new Map()
+      for (const d of symbolDatasets) {
+        for (const r of datasetCacheRef.current[d.id]) mergedByTime.set(r.time, r)
+      }
+      const fullRows = Array.from(mergedByTime.values()).sort((a, b) => a.time - b.time)
 
       let startIdx = fullRows.findIndex(r => toLocalDateStr(r.time) === fromStr)
       let endIdx = startIdx
@@ -692,6 +708,20 @@ export default function BacktestChart() {
     const to = anchor <= dateStr ? dateStr : anchor
     loadRange(from, to)
   }
+
+  // '전체선택' - 지금 보고 있는 달에 데이터 있는 날짜를 전부 이어서 하나의 재생 구간으로 불러온다.
+  // (loadRange가 '같은 데이터 파일 안'이어야 한다는 제약을 그대로 검사하므로, 파일 경계에 걸친 달은
+  // 기존과 동일하게 에러 메시지가 뜬다.)
+  const selectAllMonth = () => {
+    if (monthAvailableDates.length === 0) return
+    rangeAnchorRef.current = ''
+    setMultiSelectMode(true)
+    loadRange(monthAvailableDates[0], monthAvailableDates[monthAvailableDates.length - 1])
+  }
+
+  const allMonthSelected = monthAvailableDates.length > 0
+    && selectedDate === monthAvailableDates[0]
+    && (monthAvailableDates.length === 1 ? !selectedDateTo : selectedDateTo === monthAvailableDates[monthAvailableDates.length - 1])
 
   const toggleSummerTime = () => setSummerTime(prev => !prev)
 
@@ -863,11 +893,17 @@ export default function BacktestChart() {
     chartRef.current.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: mainBottom } })
     let cursorBottom = 0.02 // 맨 아래(0.02 여백)부터 위로 하나씩 쌓는다
     if (macdOn) {
-      chartRef.current.priceScale('macd').applyOptions({ scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom } })
+      chartRef.current.priceScale('macd').applyOptions({
+        scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom },
+        visible: true, borderVisible: true, borderColor: '#2a2e38',
+      })
       cursorBottom += PANE_HEIGHT + PANE_GAP
     }
     if (rsiOn) {
-      chartRef.current.priceScale('rsi').applyOptions({ scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom } })
+      chartRef.current.priceScale('rsi').applyOptions({
+        scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom },
+        visible: true, borderVisible: true, borderColor: '#2a2e38',
+      })
     }
   }
 
@@ -879,7 +915,6 @@ export default function BacktestChart() {
         rsiSeriesRef.current = chartRef.current.addLineSeries({
           color: rsiColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'rsi',
         })
-        chartRef.current.priceScale('rsi').applyOptions({ borderColor: '#2a2e38' })
         bumpMarkerLayer()
       }
       applyPaneLayout(true, enabledMACD)
@@ -912,7 +947,6 @@ export default function BacktestChart() {
             color: macdSignalColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
           }),
         }
-        chartRef.current.priceScale('macd').applyOptions({ borderColor: '#2a2e38' })
         bumpMarkerLayer()
       }
       applyPaneLayout(enabledRSI, true)
@@ -1498,6 +1532,16 @@ export default function BacktestChart() {
                     style={{ width: 13, height: 13, margin: 0, flexShrink: 0 }}
                   />
                   <span>여러 날 선택</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', marginBottom: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={allMonthSelected}
+                    onChange={selectAllMonth}
+                    disabled={monthAvailableDates.length === 0}
+                    style={{ width: 13, height: 13, margin: 0, flexShrink: 0 }}
+                  />
+                  <span>전체선택 {monthAvailableDates.length > 0 ? `(${monthAvailableDates.length}일)` : ''}</span>
                 </label>
                 <MonthCalendar
                   viewDate={viewDate}
