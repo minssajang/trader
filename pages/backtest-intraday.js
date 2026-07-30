@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
@@ -48,11 +49,14 @@ export default function BacktestIntraday() {
   const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
   // 지금 마우스가 어느 영역(본문/y축/x축) 위에 있는지에 따라 커서 모양을 바꿔서 뭘 할 수 있는지 알려준다
   const [cursorStyle, setCursorStyle] = useState('grab')
+  // "시간대별 변동성 분석" 버튼 결과 - null(아직 안 돌림) | {ranked, dayCount, missingHours} | {error}
+  const [hourlyAnalysis, setHourlyAnalysis] = useState(null)
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
   const dragRef = useRef(null) // {startClientX, startWindowStart} - 드래그 중일 때만 값이 있음
   const datasetCacheRef = useRef({}) // dataset.id -> parsed rows(전체) 캐시
+  const dayRowsRef = useRef({}) // date -> 그 날의 원본 캔들 행(open/high/low/close/time) - "시간대별 변동성 분석"에서 씀
 
   useEffect(() => {
     let ignore = false
@@ -62,6 +66,9 @@ export default function BacktestIntraday() {
       .catch(() => { if (!ignore) setDatasets([]) })
     return () => { ignore = true }
   }, [symbol])
+
+  // 심볼이 바뀌면 이전 심볼 기준으로 돌려둔 분석 결과는 더 이상 유효하지 않으니 지운다
+  useEffect(() => { setHourlyAnalysis(null) }, [symbol])
 
   const navigateMonth = (delta) => setViewMonth(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
@@ -109,6 +116,7 @@ export default function BacktestIntraday() {
         }
 
         const nextDays = []
+        const nextDayRows = {}
         for (const [date, rows] of [...byDate.entries()].sort()) {
           // 완전한 하루가 아니어도(데이터 경계에 걸려 일부 시간대만 있어도) 있는 부분만 그린다.
           // 시가(0선) 기준은 07:00 시점 가격 - 정확히 07:00 캔들이 있으면 그걸 쓰고, 없으면(경계에
@@ -129,10 +137,13 @@ export default function BacktestIntraday() {
             return [minutes, Math.round((r.close - dayOpen) * 100) / 100]
           })
           nextDays.push({ date, points })
+          nextDayRows[date] = rows // "시간대별 변동성 분석"은 편차가 아니라 원본 high/low/close가 필요해서 따로 보관
         }
         if (!ignore) {
           setDays(nextDays)
+          dayRowsRef.current = nextDayRows
           setSelectedDates([]) // 달/심볼이 바뀌면 이전에 골라둔 날짜는 더 이상 유효하지 않을 수 있으니 초기화
+          setHourlyAnalysis(null)
           if (nextDays.length === 0) setError('이 달엔 완전한 거래일 데이터가 없습니다')
         }
       } catch (e) {
@@ -421,6 +432,52 @@ export default function BacktestIntraday() {
     setSelectedDates(prev => prev.includes(dateStr) ? prev.filter(d => d !== dateStr) : [...prev, dateStr].sort())
   }
 
+  // "⏱ 시간대별 변동성 분석" - 지금 왼쪽 달력에서 클릭해서 고른 날짜들(selectedDates, 위 오버레이
+  // 차트에 그려지는 바로 그 날짜들)만 대상으로, 하루 중 어느 시간대(00~23시, 위 차트와 같은 브로커
+  // 서버+서머타임 오프셋 기준 라벨)에 변동이 몰리는지 계산한다 - "24시간 중 언제 자리를 지키고
+  // 있어야 하는지" 물어본 데서 나온 기능. 원본 행(dayRowsRef)은 편차가 아니라 실제 open/high/low/close라
+  // 이 계산에 필요한 레인지(고가-저가)·직전 종가 대비 변동폭을 그대로 쓸 수 있다.
+  // 지표: 그 시간대 1분봉들의 (종가 - 직전 종가) 절대값을 하루 안에서만 누적한 값 - 고른 날짜 전체의
+  // 총 변동 중 이 시간대가 차지하는 비중(%)으로 순위를 매긴다.
+  const runHourlyAnalysis = useCallback(() => {
+    if (selectedDates.length === 0) return
+
+    const hourRangeSum = new Array(24).fill(0)
+    const hourRangeCnt = new Array(24).fill(0)
+    const hourMoveSum = new Array(24).fill(0)
+
+    for (const date of selectedDates) {
+      const rows = dayRowsRef.current[date]
+      if (!rows || rows.length === 0) continue
+      let prevClose = null
+      for (const r of rows) {
+        const hh = new Date(r.time * 1000).getHours()
+        hourRangeSum[hh] += r.high - r.low
+        hourRangeCnt[hh] += 1
+        if (prevClose != null) hourMoveSum[hh] += Math.abs(r.close - prevClose)
+        prevClose = r.close
+      }
+    }
+
+    const grandTotal = hourMoveSum.reduce((a, b) => a + b, 0)
+    const missingHours = []
+    const ranked = []
+    for (let hh = 0; hh < 24; hh++) {
+      if (hourRangeCnt[hh] === 0) { missingHours.push(hh); continue }
+      ranked.push({
+        hour: hh,
+        sharePct: grandTotal ? (hourMoveSum[hh] / grandTotal * 100) : 0,
+        avgRange: hourRangeSum[hh] / hourRangeCnt[hh],
+      })
+    }
+    ranked.sort((a, b) => b.sharePct - a.sharePct)
+    setHourlyAnalysis({ ranked, dayCount: selectedDates.length, missingHours })
+  }, [selectedDates])
+
+  // 고른 날짜 목록이 바뀌면(날짜 추가/제거, 전체 지우기) 이전 분석 결과는 더 이상 지금 선택과
+  // 안 맞으니 지운다 - 버튼을 다시 눌러야 최신 선택 기준으로 갱신됨
+  useEffect(() => { setHourlyAnalysis(null) }, [selectedDates])
+
   const finalDevs = selectedSeries.map(d => d.points[d.points.length - 1][1])
   const upDays = finalDevs.filter(v => v > 0).length
   const avgFinal = finalDevs.length ? finalDevs.reduce((a, b) => a + b, 0) / finalDevs.length : 0
@@ -443,6 +500,68 @@ export default function BacktestIntraday() {
           <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 20 }}>
             왼쪽 달력에서 날짜를 하나씩 클릭해서 겹쳐볼 날짜를 골라주세요. 고른 날짜의 종가에서 그날 시가(한국시간 07:00 기준 - 실제 거래 시작 시점)를 뺀 값을 시간대별로 겹쳐 그립니다 - 0선이 07:00 가격입니다. 차트를 드래그하면 좌우로 이동하고, 마우스 휠로 확대/축소할 수 있습니다.
           </p>
+
+          {/* 하루 24시간 중 언제 변동이 몰리는지(=언제 자리를 지키고 있어야 하는지) 별도 분석 */}
+          <div style={{ marginBottom: 20 }}>
+            <button
+              type="button"
+              onClick={runHourlyAnalysis}
+              disabled={selectedDates.length === 0}
+              style={{
+                background: 'none', border: '1px solid #4CAF50', color: '#4CAF50', borderRadius: 9,
+                padding: '9px 16px', fontSize: 13, fontWeight: 700,
+                cursor: selectedDates.length === 0 ? 'default' : 'pointer',
+                opacity: selectedDates.length === 0 ? 0.5 : 1,
+              }}
+            >
+              ⏱ 고른 날짜 시간대별 변동성 분석{selectedDates.length > 0 ? ` (${selectedDates.length}일)` : ''}
+            </button>
+            {selectedDates.length === 0 && (
+              <span style={{ marginLeft: 10, fontSize: 12, color: '#5a5f6a' }}>왼쪽 달력에서 날짜를 먼저 골라주세요</span>
+            )}
+
+            {hourlyAnalysis && hourlyAnalysis.error && (
+              <div style={{ marginTop: 10, color: '#F44336', fontSize: 13 }}>❌ {hourlyAnalysis.error}</div>
+            )}
+
+            {hourlyAnalysis && !hourlyAnalysis.error && (() => {
+              const maxShare = Math.max(...hourlyAnalysis.ranked.map(r => r.sharePct), 0.0001)
+              const byHour = new Map(hourlyAnalysis.ranked.map((r, i) => [r.hour, { ...r, rank: i + 1 }]))
+              return (
+                <div style={{ marginTop: 14, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20 }}>
+                  <div style={{ fontSize: 12.5, color: '#9aa0ab', marginBottom: 18 }}>
+                    {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 하루 총 변동(1분봉 종가 변화 절대값을 하루 안에서 누적) 중 그 시간대가 차지하는 비중. 막대 위 숫자는 순위(1위=가장 바쁜 시간대).
+                    {hourlyAnalysis.missingHours.length > 0 && (
+                      <> · {hourlyAnalysis.missingHours.map(h => `${String(h).padStart(2, '0')}시`).join(', ')}는 데이터 없음</>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 200 }}>
+                    {Array.from({ length: 24 }, (_, hh) => {
+                      const info = byHour.get(hh)
+                      const barH = info ? Math.max(4, (info.sharePct / maxShare) * 168) : 0
+                      const top3 = !!info && info.rank <= 3
+                      return (
+                        <div key={hh} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+                          <span style={{ fontSize: 10, fontWeight: top3 ? 800 : 400, color: top3 ? '#4CAF50' : '#5a5f6a', marginBottom: 3 }}>
+                            {info ? info.rank : ''}
+                          </span>
+                          <div
+                            title={info ? `${String(hh).padStart(2, '0')}시 - ${info.sharePct.toFixed(1)}% (평균 레인지 ${info.avgRange.toFixed(1)}pt)` : `${String(hh).padStart(2, '0')}시 - 데이터 없음`}
+                            style={{
+                              width: '100%', height: barH,
+                              background: top3 ? '#4CAF50' : (info ? '#3a4152' : 'transparent'),
+                              borderRadius: '3px 3px 0 0',
+                            }}
+                          />
+                          <span style={{ fontSize: 9.5, color: '#5a5f6a', marginTop: 5 }}>{String(hh).padStart(2, '0')}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             {/* 왼쪽: 심볼 선택 + 달력(날짜를 클릭해서 겹쳐볼 날짜를 고른다) */}
