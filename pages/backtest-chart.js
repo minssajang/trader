@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
-import { createChart, CrosshairMode } from 'lightweight-charts'
+import { createChart, CrosshairMode, CandlestickSeries, LineSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
@@ -31,11 +31,8 @@ const DEFAULT_MACD_HIST_UP = '#26A69A'
 const DEFAULT_MACD_HIST_DOWN = '#EF5350'
 const DEFAULT_MACD5_LINE_COLOR = '#AB47BC'
 const DEFAULT_MACD5_SIGNAL_COLOR = '#FFCA28'
-// RSI(0~100)/MACD(진동값)는 캔들 가격축과 스케일이 전혀 달라 같은 축에 못 그림.
-// lightweight-charts v4는 pane API가 없어서 별도 priceScaleId + scaleMargins로
-// 차트 아래쪽에 squeeze해서 그리는 방식(applyPaneLayout) - 켜진 개수만큼 아래 공간을 나눠 배정.
-const PANE_HEIGHT = 0.16
-const PANE_GAP = 0.02
+// RSI(0~100)/MACD(진동값)는 캔들 가격축과 스케일이 전혀 달라 같은 축에 못 그림 -
+// lightweight-charts v5의 진짜 pane API(addSeries의 세 번째 인자 paneIndex)로 별도 창에 그린다.
 const DEFAULT_UP_COLOR = '#38BDF8'   // 상승 기본색 - 스카이블루
 const DEFAULT_DOWN_COLOR = '#FF69B4' // 하락 기본색 - 밝은 핑크
 // lightweight-charts 마커가 네이티브로 지원하는 모양만 사용(삼각형은 화살표로 표현)
@@ -266,6 +263,7 @@ export default function BacktestChart() {
   const chartRef = useRef(null)
   const seriesRef = useRef(null)
   const markerSeriesRef = useRef(null) // 투명 라인 시리즈 - 마커 전용. 다른 라인이 새로 추가될 때마다 지웠다 다시 만들어서 항상 맨 위(가장 나중에 추가된 시리즈)에 오게 함
+  const markersPrimitiveRef = useRef(null) // v5: series.setMarkers() 대신 createSeriesMarkers(series, markers)가 반환하는 primitive를 씀
   const rowsRef = useRef([])
   const intervalRef = useRef(null)
   const indexRef = useRef(0)
@@ -331,7 +329,7 @@ export default function BacktestChart() {
     doubleBSignalPointsRef.current = []
     bollInnerSignalPointsRef.current = []
     sessionPointsRef.current = []
-    markerSeriesRef.current?.setMarkers([])
+    markersPrimitiveRef.current?.setMarkers([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
@@ -356,14 +354,17 @@ export default function BacktestChart() {
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height: 860,
-      layout: { background: { color: '#0f1115' }, textColor: '#9aa0ab' },
+      layout: {
+        background: { color: '#0f1115' }, textColor: '#9aa0ab',
+        panes: { separatorColor: '#2a2e38', separatorHoverColor: 'rgba(76,175,80,0.15)', enableResize: true },
+      },
       grid: { vertLines: { color: '#1c2028' }, horzLines: { color: '#1c2028' } },
       crosshair: { mode: CrosshairMode.Normal },
       timeScale: { borderColor: '#2a2e38', timeVisible: true, secondsVisible: false, tickMarkFormatter: localTickMarkFormatter },
-      rightPriceScale: { borderColor: '#2a2e38', scaleMargins: { top: 0.05, bottom: 0.05 } },
+      rightPriceScale: { borderColor: '#2a2e38' },
       localization: { timeFormatter: localTimeFormatter },
     })
-    const series = chart.addCandlestickSeries({
+    const series = chart.addSeries(CandlestickSeries, {
       upColor, downColor,
       borderUpColor: upColor, borderDownColor: downColor,
       wickUpColor: upColor, wickDownColor: downColor,
@@ -378,24 +379,25 @@ export default function BacktestChart() {
       if (!enabledBands[band.id]) continue
       const color = bandColors[band.id] || band.color
       bandSeriesRef.current[band.id] = {
-        upper: chart.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:upper`] !== false }),
-        middle: chart.addLineSeries({ color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:middle`] !== false }),
-        lower: chart.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:lower`] !== false }),
+        upper: chart.addSeries(LineSeries, { color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:upper`] !== false }),
+        middle: chart.addSeries(LineSeries, { color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:middle`] !== false }),
+        lower: chart.addSeries(LineSeries, { color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:lower`] !== false }),
       }
     }
     for (const ma of MOVING_AVERAGES) {
       if (!enabledMA[ma.id]) continue
       const color = maColors[ma.id] || ma.color
       const width = maWidths[ma.id] || ma.lineWidth
-      maSeriesRef.current[ma.id] = chart.addLineSeries({
+      maSeriesRef.current[ma.id] = chart.addSeries(LineSeries, {
         color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
       })
     }
 
-    markerSeriesRef.current = chart.addLineSeries({
+    markerSeriesRef.current = chart.addSeries(LineSeries, {
       color: 'rgba(0,0,0,0)', lineWidth: 1,
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     })
+    markersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
 
     const onResize = () => chart.applyOptions({ width: containerRef.current.clientWidth })
     window.addEventListener('resize', onResize)
@@ -515,7 +517,7 @@ export default function BacktestChart() {
       .filter(p => p.idx < idx)
       .map(p => ({ time: p.time, position: 'aboveBar', color: p.color, shape: 'circle', size: 1, text: p.label }))
 
-    markerSeriesRef.current.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers].sort((a, b) => a.time - b.time))
+    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers].sort((a, b) => a.time - b.time))
   }
 
   const applyIndex = (idx) => {
@@ -615,7 +617,7 @@ export default function BacktestChart() {
     doubleBSignalPointsRef.current = []
     bollInnerSignalPointsRef.current = []
     sessionPointsRef.current = []
-    markerSeriesRef.current?.setMarkers([])
+    markersPrimitiveRef.current?.setMarkers([])
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
     setPlayIndex(0)
@@ -777,7 +779,7 @@ export default function BacktestChart() {
     doubleBSignalPointsRef.current = []
     bollInnerSignalPointsRef.current = []
     sessionPointsRef.current = []
-    markerSeriesRef.current?.setMarkers([])
+    markersPrimitiveRef.current?.setMarkers([])
     setPositions([])
   }
 
@@ -866,10 +868,11 @@ export default function BacktestChart() {
   const bumpMarkerLayer = () => {
     if (!chartRef.current) return
     if (markerSeriesRef.current) chartRef.current.removeSeries(markerSeriesRef.current)
-    markerSeriesRef.current = chartRef.current.addLineSeries({
+    markerSeriesRef.current = chartRef.current.addSeries(LineSeries, {
       color: 'rgba(0,0,0,0)', lineWidth: 1,
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     })
+    markersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
     const idx = indexRef.current
     markerSeriesRef.current.setData(rowsRef.current.slice(0, idx).map(r => ({ time: r.time, value: r.close })))
     applyAllMarkers(idx)
@@ -885,9 +888,9 @@ export default function BacktestChart() {
         const color = getBandColor(band)
         bandSeriesRef.current[bandId] = {
           // 위/중심/아래 모두 실선
-          upper: chartRef.current.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'upper') }),
-          middle: chartRef.current.addLineSeries({ color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'middle') }),
-          lower: chartRef.current.addLineSeries({ color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'lower') }),
+          upper: chartRef.current.addSeries(LineSeries, { color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'upper') }),
+          middle: chartRef.current.addSeries(LineSeries, { color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'middle') }),
+          lower: chartRef.current.addSeries(LineSeries, { color, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'lower') }),
         }
         bumpMarkerLayer()
       }
@@ -947,7 +950,7 @@ export default function BacktestChart() {
         const color = getMAColor(ma)
         const width = getMAWidth(ma)
         // 각 이평선마다 정의된(또는 커스텀) 굵기 + 실선/점선 스타일 그대로
-        maSeriesRef.current[maId] = chartRef.current.addLineSeries({
+        maSeriesRef.current[maId] = chartRef.current.addSeries(LineSeries, {
           color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
         })
         bumpMarkerLayer()
@@ -960,52 +963,26 @@ export default function BacktestChart() {
     }
   }
 
-  // RSI/MACD 창 위치 재계산 - 켜진 개수(0~2개)에 따라 차트 아래쪽 공간을 나눠 배정하고,
-  // 캔들 가격축(right)은 그만큼 아래 여백을 늘려서 겹치지 않게 한다.
-  // lightweight-charts v4 공식 문서 - scaleMargins/visible 등은 chart.priceScale(id)가 아니라
-  // "그 스케일을 쓰는 시리즈 인스턴스".priceScale()로 적용해야 한다(공식 예제: series.priceScale().applyOptions(...)).
-  // 처음엔 chart.priceScale('rsi')/('macd')로 했다가 실제 배포에서 캔들 축이랑 뒤섞여 보이는 버그가 났음 - 이 방식으로 교체.
-  const applyPaneLayout = (rsiOn, macdOn) => {
-    if (!chartRef.current) return
-    const paneCount = (rsiOn ? 1 : 0) + (macdOn ? 1 : 0)
-    const mainBottom = paneCount === 0 ? 0.05 : paneCount * PANE_HEIGHT + paneCount * PANE_GAP + 0.02
-    // 캔들 시리즈 자신을 통해 'right' 스케일에 접근 - chart.priceScale('right')로도 될 것 같았지만
-    // 실제 배포에서 마진이 전혀 안 먹혔던 걸 보면 이것도 시리즈 경유로 해야 하는 것으로 보임
-    seriesRef.current?.priceScale().applyOptions({ scaleMargins: { top: 0.05, bottom: mainBottom } })
-    let cursorBottom = 0.02 // 맨 아래(0.02 여백)부터 위로 하나씩 쌓는다
-    if (macdOn) {
-      // MACD1/MACD5가 같은 priceScaleId('macd')를 쓰므로 둘 중 있는 쪽 시리즈로 스케일에 접근하면 된다
-      const macdAnySeries = macdSeriesRef.current || macd5SeriesRef.current
-      macdAnySeries?.macd.priceScale().applyOptions({
-        scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom },
-        visible: true, borderVisible: true, borderColor: '#2a2e38',
-      })
-      cursorBottom += PANE_HEIGHT + PANE_GAP
-    }
-    if (rsiOn) {
-      rsiSeriesRef.current?.priceScale().applyOptions({
-        scaleMargins: { top: 1 - cursorBottom - PANE_HEIGHT, bottom: cursorBottom },
-        visible: true, borderVisible: true, borderColor: '#2a2e38',
-      })
-    }
-  }
-
+  // RSI - 자기만의 pane(index는 동적으로 계산: 현재 pane 개수 = 맨 끝에 새 pane) - v5 진짜 pane API
   const toggleRSI = () => {
     const turningOn = !enabledRSI
     setEnabledRSI(turningOn)
     if (turningOn) {
       if (!rsiSeriesRef.current && chartRef.current) {
-        rsiSeriesRef.current = chartRef.current.addLineSeries({
-          color: rsiColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true, priceScaleId: 'rsi',
-        })
+        const paneIndex = chartRef.current.panes().length
+        rsiSeriesRef.current = chartRef.current.addSeries(LineSeries, {
+          color: rsiColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true,
+        }, paneIndex)
         bumpMarkerLayer()
       }
-      applyPaneLayout(true, enabledMACD || enabledMACD5)
       applyRSIIndex(indexRef.current)
     } else {
-      if (rsiSeriesRef.current && chartRef.current) chartRef.current.removeSeries(rsiSeriesRef.current)
+      if (rsiSeriesRef.current && chartRef.current) {
+        const pane = rsiSeriesRef.current.getPane()
+        chartRef.current.removeSeries(rsiSeriesRef.current)
+        try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+      }
       rsiSeriesRef.current = null
-      applyPaneLayout(false, enabledMACD || enabledMACD5)
     }
   }
 
@@ -1014,35 +991,39 @@ export default function BacktestChart() {
     rsiSeriesRef.current?.applyOptions({ color })
   }
 
+  // MACD1 - MACD5와 같은 pane을 공유(둘 중 먼저 켜진 쪽이 pane을 만들고, 나중 것은 그 pane index를 그대로 씀)
   const toggleMACD = () => {
     const turningOn = !enabledMACD
     setEnabledMACD(turningOn)
     if (turningOn) {
       if (!macdSeriesRef.current && chartRef.current) {
+        const paneIndex = macd5SeriesRef.current ? macd5SeriesRef.current.macd.getPane().paneIndex() : chartRef.current.panes().length
         macdSeriesRef.current = {
-          hist: chartRef.current.addHistogramSeries({
-            lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
-          }),
-          macd: chartRef.current.addLineSeries({
-            color: macdLineColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true, priceScaleId: 'macd',
-          }),
-          signal: chartRef.current.addLineSeries({
-            color: macdSignalColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false, priceScaleId: 'macd',
-          }),
+          hist: chartRef.current.addSeries(HistogramSeries, {
+            lastValueVisible: false, priceLineVisible: false,
+          }, paneIndex),
+          macd: chartRef.current.addSeries(LineSeries, {
+            color: macdLineColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true,
+          }, paneIndex),
+          signal: chartRef.current.addSeries(LineSeries, {
+            color: macdSignalColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false,
+          }, paneIndex),
         }
         bumpMarkerLayer()
       }
-      applyPaneLayout(enabledRSI, true)
       applyMACDIndex(indexRef.current)
     } else {
       const s = macdSeriesRef.current
       if (s && chartRef.current) {
+        const pane = s.macd.getPane()
         chartRef.current.removeSeries(s.macd)
         chartRef.current.removeSeries(s.signal)
         chartRef.current.removeSeries(s.hist)
+        if (!macd5SeriesRef.current) {
+          try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+        }
       }
       macdSeriesRef.current = null
-      applyPaneLayout(enabledRSI, enabledMACD5)
     }
   }
 
@@ -1056,36 +1037,39 @@ export default function BacktestChart() {
     macdSeriesRef.current?.signal.applyOptions({ color })
   }
 
-  // MACD5 - "5분" MACD(기간 ×5). MACD1과 같은 'macd' 축(priceScaleId)을 공유해서 한 창에 같이 그린다.
+  // MACD5 - "5분" MACD(기간 ×5). MACD1과 같은 pane을 공유해서 한 창에 같이 그린다.
   const toggleMACD5 = () => {
     const turningOn = !enabledMACD5
     setEnabledMACD5(turningOn)
     if (turningOn) {
       if (!macd5SeriesRef.current && chartRef.current) {
+        const paneIndex = macdSeriesRef.current ? macdSeriesRef.current.macd.getPane().paneIndex() : chartRef.current.panes().length
         macd5SeriesRef.current = {
-          hist: chartRef.current.addHistogramSeries({
-            lastValueVisible: false, priceLineVisible: false, priceScaleId: 'macd',
-          }),
-          macd: chartRef.current.addLineSeries({
-            color: macd5LineColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true, priceScaleId: 'macd',
-          }),
-          signal: chartRef.current.addLineSeries({
-            color: macd5SignalColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false, priceScaleId: 'macd',
-          }),
+          hist: chartRef.current.addSeries(HistogramSeries, {
+            lastValueVisible: false, priceLineVisible: false,
+          }, paneIndex),
+          macd: chartRef.current.addSeries(LineSeries, {
+            color: macd5LineColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true,
+          }, paneIndex),
+          signal: chartRef.current.addSeries(LineSeries, {
+            color: macd5SignalColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false,
+          }, paneIndex),
         }
         bumpMarkerLayer()
       }
-      applyPaneLayout(enabledRSI, true)
       applyMACD5Index(indexRef.current)
     } else {
       const s = macd5SeriesRef.current
       if (s && chartRef.current) {
+        const pane = s.macd.getPane()
         chartRef.current.removeSeries(s.macd)
         chartRef.current.removeSeries(s.signal)
         chartRef.current.removeSeries(s.hist)
+        if (!macdSeriesRef.current) {
+          try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+        }
       }
       macd5SeriesRef.current = null
-      applyPaneLayout(enabledRSI, enabledMACD)
     }
   }
 
