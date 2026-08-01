@@ -1441,6 +1441,70 @@ export default function BacktestChart() {
     })
   }
 
+  // 지금 재생 위치까지 실제로 화면에 그려진 데이터를 스샷(그림) 대신 숫자 그대로 뽑아낸다.
+  // 캔들 + 볼린저밴드 5개 + 이평선 전부 + RSI + MACD1/5 - 전부 재생 위치(playIndex) 이후(아직 안 지난)
+  // 구간은 제외하고 지금까지 드러난 만큼만 담는다(화면에 실제 그려진 것과 동일한 범위).
+  const buildChartDataPayload = () => {
+    const idx = playIndex
+    const bands = {}
+    for (const band of BOLLINGER_BANDS) {
+      const d = bandDataRef.current[band.id]
+      if (!d) continue
+      bands[band.id] = {
+        label: band.label,
+        upper: d.upper.slice(0, idx).filter(Boolean),
+        middle: d.middle.slice(0, idx).filter(Boolean),
+        lower: d.lower.slice(0, idx).filter(Boolean),
+      }
+    }
+    const movingAverages = {}
+    for (const ma of MOVING_AVERAGES) {
+      const d = maDataRef.current[ma.id]
+      if (!d) continue
+      movingAverages[ma.id] = { label: ma.label, values: d.slice(0, idx).filter(Boolean) }
+    }
+    return {
+      symbol, selectedDate, selectedDateTo, playIndex: idx, total,
+      candles: rowsRef.current.slice(0, idx),
+      bollingerBands: bands,
+      movingAverages,
+      rsi: rsiDataRef.current.slice(0, idx).filter(Boolean),
+      macd1: {
+        macd: macdDataRef.current.macd.slice(0, idx).filter(Boolean),
+        signal: macdDataRef.current.signal.slice(0, idx).filter(Boolean),
+        hist: macdDataRef.current.hist.slice(0, idx).filter(Boolean),
+      },
+      macd5: {
+        macd: macd5DataRef.current.macd.slice(0, idx).filter(Boolean),
+        signal: macd5DataRef.current.signal.slice(0, idx).filter(Boolean),
+        hist: macd5DataRef.current.hist.slice(0, idx).filter(Boolean),
+      },
+    }
+  }
+
+  // "📋 데이터" 버튼 - 사람이 눌러서 JSON 파일로 다운로드(기존 그대로 둠).
+  const exportChartData = () => {
+    const payload = buildChartDataPayload()
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const dateLabel = selectedDate ? (selectedDateTo ? `${selectedDate}_${selectedDateTo}` : selectedDate) : 'chart'
+    a.href = url
+    a.download = `${symbol}_${dateLabel}_${payload.playIndex}봉_data.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // Claude가 Browser 도구로 이 페이지에 직접 접속했을 때, 파일 다운로드 없이 브라우저 콘솔에서
+  // `window.getBacktestChartData()`를 호출해서 지금 이 화면 상태(재생위치까지)를 바로 읽어갈 수 있게
+  // window에 노출해둔다. 렌더될 때마다 최신 클로저로 갱신(각 값이 바뀔 때마다 새로 만들어도 비용 거의 없음).
+  useEffect(() => {
+    window.getBacktestChartData = buildChartDataPayload
+    return () => { if (window.getBacktestChartData === buildChartDataPayload) delete window.getBacktestChartData }
+  })
+
   const play = () => {
     if (!rowsRef.current.length) return
     if (indexRef.current >= rowsRef.current.length) applyIndex(0)
@@ -2045,6 +2109,11 @@ export default function BacktestChart() {
                   background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
                   padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
                 }}>📸 스샷</button>
+
+                <button onClick={exportChartData} disabled={!total} title="지금까지 재생된 캔들+볼린저+이평선+RSI+MACD 값을 JSON으로 저장" style={{
+                  background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
+                  padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
+                }}>📋 데이터</button>
 
                 {SPEEDS.map(s => {
                   const secs = REALTIME_MS / s / 1000
