@@ -157,8 +157,26 @@ function PairSelect({ value, onChange, options, placeholder = '-' }) {
   )
 }
 
+// 다른 페이지 갔다가 돌아왔을 때(뒤로가기 등, 컴포넌트가 완전히 언마운트/리마운트됨) 심볼·선택한 날짜·
+// 재생 위치가 리셋되던 문제 - 탭을 닫기 전까진 유지되는 sessionStorage에 저장해두고 마운트 시 복원한다.
+// (새로고침에도 유지되길 원하면 localStorage로 바꾸면 되지만, 여긴 "이 세션 동안만" 기준으로 sessionStorage 사용)
+const BACKTEST_STATE_KEY = 'backtestChartState'
+
 export default function BacktestChart() {
-  const [symbol, setSymbol] = useState('NASDAQ')
+  // 마운트 시 딱 한 번만 sessionStorage를 읽어서 ref에 담아둔다(렌더 중 계산이라 useEffect보다 먼저 값이 준비됨).
+  const restoreRef = useRef(undefined)
+  if (restoreRef.current === undefined) {
+    restoreRef.current = null
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.sessionStorage.getItem(BACKTEST_STATE_KEY)
+        if (raw) restoreRef.current = JSON.parse(raw)
+      } catch { /* 저장된 값이 깨져있으면 그냥 무시하고 기본값으로 시작 */ }
+    }
+  }
+  const hasAutoRestoredRef = useRef(false)
+
+  const [symbol, setSymbol] = useState(() => restoreRef.current?.symbol || 'NASDAQ')
   // 브로커 서머타임 여부 - 겨울엔 서버시간이 1시간 밀려서(EEST→EET) 한국시간 환산 오프셋이 6→7시간으로 바뀐다.
   // 자동판별할 방법이 없어서 버튼으로 직접 전환하게 함(기본값: 서머타임 켜짐)
   const [summerTime, setSummerTime] = useState(true)
@@ -193,6 +211,7 @@ export default function BacktestChart() {
   const [macd5SignalColor, setMacd5SignalColorState] = useState(DEFAULT_MACD5_SIGNAL_COLOR)
   const [upColor, setUpColorState] = useState(DEFAULT_UP_COLOR)
   const [downColor, setDownColorState] = useState(DEFAULT_DOWN_COLOR)
+  const [candleVisible, setCandleVisible] = useState(() => restoreRef.current?.candleVisible ?? true) // 체크 해제하면 캔들을 숨김(지표만 보고 판단 연습할 때 씀) - 기본 체크됨
   // 왼쪽 "크로스/더블비/눌림 신호" 표시 - 예전엔 체크박스를 여러 개 켜면 그 안에서 가능한 모든 조합을
   // 자동으로 판정했는데(체크 3개면 3쌍이 전부 감지되는 식으로 통제가 안 됨), 각각 1/2/3 슬롯으로 나눠
   // 슬롯마다 정확히 2개(드롭다운)만 골라 그 조합만 보게 바꿈(사용자 요청) - 크로스/더블비/눌림 전부 동일 방식,
@@ -333,7 +352,7 @@ export default function BacktestChart() {
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
-      .then(d => {
+      .then(async d => {
         if (ignore) return
         const rows = d.rows || []
         setDatasets(rows)
@@ -342,6 +361,19 @@ export default function BacktestChart() {
         if (latest) {
           const [y, m] = latest.split('-').map(Number)
           setViewDate(new Date(y, m - 1, 1))
+        }
+        // 세션 복원 - 마운트 직후 딱 한 번만, 저장된 심볼이 지금 심볼과 같을 때만 그 날짜/재생위치를 이어서 불러온다
+        if (!hasAutoRestoredRef.current) {
+          hasAutoRestoredRef.current = true
+          const saved = restoreRef.current
+          if (saved && saved.symbol === symbol && saved.selectedDate) {
+            const [y2, m2] = saved.selectedDate.split('-').map(Number)
+            if (!Number.isNaN(y2) && !Number.isNaN(m2)) setViewDate(new Date(y2, m2 - 1, 1))
+            await loadRange(saved.selectedDate, saved.selectedDateTo || saved.selectedDate)
+            if (!ignore && typeof saved.playIndex === 'number' && saved.playIndex > 0) {
+              applyIndex(Math.min(saved.playIndex, rowsRef.current.length))
+            }
+          }
         }
       })
       .catch(() => { if (!ignore) setDatasets([]) })
@@ -365,6 +397,7 @@ export default function BacktestChart() {
       localization: { timeFormatter: localTimeFormatter },
     })
     const series = chart.addSeries(CandlestickSeries, {
+      visible: candleVisible,
       upColor, downColor,
       borderUpColor: upColor, borderDownColor: downColor,
       wickUpColor: upColor, wickDownColor: downColor,
@@ -812,6 +845,14 @@ export default function BacktestChart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summerTime])
 
+  // 심볼/날짜/재생위치가 바뀔 때마다 sessionStorage에 저장 - 다른 페이지 갔다가 돌아와도 이어서 볼 수 있게.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.sessionStorage.setItem(BACKTEST_STATE_KEY, JSON.stringify({ symbol, selectedDate, selectedDateTo, playIndex, candleVisible }))
+    } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 - 그냥 다음번엔 복원 안 될 뿐 */ }
+  }, [symbol, selectedDate, selectedDateTo, playIndex, candleVisible])
+
   // 위/중심/아래 각 줄을 따로 숨길 수도 있게 - 기본은 다 보임(true)
   const isLineVisible = (bandId, which) => lineVisibility[`${bandId}:${which}`] !== false
 
@@ -834,6 +875,12 @@ export default function BacktestChart() {
   const resetCandleColors = () => {
     setUpColor(DEFAULT_UP_COLOR)
     setDownColor(DEFAULT_DOWN_COLOR)
+  }
+
+  const toggleCandleVisible = () => {
+    const next = !candleVisible
+    setCandleVisible(next)
+    seriesRef.current?.applyOptions({ visible: next })
   }
 
   // 커스텀 색을 안 골랐으면 BOLLINGER_BANDS에 정의된 기본색 그대로
@@ -1369,6 +1416,27 @@ export default function BacktestChart() {
     })
   }
 
+  // 지금 화면에 보이는 상태 그대로(재생/스크럽 위치, 켜둔 지표·마커 전부 포함) PNG로 캡처해서 바로 다운로드.
+  // lightweight-charts 내장 takeScreenshot()은 지금까지 그려진 캔버스를 그대로 캡처하므로,
+  // 재생 위치보다 앞선(아직 안 지난) 구간은 애초에 그려져 있지 않아 화면에 보이는 그대로만 찍힌다.
+  const captureScreenshot = () => {
+    const chart = chartRef.current
+    if (!chart) return
+    const canvas = chart.takeScreenshot()
+    canvas.toBlob(blob => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const dateLabel = selectedDate ? (selectedDateTo ? `${selectedDate}_${selectedDateTo}` : selectedDate) : 'chart'
+      a.href = url
+      a.download = `${symbol}_${dateLabel}_${playIndex}봉.png`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    })
+  }
+
   const play = () => {
     if (!rowsRef.current.length) return
     if (indexRef.current >= rowsRef.current.length) applyIndex(0)
@@ -1603,7 +1671,10 @@ export default function BacktestChart() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#9aa0ab' }}>
-                <span style={{ flex: 1 }}>캔들 색상</span>
+                <label title="체크 해제하면 캔들을 숨깁니다(지표만 보고 판단 연습할 때)" style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={candleVisible} onChange={toggleCandleVisible} />
+                  캔들 색상
+                </label>
                 <label title="상승 색상 변경 가능" style={{ display: 'flex', cursor: 'pointer' }}>
                   <input
                     type="color"
@@ -1965,6 +2036,11 @@ export default function BacktestChart() {
                   background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
                   padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
                 }}>⏮ 처음부터</button>
+
+                <button onClick={captureScreenshot} disabled={!total} title="지금 보이는 상태 그대로 PNG로 저장" style={{
+                  background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
+                  padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
+                }}>📸 스샷</button>
 
                 {SPEEDS.map(s => {
                   const secs = REALTIME_MS / s / 1000
