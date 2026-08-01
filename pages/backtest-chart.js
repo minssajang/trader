@@ -369,7 +369,7 @@ export default function BacktestChart() {
           if (saved && saved.symbol === symbol && saved.selectedDate) {
             const [y2, m2] = saved.selectedDate.split('-').map(Number)
             if (!Number.isNaN(y2) && !Number.isNaN(m2)) setViewDate(new Date(y2, m2 - 1, 1))
-            await loadRange(saved.selectedDate, saved.selectedDateTo || saved.selectedDate)
+            await loadRange(saved.selectedDate, saved.selectedDateTo || saved.selectedDate, rows)
             if (!ignore && typeof saved.playIndex === 'number' && saved.playIndex > 0) {
               applyIndex(Math.min(saved.playIndex, rowsRef.current.length))
             }
@@ -613,7 +613,11 @@ export default function BacktestChart() {
 
   // fromStr === toStr이면 하루, fromStr < toStr이면 그 사이 여러 날을 이어서 하나의 재생 구간으로 불러온다
   // (여러 날 선택 모드에서 두 번째 클릭 시 씀). 단일 날짜 클릭(loadDate)도 내부적으로 이 함수를 그대로 쓴다.
-  const loadRange = async (fromStr, toStr) => {
+  // datasetsOverride: 세션 복원 직후처럼 setDatasets(rows)를 호출한 바로 그 틱 안에서 곧바로
+  // loadRange를 부르면, 이 함수가 클로저로 캡처한 `datasets` state는 아직 리렌더 전이라 예전 값(빈 배열)
+  // 그대로다 - "이 심볼엔 데이터셋이 없다"고 오판해서 조용히 실패하는 버그가 있었음. 그 경우엔 방금 받은
+  // rows를 여기로 직접 넘겨서 state 갱신을 기다리지 않고 바로 쓰게 한다.
+  const loadRange = async (fromStr, toStr, datasetsOverride) => {
     stopPlayback()
     setError('')
     setSelectedDate(fromStr)
@@ -624,7 +628,7 @@ export default function BacktestChart() {
     // 예전엔 시작~끝 날짜가 전부 같은 파일 안에 있어야 했는데(파일이 월 단위로 나뉘어 있어서 여러 달
     // 걸치면 에러가 났음), 주말에 캔들이 비어도 자연스럽게 넘어가는 것처럼 파일 경계도 신경 안 쓰게
     // 해달라는 요청(사용자) - 그 심볼의 파일을 전부 모아 시간 기준으로 병합해서 하나의 연속 시계열로 씀.
-    const symbolDatasets = datasets.filter(d => d.symbol === symbol)
+    const symbolDatasets = (datasetsOverride || datasets).filter(d => d.symbol === symbol)
     const overlapping = symbolDatasets.filter(d => d.date_from <= toStr && fromStr <= d.date_to)
     if (overlapping.length === 0) {
       setError(fromStr === toStr ? '해당 날짜의 데이터를 찾을 수 없습니다' : '선택한 범위의 데이터를 찾을 수 없습니다')
