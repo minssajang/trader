@@ -2116,8 +2116,8 @@ export default function BacktestChart() {
                       />
                     </label>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 5, fontSize: 10, color: '#5a5f6a' }}>
-                    <span>투명도</span>
+                  <div style={{ marginTop: 5, fontSize: 10, color: '#5a5f6a', width: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ marginBottom: 3, whiteSpace: 'nowrap' }}>투명도 {Math.round(ribbonOpacity * 100)}%</div>
                     <input
                       type="range"
                       min={0.1}
@@ -2125,9 +2125,8 @@ export default function BacktestChart() {
                       step={0.05}
                       value={ribbonOpacity}
                       onChange={e => setRibbonOpacityValue(Number(e.target.value))}
-                      style={{ flex: 1 }}
+                      style={{ width: '100%', boxSizing: 'border-box', display: 'block', margin: 0 }}
                     />
-                    <span style={{ width: 30, textAlign: 'right' }}>{Math.round(ribbonOpacity * 100)}%</span>
                   </div>
                 </div>
               </CollapsibleCard>
