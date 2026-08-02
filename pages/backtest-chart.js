@@ -125,15 +125,16 @@ const SIDEWAYS_BAND_COLOR = '#FFEB3B' // 횡보 구간 배경 기본색(옅은 �
 // 세션 표시 전용(사용자 요청) - 차트 전체 높이를 채우는 BackgroundBandsPrimitive와 달리, 그 세션
 // 동안의 실제 고가/저가에 맞춰 점선 테두리 사각형만 그린다(안은 채우지 않음).
 class SessionBoxesPrimitive {
-  constructor(strokeColor) {
+  constructor(hexColor, fillAlpha) {
     this._boxes = [] // [{fromIndex, toIndex, high, low}] - 시각(time) 대신 캔들 순번(logical index) 기준.
     // time 기준으로 좌표를 구하면 아직 화면에 안 그려진(재생 안 된) 캔들 시각은 timeToCoordinate가
     // null을 반환해서 좌표를 못 구하는데, logicalToCoordinate는 데이터가 실제로 그려졌는지와
-    // 무관하게 순번만으로 위치를 계산해줘서 항상 정확한 자리에 그려진다(사용자가 찾아낸 버그 수정).
+    // 무관하게 순번만으로 위치를 계산해줘서 항상 정확한 자리에 그려진다.
     this._chart = null
     this._series = null
     this._requestUpdate = null
-    this._strokeColor = strokeColor
+    this._hexColor = hexColor       // 테두리(항상 불투명) + 채우기(투명도 적용) 둘 다의 기본 색
+    this._fillAlpha = fillAlpha     // 안쪽 채우기 투명도(사용자 요청 - "선"이 아니라 "채우기"에 적용)
   }
   attached({ chart, series, requestUpdate }) {
     this._chart = chart
@@ -156,7 +157,8 @@ class SessionBoxesPrimitive {
             const hRatio = scope.horizontalPixelRatio
             const vRatio = scope.verticalPixelRatio
             ctx.save()
-            ctx.strokeStyle = this._strokeColor
+            ctx.strokeStyle = this._hexColor
+            ctx.fillStyle = hexToRgba(this._hexColor, this._fillAlpha)
             ctx.lineWidth = 1
             ctx.setLineDash([4, 3])
             for (const b of this._boxes) {
@@ -170,7 +172,9 @@ class SessionBoxesPrimitive {
               const right = Math.max(x1, x2) * hRatio
               const top = Math.min(yHigh, yLow) * vRatio
               const bottom = Math.max(yHigh, yLow) * vRatio
-              ctx.strokeRect(left, top, Math.max(1, right - left), Math.max(1, bottom - top))
+              const w = Math.max(1, right - left), h = Math.max(1, bottom - top)
+              ctx.fillRect(left, top, w, h)
+              ctx.strokeRect(left, top, w, h)
             }
             ctx.restore()
           })
@@ -182,8 +186,12 @@ class SessionBoxesPrimitive {
     this._boxes = boxes
     this._requestUpdate?.()
   }
-  setStrokeColor(color) {
-    this._strokeColor = color
+  setColor(hexColor) {
+    this._hexColor = hexColor
+    this._requestUpdate?.()
+  }
+  setFillAlpha(alpha) {
+    this._fillAlpha = alpha
     this._requestUpdate?.()
   }
 }
@@ -192,9 +200,9 @@ class SessionBoxesPrimitive {
 // 한국시간(KST) 기준이고, 이 차트의 시간 라벨이 이미 KST와 동일(SESSION_OPENS 주석 참고)이라
 // 그대로 쓴다. endHour <= startHour면 자정을 넘어가는 세션(뉴욕: 21시~다음날 5시).
 const SESSIONS = [
-  { id: 'asia', label: '아시아', color: '#FFEB3B', startHour: 7, endHour: 16 },
-  { id: 'europe', label: '유럽', color: '#2196F3', startHour: 15, endHour: 24 },
-  { id: 'newyork', label: '뉴욕', color: '#F44336', startHour: 21, endHour: 5 },
+  { id: 'asia', label: '아시아', color: '#FFEB3B', startHour: 22, endHour: 7 },   // 테스트용 -9(사용자 지시): 7,16 -> 22,7
+  { id: 'europe', label: '유럽', color: '#2196F3', startHour: 7, endHour: 15 },  // 16,24 -> 7,15
+  { id: 'newyork', label: '뉴욕', color: '#F44336', startHour: 12, endHour: 20 }, // 21,5 -> 12,20
 ]
 function hourInSession(hourOfDay, startHour, endHour) {
   if (endHour <= startHour) return hourOfDay >= startHour || hourOfDay < endHour
@@ -692,7 +700,7 @@ export default function BacktestChart() {
     series.attachPrimitive(sidewaysBandRef.current)
 
     for (const s of SESSIONS) {
-      const p = new SessionBoxesPrimitive(hexToRgba(sessionColors[s.id] || s.color, sessionOpacity))
+      const p = new SessionBoxesPrimitive(sessionColors[s.id] || s.color, sessionOpacity)
       series.attachPrimitive(p)
       sessionBandRefs.current[s.id] = p
     }
@@ -1582,15 +1590,15 @@ export default function BacktestChart() {
 
   const setSessionColor = (sessionId, hex) => {
     setSessionColorsState(prev => ({ ...prev, [sessionId]: hex }))
-    sessionBandRefs.current[sessionId]?.setStrokeColor(hexToRgba(hex, sessionOpacity))
+    sessionBandRefs.current[sessionId]?.setColor(hex)
   }
 
-  // 투명도는 세션 3개 공통(사용자 요청) - 각자 색은 그대로 두고 알파만 다시 계산해서 3개 다 갱신
+  // 투명도는 세션 3개 공통(사용자 요청) - 테두리가 아니라 안쪽 채우기 투명도. 각자 테두리/기본색은
+  // 그대로 두고 채우기 알파만 3개 다 갱신
   const setSessionOpacityValue = (value) => {
     setSessionOpacityState(value)
     for (const s of SESSIONS) {
-      const color = sessionColors[s.id] || s.color
-      sessionBandRefs.current[s.id]?.setStrokeColor(hexToRgba(color, value))
+      sessionBandRefs.current[s.id]?.setFillAlpha(value)
     }
   }
 
@@ -2446,8 +2454,8 @@ export default function BacktestChart() {
                         />
                         <span>시 ~</span>
                         <input
-                          type="number" min={0} max={23} value={hrs.end}
-                          onChange={e => setSessionHour(s.id, 'end', Math.min(23, Math.max(0, Number(e.target.value) || 0)))}
+                          type="number" min={0} max={24} value={hrs.end}
+                          onChange={e => setSessionHour(s.id, 'end', Math.min(24, Math.max(0, Number(e.target.value) || 0)))}
                           style={{ width: 34, fontSize: 10, background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 3px' }}
                         />
                         <span>시</span>
