@@ -200,9 +200,9 @@ class SessionBoxesPrimitive {
 // 한국시간(KST) 기준이고, 이 차트의 시간 라벨이 이미 KST와 동일(SESSION_OPENS 주석 참고)이라
 // 그대로 쓴다. endHour <= startHour면 자정을 넘어가는 세션(뉴욕: 21시~다음날 5시).
 const SESSIONS = [
-  { id: 'asia', label: '아시아', color: '#FFEB3B', startHour: 22, endHour: 7 },   // 테스트용 -9(사용자 지시): 7,16 -> 22,7
-  { id: 'europe', label: '유럽', color: '#2196F3', startHour: 7, endHour: 15 },  // 16,24 -> 7,15
-  { id: 'newyork', label: '뉴욕', color: '#F44336', startHour: 12, endHour: 20 }, // 21,5 -> 12,20
+  { id: 'asia', label: '아시아', color: '#FFEB3B', startHour: 7, endHour: 16 },
+  { id: 'europe', label: '유럽', color: '#2196F3', startHour: 16, endHour: 24 },
+  { id: 'newyork', label: '뉴욕', color: '#F44336', startHour: 21, endHour: 5 },
 ]
 function hourInSession(hourOfDay, startHour, endHour) {
   if (endHour <= startHour) return hourOfDay >= startHour || hourOfDay < endHour
@@ -214,7 +214,9 @@ function findSessionSegmentsIn(rows, startHour, endHour) {
   const segs = []
   let segStart = null
   for (let i = 0; i < rows.length; i++) {
-    const hourOfDay = new Date(rows[i].time * 1000).getUTCHours()
+    // getUTCHours가 아니라 getHours(로컬 시간대)를 쓴다 - 차트 시간축 라벨(localTickMarkFormatter)이
+    // getHours()로 그려지므로, 세션 판정도 같은 기준이어야 화면에 보이는 시각과 어긋나지 않는다.
+    const hourOfDay = new Date(rows[i].time * 1000).getHours()
     const inSession = hourInSession(hourOfDay, startHour, endHour)
     if (inSession && segStart == null) segStart = i
     if (!inSession && segStart != null) { segs.push({ startIdx: segStart, endIdx: i - 1 }); segStart = null }
@@ -258,9 +260,16 @@ function splitRibbonBySlope(points) {
     const p0 = points[i - 1], p1 = points[i]
     if (!p0 || !p1) { lastState = null; continue }
     const state = p1.value >= p0.value ? 'lime' : 'red'
-    const arr = state === 'lime' ? lime : red
-    if (lastState !== state) arr[i - 1] = p0 // 색 바뀌는 경계점은 새 색 쪽에도 포함시켜 이어붙임
-    arr[i] = p1
+    const own = state === 'lime' ? lime : red
+    const other = state === 'lime' ? red : lime
+    if (lastState !== state) own[i - 1] = p0 // 색 바뀌는 경계점은 새 색 쪽에도 포함시켜 이어붙임
+    own[i] = p1
+    // 반대 색 배열엔 값 대신 빈 자리(time만 있고 value는 없는 whitespace)를 남긴다.
+    // 그냥 null로 두면 applyMAIndex의 filter(Boolean)이 이 구간을 통째로 걷어내버려서,
+    // 멀리 떨어진(다른 색 구간 건너편) 같은 색 점들끼리 직선으로 이어붙는 버그가 생긴다
+    // (선이 2개로 보인다는 증상의 원인) - whitespace는 filter(Boolean)엔 살아남지만
+    // lightweight-charts가 선을 끊어주는 지점으로 인식해서 대각선이 안 생긴다.
+    if (other[i] == null) other[i] = { time: p1.time }
     lastState = state
   }
   return { lime, red }
@@ -420,6 +429,10 @@ function PairSelect({ value, onChange, options, placeholder = '-' }) {
 // 재생 위치가 리셋되던 문제 - 탭을 닫기 전까진 유지되는 sessionStorage에 저장해두고 마운트 시 복원한다.
 // (새로고침에도 유지되길 원하면 localStorage로 바꾸면 되지만, 여긴 "이 세션 동안만" 기준으로 sessionStorage 사용)
 const BACKTEST_STATE_KEY = 'backtestChartState'
+// 지표/색상/굵기/모양 등 "차트 표시 설정" 전체는 localStorage에 저장(사용자 요청) - 새로고침은 물론
+// 브라우저를 완전히 닫았다 열어도 유지된다(위 BACKTEST_STATE_KEY는 심볼/날짜/재생위치 같은 "지금 뭘
+// 보고 있었는지" 세션 복귀용이라 성격이 달라서 별도 키로 분리 유지).
+const CHART_SETTINGS_KEY = 'backtestChartSettings'
 
 export default function BacktestChart() {
   // 마운트 시 딱 한 번만 sessionStorage를 읽어서 ref에 담아둔다(렌더 중 계산이라 useEffect보다 먼저 값이 준비됨).
@@ -433,6 +446,19 @@ export default function BacktestChart() {
       } catch { /* 저장된 값이 깨져있으면 그냥 무시하고 기본값으로 시작 */ }
     }
   }
+  // 표시 설정 복원(localStorage) - 마찬가지로 렌더 중 한 번만 읽는다. 없는 키는 각 useState의
+  // 기본값(뒤의 ?? 오른쪽)이 그대로 쓰인다.
+  const settingsRestoreRef = useRef(undefined)
+  if (settingsRestoreRef.current === undefined) {
+    settingsRestoreRef.current = null
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(CHART_SETTINGS_KEY)
+        if (raw) settingsRestoreRef.current = JSON.parse(raw)
+      } catch { /* 저장된 값이 깨져있으면 무시하고 기본값으로 시작 */ }
+    }
+  }
+  const rs = settingsRestoreRef.current || {}
   const hasAutoRestoredRef = useRef(false)
 
   const [symbol, setSymbol] = useState(() => restoreRef.current?.symbol || 'NASDAQ')
@@ -451,103 +477,104 @@ export default function BacktestChart() {
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
   // 기본 셋팅(사용자 요청) - 1분 볼린저는 중간선만, 5분/15분/1시간 볼린저는 전체 표시
-  const [enabledBands, setEnabledBands] = useState({ sma20: true, sma100: true, sma300: true, sma1200: true })
-  const [lineVisibility, setLineVisibility] = useState({}) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true, 1분B 상/하도 기본 켜짐 - 사용자 요청)
-  const [bandColors, setBandColors] = useState({}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
+  // (아래 전부 rs.필드명 ?? 기본값 형태 - localStorage에 저장된 값이 있으면 그걸로 시작, 없으면 기존 기본값)
+  const [enabledBands, setEnabledBands] = useState(rs.enabledBands ?? { sma20: true, sma100: true, sma300: true, sma1200: true })
+  const [lineVisibility, setLineVisibility] = useState(rs.lineVisibility ?? {}) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true, 1분B 상/하도 기본 켜짐 - 사용자 요청)
+  const [bandColors, setBandColors] = useState(rs.bandColors ?? {}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
   // 기본 셋팅 - 3분/5분/15분 H, 1분/5분 W17, 1시간 W4 이평선 체크
-  const [enabledMA, setEnabledMA] = useState({
+  const [enabledMA, setEnabledMA] = useState(rs.enabledMA ?? {
     hma60: true, hma100: true, hma300: true, wma17_1m: true, wma17_5m: true, wma4_1h: true,
     ...Object.fromEntries(MADRID_RIBBON.map(m => [m.id, true])), // 리본 기본 체크(사용자 요청)
   })
-  const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
+  const [maColors, setMaColors] = useState(rs.maColors ?? {}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
   // 기본 셋팅 - 위 6개 이평선 전부 두께 3
-  const [maWidths, setMaWidths] = useState({ hma60: 3, hma100: 3, hma300: 3, wma17_1m: 3, wma17_5m: 3, wma4_1h: 3 }) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
+  const [maWidths, setMaWidths] = useState(rs.maWidths ?? { hma60: 3, hma100: 3, hma300: 3, wma17_1m: 3, wma17_5m: 3, wma4_1h: 3 }) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
   // 리본(Madrid) - MACD처럼 체크박스 하나가 켜고 끄는 세트(사용자 요청).
-  const [ribbonEnabled, setRibbonEnabledState] = useState(true) // 기본 체크(사용자 요청)
-  const [ribbonOpacity, setRibbonOpacityState] = useState(0.2) // 리본 18개 선 전용 투명도(0~1, 기본 20%, 사용자 요청) - hma3는 영향 없음
+  const [ribbonEnabled, setRibbonEnabledState] = useState(rs.ribbonEnabled ?? true) // 기본 체크(사용자 요청)
+  const [ribbonOpacity, setRibbonOpacityState] = useState(rs.ribbonOpacity ?? 0.2) // 리본 18개 선 전용 투명도(0~1, 기본 20%, 사용자 요청) - hma3는 영향 없음
   // 횡보 구간 배경 표시(사용자 요청) - 5분B 폭 & 리본 폭이 둘 다 로드된 구간 하위25%일 때 배경을 옅게 칠함
-  const [sidewaysEnabled, setSidewaysEnabledState] = useState(false)
-  const [sidewaysColor, setSidewaysColorState] = useState(SIDEWAYS_BAND_COLOR)
+  const [sidewaysEnabled, setSidewaysEnabledState] = useState(rs.sidewaysEnabled ?? false)
+  const [sidewaysColor, setSidewaysColorState] = useState(rs.sidewaysColor ?? SIDEWAYS_BAND_COLOR)
   // 세션 표시(아시아/유럽/뉴욕) - 세션마다 독립적으로 켜고 끄고 색상 지정(사용자 요청)
-  const [sessionEnabled, setSessionEnabledState] = useState({})
-  const [sessionColors, setSessionColorsState] = useState(Object.fromEntries(SESSIONS.map(s => [s.id, s.color])))
-  const [sessionHours, setSessionHoursState] = useState(Object.fromEntries(SESSIONS.map(s => [s.id, { start: s.startHour, end: s.endHour }]))) // 세션마다 독립 (사용자 요청)
-  const [sessionOpacity, setSessionOpacityState] = useState(0.15) // 세션 3개 공통 투명도(사용자 요청 - 색은 따로, 투명도는 같이)
+  const [sessionEnabled, setSessionEnabledState] = useState(rs.sessionEnabled ?? {})
+  const [sessionColors, setSessionColorsState] = useState(rs.sessionColors ?? Object.fromEntries(SESSIONS.map(s => [s.id, s.color])))
+  const [sessionHours, setSessionHoursState] = useState(rs.sessionHours ?? Object.fromEntries(SESSIONS.map(s => [s.id, { start: s.startHour, end: s.endHour }]))) // 세션마다 독립 (사용자 요청)
+  const [sessionOpacity, setSessionOpacityState] = useState(rs.sessionOpacity ?? 0.15) // 세션 3개 공통 투명도(사용자 요청 - 색은 따로, 투명도는 같이)
   // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
-  const [maUpColors, setMaUpColors] = useState({ hma60: '#00D5FF' }) // 3분 H 상승색 기본값(사용자 지정)
-  const [maDownColors, setMaDownColors] = useState({})
+  const [maUpColors, setMaUpColors] = useState(rs.maUpColors ?? { hma60: '#00D5FF' }) // 3분 H 상승색 기본값(사용자 지정)
+  const [maDownColors, setMaDownColors] = useState(rs.maDownColors ?? {})
   // RSI/MACD - 기간은 표준값(14 / 12,26,9)으로 고정, 색상만 커스터마이징 가능. 기본은 꺼짐(체크해야 나옴)
-  const [enabledRSI, setEnabledRSI] = useState(false)
-  const [rsiColor, setRsiColorState] = useState(DEFAULT_RSI_COLOR)
-  const [enabledMACD, setEnabledMACD] = useState(false)
-  const [macdLineColor, setMacdLineColorState] = useState(DEFAULT_MACD_LINE_COLOR)
-  const [macdSignalColor, setMacdSignalColorState] = useState(DEFAULT_MACD_SIGNAL_COLOR)
-  const [enabledMACD5, setEnabledMACD5] = useState(false)
-  const [macd5LineColor, setMacd5LineColorState] = useState(DEFAULT_MACD5_LINE_COLOR)
-  const [macd5SignalColor, setMacd5SignalColorState] = useState(DEFAULT_MACD5_SIGNAL_COLOR)
-  const [upColor, setUpColorState] = useState(DEFAULT_UP_COLOR)
-  const [downColor, setDownColorState] = useState(DEFAULT_DOWN_COLOR)
-  const [candleVisible, setCandleVisible] = useState(() => restoreRef.current?.candleVisible ?? true) // 체크 해제하면 캔들을 숨김(지표만 보고 판단 연습할 때 씀) - 기본 체크됨
+  const [enabledRSI, setEnabledRSI] = useState(rs.enabledRSI ?? false)
+  const [rsiColor, setRsiColorState] = useState(rs.rsiColor ?? DEFAULT_RSI_COLOR)
+  const [enabledMACD, setEnabledMACD] = useState(rs.enabledMACD ?? false)
+  const [macdLineColor, setMacdLineColorState] = useState(rs.macdLineColor ?? DEFAULT_MACD_LINE_COLOR)
+  const [macdSignalColor, setMacdSignalColorState] = useState(rs.macdSignalColor ?? DEFAULT_MACD_SIGNAL_COLOR)
+  const [enabledMACD5, setEnabledMACD5] = useState(rs.enabledMACD5 ?? false)
+  const [macd5LineColor, setMacd5LineColorState] = useState(rs.macd5LineColor ?? DEFAULT_MACD5_LINE_COLOR)
+  const [macd5SignalColor, setMacd5SignalColorState] = useState(rs.macd5SignalColor ?? DEFAULT_MACD5_SIGNAL_COLOR)
+  const [upColor, setUpColorState] = useState(rs.upColor ?? DEFAULT_UP_COLOR)
+  const [downColor, setDownColorState] = useState(rs.downColor ?? DEFAULT_DOWN_COLOR)
+  const [candleVisible, setCandleVisible] = useState(() => rs.candleVisible ?? restoreRef.current?.candleVisible ?? true) // 체크 해제하면 캔들을 숨김(지표만 보고 판단 연습할 때 씀) - 기본 체크됨
   // 왼쪽 "크로스/더블비/눌림 신호" 표시 - 예전엔 체크박스를 여러 개 켜면 그 안에서 가능한 모든 조합을
   // 자동으로 판정했는데(체크 3개면 3쌍이 전부 감지되는 식으로 통제가 안 됨), 각각 1/2/3 슬롯으로 나눠
   // 슬롯마다 정확히 2개(드롭다운)만 골라 그 조합만 보게 바꿈(사용자 요청) - 크로스/더블비/눌림 전부 동일 방식,
   // 반자동(auto)/시뮬레이션(sim)도 같은 방식으로 통일함.
-  const [crossPairs, setCrossPairs] = useState(EMPTY_PAIR_SLOTS)
+  const [crossPairs, setCrossPairs] = useState(rs.crossPairs ?? EMPTY_PAIR_SLOTS)
   // 골든크로스(단기선이 장기선을 아래에서 위로 돌파)/데드크로스(그 반대) 표시를 따로 설정
-  const [goldenShape, setGoldenShapeState] = useState('arrowUp')
-  const [goldenColor, setGoldenColorState] = useState(DEFAULT_GOLDEN_COLOR)
-  const [goldenSize, setGoldenSizeState] = useState(3) // 기본 셋팅(사용자 요청) - 크로스 신호 크기 3번
-  const [deadShape, setDeadShapeState] = useState('arrowDown')
-  const [deadColor, setDeadColorState] = useState(DEFAULT_DEAD_COLOR)
-  const [deadSize, setDeadSizeState] = useState(3) // 기본 셋팅(사용자 요청) - 크로스 신호 크기 3번
+  const [goldenShape, setGoldenShapeState] = useState(rs.goldenShape ?? 'arrowUp')
+  const [goldenColor, setGoldenColorState] = useState(rs.goldenColor ?? DEFAULT_GOLDEN_COLOR)
+  const [goldenSize, setGoldenSizeState] = useState(rs.goldenSize ?? 3) // 기본 셋팅(사용자 요청) - 크로스 신호 크기 3번
+  const [deadShape, setDeadShapeState] = useState(rs.deadShape ?? 'arrowDown')
+  const [deadColor, setDeadColorState] = useState(rs.deadColor ?? DEFAULT_DEAD_COLOR)
+  const [deadSize, setDeadSizeState] = useState(rs.deadSize ?? 3) // 기본 셋팅(사용자 요청) - 크로스 신호 크기 3번
   // 더블비 신호(왼쪽 표시용) - 슬롯 1/2/3마다 라인(`${bandId}:${upper|middle|lower}`) 2개를 드롭다운으로 골라
   // 그 쌍의 겹침만 본다. 반자동/시뮬레이션의 더블비 조건(autoDoubleBPairs/simDoubleBPairs)과 슬롯 상태는
   // 따로 관리하지만, 계산 함수(computeDoubleBTouchForPair)는 공유한다.
-  const [doubleBPairs, setDoubleBPairsState] = useState(EMPTY_PAIR_SLOTS)
+  const [doubleBPairs, setDoubleBPairsState] = useState(rs.doubleBPairs ?? EMPTY_PAIR_SLOTS)
   // 더블비 신호 모양/색상/크기 - 매수(롱)/매도(숏) 방향별로 따로 저장하고, 크로스 신호(골든/데드)와 같은
   // 방식으로 롱/숏 두 행을 탭 전환 없이 항상 같이 보여준다(사용자 요청 - 통일성)
-  const [doubleBShapeLong, setDoubleBShapeLongState] = useState('square')
-  const [doubleBColorLong, setDoubleBColorLongState] = useState('#00BCD4')
-  const [doubleBSizeLong, setDoubleBSizeLongState] = useState(1)
-  const [doubleBShapeShort, setDoubleBShapeShortState] = useState('square')
-  const [doubleBColorShort, setDoubleBColorShortState] = useState('#FF6D00')
-  const [doubleBSizeShort, setDoubleBSizeShortState] = useState(1)
+  const [doubleBShapeLong, setDoubleBShapeLongState] = useState(rs.doubleBShapeLong ?? 'square')
+  const [doubleBColorLong, setDoubleBColorLongState] = useState(rs.doubleBColorLong ?? '#00BCD4')
+  const [doubleBSizeLong, setDoubleBSizeLongState] = useState(rs.doubleBSizeLong ?? 1)
+  const [doubleBShapeShort, setDoubleBShapeShortState] = useState(rs.doubleBShapeShort ?? 'square')
+  const [doubleBColorShort, setDoubleBColorShortState] = useState(rs.doubleBColorShort ?? '#FF6D00')
+  const [doubleBSizeShort, setDoubleBSizeShortState] = useState(rs.doubleBSizeShort ?? 1)
   // 볼린저 눌림 신호(왼쪽 표시용, 5분↔15분 고정) - 반자동/시뮬레이션의 볼린저 눌림 조건과 켜고 끄는 체크는
   // 따로 관리하지만 계산 함수(computeBollInnerTouchForPair)는 공유한다.
-  const [bollInnerSignalSellEnabled, setBollInnerSignalSellEnabled] = useState(false) // 5분 상단선이 15분 상단선 안(아래)
-  const [bollInnerSignalBuyEnabled, setBollInnerSignalBuyEnabled] = useState(false)   // 5분 하단선이 15분 하단선 안(위)
+  const [bollInnerSignalSellEnabled, setBollInnerSignalSellEnabled] = useState(rs.bollInnerSignalSellEnabled ?? false) // 5분 상단선이 15분 상단선 안(아래)
+  const [bollInnerSignalBuyEnabled, setBollInnerSignalBuyEnabled] = useState(rs.bollInnerSignalBuyEnabled ?? false)   // 5분 하단선이 15분 하단선 안(위)
   // 롱/숏 모양/색상/크기 - 더블비와 같은 이유로 탭 전환 없이 두 행을 항상 같이 보여준다
-  const [bollInnerShapeLong, setBollInnerShapeLongState] = useState('circle')
-  const [bollInnerColorLong, setBollInnerColorLongState] = useState('#26A69A')
-  const [bollInnerSizeLong, setBollInnerSizeLongState] = useState(1)
-  const [bollInnerShapeShort, setBollInnerShapeShortState] = useState('circle')
-  const [bollInnerColorShort, setBollInnerColorShortState] = useState('#EF5350')
-  const [bollInnerSizeShort, setBollInnerSizeShortState] = useState(1)
+  const [bollInnerShapeLong, setBollInnerShapeLongState] = useState(rs.bollInnerShapeLong ?? 'circle')
+  const [bollInnerColorLong, setBollInnerColorLongState] = useState(rs.bollInnerColorLong ?? '#26A69A')
+  const [bollInnerSizeLong, setBollInnerSizeLongState] = useState(rs.bollInnerSizeLong ?? 1)
+  const [bollInnerShapeShort, setBollInnerShapeShortState] = useState(rs.bollInnerShapeShort ?? 'circle')
+  const [bollInnerColorShort, setBollInnerColorShortState] = useState(rs.bollInnerColorShort ?? '#EF5350')
+  const [bollInnerSizeShort, setBollInnerSizeShortState] = useState(rs.bollInnerSizeShort ?? 1)
   // 매매 연습 - 헤징 허용(바이/셀 동시 보유 가능), 수수료/스프레드는 계산 안 함
-  const [startingBalance, setStartingBalanceState] = useState(DEFAULT_STARTING_BALANCE)
+  const [startingBalance, setStartingBalanceState] = useState(rs.startingBalance ?? DEFAULT_STARTING_BALANCE)
   const [balance, setBalance] = useState(DEFAULT_STARTING_BALANCE)
-  const [lotSize, setLotSize] = useState(0.01)
+  const [lotSize, setLotSize] = useState(rs.lotSize ?? 0.01)
   const [positions, setPositions] = useState([]) // { id, side:'buy'|'sell', symbol, lot, entryPrice, entryTime }
-  const [pnlDisplay, setPnlDisplay] = useState('dollar') // 'dollar' | 'point'
+  const [pnlDisplay, setPnlDisplay] = useState(rs.pnlDisplay ?? 'dollar') // 'dollar' | 'point'
   // 반자동진입 - 왼쪽 표시(크로스는 crossPairs, 더블비는 doubleBPairs 슬롯)와 켜고 끄는 슬롯 상태는
   // 따로 관리한다(화면엔 여러 개 띄워두고 그중 일부만 실전 진입 조건으로 쓸 수 있게). 계산 로직
   // (findMACrossForPair / computeDoubleBTouchForPair / computeBollInnerTouchForPair)은 공유하므로,
   // 왼쪽과 여기에 같은 조합을 골라두면 마커 표시 캔들 = 실제 진입 캔들이 항상 일치한다.
   // 볼린저 눌림은 크로스/더블비와 달리 원래부터 5분↔15분 고정이라 여기도 그대로 고정 유지.
-  const [semiAutoEnabled, setSemiAutoEnabled] = useState(false)
-  const [autoCrossPairs, setAutoCrossPairsState] = useState(EMPTY_PAIR_SLOTS)
-  const [autoDoubleBPairs, setAutoDoubleBPairsState] = useState(EMPTY_PAIR_SLOTS)
+  const [semiAutoEnabled, setSemiAutoEnabled] = useState(rs.semiAutoEnabled ?? false)
+  const [autoCrossPairs, setAutoCrossPairsState] = useState(rs.autoCrossPairs ?? EMPTY_PAIR_SLOTS)
+  const [autoDoubleBPairs, setAutoDoubleBPairsState] = useState(rs.autoDoubleBPairs ?? EMPTY_PAIR_SLOTS)
   // "볼린저 눌림"(5분↔15분 고정) - 상단/하단 조건을 따로 켜고 끌 수 있다
-  const [autoBollInnerSellEnabled, setAutoBollInnerSellEnabled] = useState(false) // 5분 상단선이 15분 상단선 안(아래)일 때 매도
-  const [autoBollInnerBuyEnabled, setAutoBollInnerBuyEnabled] = useState(false)   // 5분 하단선이 15분 하단선 안(위)일 때 매수
+  const [autoBollInnerSellEnabled, setAutoBollInnerSellEnabled] = useState(rs.autoBollInnerSellEnabled ?? false) // 5분 상단선이 15분 상단선 안(아래)일 때 매도
+  const [autoBollInnerBuyEnabled, setAutoBollInnerBuyEnabled] = useState(rs.autoBollInnerBuyEnabled ?? false)   // 5분 하단선이 15분 하단선 안(위)일 때 매수
 
   // 시뮬레이션 - 반자동과 조건 구성은 완전히 동일하되, 켜고 끄는 체크 상태와 트리거 타임라인은 독립적이라
   // 반자동과 시뮬레이션을 동시에 켜두고 서로 다른 조건 조합을 비교해볼 수 있다
-  const [simulationEnabled, setSimulationEnabled] = useState(false)
-  const [simCrossPairs, setSimCrossPairsState] = useState(EMPTY_PAIR_SLOTS)
-  const [simDoubleBPairs, setSimDoubleBPairsState] = useState(EMPTY_PAIR_SLOTS)
-  const [simBollInnerSellEnabled, setSimBollInnerSellEnabled] = useState(false)
-  const [simBollInnerBuyEnabled, setSimBollInnerBuyEnabled] = useState(false)
+  const [simulationEnabled, setSimulationEnabled] = useState(rs.simulationEnabled ?? false)
+  const [simCrossPairs, setSimCrossPairsState] = useState(rs.simCrossPairs ?? EMPTY_PAIR_SLOTS)
+  const [simDoubleBPairs, setSimDoubleBPairsState] = useState(rs.simDoubleBPairs ?? EMPTY_PAIR_SLOTS)
+  const [simBollInnerSellEnabled, setSimBollInnerSellEnabled] = useState(rs.simBollInnerSellEnabled ?? false)
+  const [simBollInnerBuyEnabled, setSimBollInnerBuyEnabled] = useState(rs.simBollInnerBuyEnabled ?? false)
   // 시뮬레이션 결과 저장 - 청산된 거래를 여기 쌓아뒀다가 "결과 저장" 누르면 한 번에 DB로 보낸다.
   // (Claude가 나중에 MCP run_sql로 simulation_results 테이블을 조회해서 분석해줄 수 있게 하는 용도 -
   // 사이트 화면 어디에도 노출 안 되는, 세션에서만 쓰는 백엔드 기록)
@@ -1322,6 +1349,61 @@ export default function BacktestChart() {
       window.sessionStorage.setItem(BACKTEST_STATE_KEY, JSON.stringify({ symbol, selectedDate, selectedDateTo, playIndex, candleVisible }))
     } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 - 그냥 다음번엔 복원 안 될 뿐 */ }
   }, [symbol, selectedDate, selectedDateTo, playIndex, candleVisible])
+
+  // 차트 표시 설정(체크박스/색상/두께/시간/투명도/모양/크기/슬롯 선택 전부) 저장 - localStorage라 브라우저를
+  // 완전히 닫았다 열어도 유지된다. "초기화" 버튼을 눌렀을 때만 CHART_SETTINGS_KEY를 지우고 새로고침한다.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(CHART_SETTINGS_KEY, JSON.stringify({
+        enabledBands, lineVisibility, bandColors,
+        enabledMA, maColors, maWidths, maUpColors, maDownColors,
+        ribbonEnabled, ribbonOpacity,
+        sidewaysEnabled, sidewaysColor,
+        sessionEnabled, sessionColors, sessionHours, sessionOpacity,
+        enabledRSI, rsiColor,
+        enabledMACD, macdLineColor, macdSignalColor,
+        enabledMACD5, macd5LineColor, macd5SignalColor,
+        upColor, downColor, candleVisible,
+        crossPairs, goldenShape, goldenColor, goldenSize, deadShape, deadColor, deadSize,
+        doubleBPairs, doubleBShapeLong, doubleBColorLong, doubleBSizeLong, doubleBShapeShort, doubleBColorShort, doubleBSizeShort,
+        bollInnerSignalSellEnabled, bollInnerSignalBuyEnabled,
+        bollInnerShapeLong, bollInnerColorLong, bollInnerSizeLong, bollInnerShapeShort, bollInnerColorShort, bollInnerSizeShort,
+        startingBalance, lotSize, pnlDisplay,
+        semiAutoEnabled, autoCrossPairs, autoDoubleBPairs, autoBollInnerSellEnabled, autoBollInnerBuyEnabled,
+        simulationEnabled, simCrossPairs, simDoubleBPairs, simBollInnerSellEnabled, simBollInnerBuyEnabled,
+      }))
+    } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 */ }
+  }, [
+    enabledBands, lineVisibility, bandColors,
+    enabledMA, maColors, maWidths, maUpColors, maDownColors,
+    ribbonEnabled, ribbonOpacity,
+    sidewaysEnabled, sidewaysColor,
+    sessionEnabled, sessionColors, sessionHours, sessionOpacity,
+    enabledRSI, rsiColor,
+    enabledMACD, macdLineColor, macdSignalColor,
+    enabledMACD5, macd5LineColor, macd5SignalColor,
+    upColor, downColor, candleVisible,
+    crossPairs, goldenShape, goldenColor, goldenSize, deadShape, deadColor, deadSize,
+    doubleBPairs, doubleBShapeLong, doubleBColorLong, doubleBSizeLong, doubleBShapeShort, doubleBColorShort, doubleBSizeShort,
+    bollInnerSignalSellEnabled, bollInnerSignalBuyEnabled,
+    bollInnerShapeLong, bollInnerColorLong, bollInnerSizeLong, bollInnerShapeShort, bollInnerColorShort, bollInnerSizeShort,
+    startingBalance, lotSize, pnlDisplay,
+    semiAutoEnabled, autoCrossPairs, autoDoubleBPairs, autoBollInnerSellEnabled, autoBollInnerBuyEnabled,
+    simulationEnabled, simCrossPairs, simDoubleBPairs, simBollInnerSellEnabled, simBollInnerBuyEnabled,
+  ])
+
+  // 초기화 버튼 - 저장된 설정을 지우고 새로고침하면 위의 모든 useState가 기본값으로 다시 시작된다.
+  // (약 50개 상태를 하나하나 되돌리고 살아있는 차트 시리즈/프리미티브를 전부 재동기화하는 것보다,
+  // 새로고침으로 기존 마운트 로직이 처음부터 다시 실행되게 하는 쪽이 훨씬 안전하다)
+  const resetChartSettings = () => {
+    if (typeof window === 'undefined') return
+    if (!window.confirm('차트 설정을 전부 기본값으로 초기화할까요? (심볼/날짜/재생위치는 유지됩니다)')) return
+    try {
+      window.localStorage.removeItem(CHART_SETTINGS_KEY)
+    } catch { /* ignore */ }
+    window.location.reload()
+  }
 
   // 위/중심/아래 각 줄을 따로 숨길 수도 있게 - 기본은 다 보임(true)
   const isLineVisible = (bandId, which) => lineVisibility[`${bandId}:${which}`] !== false
@@ -2332,6 +2414,15 @@ export default function BacktestChart() {
                   }}>{label}</button>
                 ))}
               </div>
+
+              <button
+                onClick={resetChartSettings}
+                title="체크박스/색상/두께/시간/투명도/모양/크기 등 모든 차트 설정을 기본값으로 되돌립니다"
+                style={{
+                  width: '100%', background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
+                  padding: '7px 0', fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                }}
+              >↺ 설정 초기화</button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#9aa0ab' }}>
                 <label title="체크 해제하면 캔들을 숨깁니다(지표만 보고 판단 연습할 때)" style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, cursor: 'pointer' }}>
