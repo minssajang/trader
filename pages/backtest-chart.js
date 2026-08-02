@@ -324,21 +324,35 @@ class DualColorLinePrimitive {
             ctx.lineJoin = 'round'
             ctx.lineCap = 'round'
             ctx.setLineDash(dashPatternForStyle(this._lineStyle, this._lineWidth, hRatio))
+            // 캔들 하나짜리 구간마다 매번 beginPath+stroke를 하면 캔버스가 매 stroke마다 점선/대시
+            // 패턴의 위상(phase)을 처음(=항상 "선 있음"부터)부터 다시 시작해버려서, 구간 폭이 패턴
+            // 주기보다 좁으면 사실상 항상 실선처럼 보인다(점선/대시 구분이 안 되는 버그의 원인이었음).
+            // 그래서 같은 색이 이어지는 동안은 path를 안 끊고 lineTo만 계속 이어붙여서 그 구간 전체를
+            // 한 번의 stroke로 그린다 - 그래야 점/대시 패턴이 구간 전체에 걸쳐 자연스럽게 이어진다.
+            let curColor = null
+            let pathOpen = false
+            const flush = () => { if (pathOpen) { ctx.stroke(); pathOpen = false } }
             for (let i = 1; i < this._points.length; i++) {
               const p0 = this._points[i - 1], p1 = this._points[i]
-              if (p0 == null || p1 == null) continue
+              if (p0 == null || p1 == null) { flush(); curColor = null; continue }
               const x0 = ts.logicalToCoordinate(i - 1)
               const x1 = ts.logicalToCoordinate(i)
-              if (x0 == null || x1 == null) continue
+              if (x0 == null || x1 == null) { flush(); curColor = null; continue }
               const y0 = this._series.priceToCoordinate(p0)
               const y1 = this._series.priceToCoordinate(p1)
-              if (y0 == null || y1 == null) continue
-              ctx.strokeStyle = hexToRgba(p1 >= p0 ? this._upHex : this._downHex, this._alpha)
-              ctx.beginPath()
-              ctx.moveTo(x0 * hRatio, y0 * vRatio)
+              if (y0 == null || y1 == null) { flush(); curColor = null; continue }
+              const color = p1 >= p0 ? this._upHex : this._downHex
+              if (color !== curColor) {
+                flush()
+                ctx.strokeStyle = hexToRgba(color, this._alpha)
+                ctx.beginPath()
+                ctx.moveTo(x0 * hRatio, y0 * vRatio)
+                curColor = color
+                pathOpen = true
+              }
               ctx.lineTo(x1 * hRatio, y1 * vRatio)
-              ctx.stroke()
             }
+            flush()
             ctx.restore()
           })
         },
