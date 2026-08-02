@@ -20,6 +20,16 @@ const RIBBON_RED = '#FF0000'
 // 리본 18개 + "3분 H"(hma60, 사용자 요청) - 이 id들은 단색 대신 상승/하락 두 색으로 동적 렌더링한다.
 const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60'])
 const isDualColor = (maId) => DUAL_COLOR_IDS.has(maId)
+const RIBBON_IDS = new Set(MADRID_RIBBON.map(m => m.id))
+const isRibbonId = (maId) => RIBBON_IDS.has(maId)
+// hex(#RRGGBB) -> rgba(r,g,b,alpha) 문자열 - 리본 18개 선에만 투명도를 적용할 때 씀(hma3는 불투명 유지, 사용자 요청)
+function hexToRgba(hex, alpha) {
+  const h = (hex || '#000000').replace('#', '')
+  const r = parseInt(h.substring(0, 2), 16)
+  const g = parseInt(h.substring(2, 4), 16)
+  const b = parseInt(h.substring(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
 function splitRibbonBySlope(points) {
   const n = points.length
   const lime = new Array(n).fill(null)
@@ -232,6 +242,7 @@ export default function BacktestChart() {
   const [maWidths, setMaWidths] = useState({ hma60: 3, hma100: 3, hma300: 3, wma17_1m: 3, wma17_5m: 3, wma4_1h: 3 }) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
   // 리본(Madrid) - MACD처럼 체크박스 하나가 켜고 끄는 세트(사용자 요청).
   const [ribbonEnabled, setRibbonEnabledState] = useState(false)
+  const [ribbonOpacity, setRibbonOpacityState] = useState(0.5) // 리본 18개 선 전용 투명도(0~1, 사용자 요청) - hma3는 영향 없음
   // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
   const [maUpColors, setMaUpColors] = useState({ hma60: '#00D5FF' }) // 3분 H 상승색 기본값(사용자 지정)
   const [maDownColors, setMaDownColors] = useState({})
@@ -456,11 +467,12 @@ export default function BacktestChart() {
       if (!enabledMA[ma.id]) continue
       const width = maWidths[ma.id] || ma.lineWidth
       if (isDualColor(ma.id)) {
+        const alpha = isRibbonId(ma.id) ? ribbonOpacity : 1
         maSeriesRef.current[ma.id + '_lime'] = chart.addSeries(LineSeries, {
-          color: maUpColors[ma.id] || RIBBON_LIME, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
+          color: hexToRgba(maUpColors[ma.id] || RIBBON_LIME, alpha), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
         })
         maSeriesRef.current[ma.id + '_red'] = chart.addSeries(LineSeries, {
-          color: maDownColors[ma.id] || RIBBON_RED, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
+          color: hexToRgba(maDownColors[ma.id] || RIBBON_RED, alpha), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
         })
       } else {
         const color = maColors[ma.id] || ma.color
@@ -1056,15 +1068,25 @@ export default function BacktestChart() {
   const getDualDownColor = (maId) => maDownColors[maId] || RIBBON_RED
   const setDualUpColor = (maId, color) => {
     setMaUpColors(prev => ({ ...prev, [maId]: color }))
-    maSeriesRef.current[maId + '_lime']?.applyOptions({ color })
+    const applied = isRibbonId(maId) ? hexToRgba(color, ribbonOpacity) : color
+    maSeriesRef.current[maId + '_lime']?.applyOptions({ color: applied })
   }
   const setDualDownColor = (maId, color) => {
     setMaDownColors(prev => ({ ...prev, [maId]: color }))
-    maSeriesRef.current[maId + '_red']?.applyOptions({ color })
+    const applied = isRibbonId(maId) ? hexToRgba(color, ribbonOpacity) : color
+    maSeriesRef.current[maId + '_red']?.applyOptions({ color: applied })
   }
   // 리본 카드의 "세트" 컬러피커 - 리본 선 전부의 상승/하락 색을 한번에 바꾼다
   const setRibbonUpColor = (color) => { for (const ma of MADRID_RIBBON) setDualUpColor(ma.id, color) }
   const setRibbonDownColor = (color) => { for (const ma of MADRID_RIBBON) setDualDownColor(ma.id, color) }
+  // 리본 18개 선 전용 투명도 슬라이더(사용자 요청) - hma3(dual이지만 리본 아님)는 영향 없음
+  const setRibbonOpacityValue = (value) => {
+    setRibbonOpacityState(value)
+    for (const ma of MADRID_RIBBON) {
+      maSeriesRef.current[ma.id + '_lime']?.applyOptions({ color: hexToRgba(getDualUpColor(ma.id), value) })
+      maSeriesRef.current[ma.id + '_red']?.applyOptions({ color: hexToRgba(getDualDownColor(ma.id), value) })
+    }
+  }
 
   const toggleMA = (maId) => {
     const turningOn = !enabledMA[maId]
@@ -1076,11 +1098,12 @@ export default function BacktestChart() {
       if (dual) {
         if (!maSeriesRef.current[maId + '_lime'] && chartRef.current) {
           const width = getMAWidth(ma)
+          const alpha = isRibbonId(maId) ? ribbonOpacity : 1
           maSeriesRef.current[maId + '_lime'] = chartRef.current.addSeries(LineSeries, {
-            color: getDualUpColor(maId), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
+            color: hexToRgba(getDualUpColor(maId), alpha), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
           })
           maSeriesRef.current[maId + '_red'] = chartRef.current.addSeries(LineSeries, {
-            color: getDualDownColor(maId), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
+            color: hexToRgba(getDualDownColor(maId), alpha), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
           })
           bumpMarkerLayer()
         }
@@ -2092,6 +2115,19 @@ export default function BacktestChart() {
                         style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
                       />
                     </label>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 5, fontSize: 10, color: '#5a5f6a' }}>
+                    <span>투명도</span>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={1}
+                      step={0.05}
+                      value={ribbonOpacity}
+                      onChange={e => setRibbonOpacityValue(Number(e.target.value))}
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ width: 30, textAlign: 'right' }}>{Math.round(ribbonOpacity * 100)}%</span>
                   </div>
                 </div>
               </CollapsibleCard>
