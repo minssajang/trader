@@ -122,6 +122,33 @@ class BackgroundBandsPrimitive {
 }
 const SIDEWAYS_BAND_COLOR = '#FFEB3B' // 횡보 구간 배경 기본색(옅은 노랑) - 알파는 적용할 때 따로 낮춤
 
+// 세션 표시(사용자가 공유한 Pine 스크립트에서 세션 부분만 분리, 사용자 요청) - 시작/종료 시각은
+// 한국시간(KST) 기준이고, 이 차트의 시간 라벨이 이미 KST와 동일(SESSION_OPENS 주석 참고)이라
+// 그대로 쓴다. endHour <= startHour면 자정을 넘어가는 세션(뉴욕: 21시~다음날 5시).
+const SESSIONS = [
+  { id: 'asia', label: '아시아', color: '#FFEB3B', startHour: 7, endHour: 16 },
+  { id: 'europe', label: '유럽', color: '#2196F3', startHour: 15, endHour: 24 },
+  { id: 'newyork', label: '뉴욕', color: '#F44336', startHour: 21, endHour: 5 },
+]
+function hourInSession(hourOfDay, startHour, endHour) {
+  if (endHour <= startHour) return hourOfDay >= startHour || hourOfDay < endHour
+  return hourOfDay >= startHour && hourOfDay < endHour
+}
+// rows(캔들 배열)에서 [startHour,endHour) 시간대(KST)에 해당하는 연속 구간을 전부 찾는다 -
+// 초기 로드 시점과, 사용자가 시간을 나중에 바꿨을 때 재계산할 때 둘 다 씀.
+function findSessionSegmentsIn(rows, startHour, endHour) {
+  const segs = []
+  let segStart = null
+  for (let i = 0; i < rows.length; i++) {
+    const hourOfDay = new Date(rows[i].time * 1000).getUTCHours()
+    const inSession = hourInSession(hourOfDay, startHour, endHour)
+    if (inSession && segStart == null) segStart = i
+    if (!inSession && segStart != null) { segs.push({ startIdx: segStart, endIdx: i - 1 }); segStart = null }
+  }
+  if (segStart != null) segs.push({ startIdx: segStart, endIdx: rows.length - 1 })
+  return segs.map(seg => ({ ...seg, startTime: rows[seg.startIdx].time, endTime: rows[seg.endIdx].time }))
+}
+
 // 리본 전용 - 오를 땐 라임/내릴 땐 레드로(Madrid 원본 색, 사용자 요청 "트레이딩뷰처럼").
 // lightweight-charts는 선 하나 안에서 구간별 색을 못 바꾸므로, 선마다 상승구간 시리즈(라임)와
 // 하락구간 시리즈(레드) 둘로 쪼개서 겹쳐 그린다. 색이 바뀌는 경계에서는 두 시리즈 모두에 그
@@ -360,6 +387,11 @@ export default function BacktestChart() {
   // 횡보 구간 배경 표시(사용자 요청) - 5분B 폭 & 리본 폭이 둘 다 로드된 구간 하위25%일 때 배경을 옅게 칠함
   const [sidewaysEnabled, setSidewaysEnabledState] = useState(false)
   const [sidewaysColor, setSidewaysColorState] = useState(SIDEWAYS_BAND_COLOR)
+  // 세션 표시(아시아/유럽/뉴욕) - 세션마다 독립적으로 켜고 끄고 색상 지정(사용자 요청)
+  const [sessionEnabled, setSessionEnabledState] = useState({})
+  const [sessionColors, setSessionColorsState] = useState(Object.fromEntries(SESSIONS.map(s => [s.id, s.color])))
+  const [sessionHours, setSessionHoursState] = useState(Object.fromEntries(SESSIONS.map(s => [s.id, { start: s.startHour, end: s.endHour }]))) // 세션마다 독립 (사용자 요청)
+  const [sessionOpacity, setSessionOpacityState] = useState(0.15) // 세션 3개 공통 투명도(사용자 요청 - 색은 따로, 투명도는 같이)
   // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
   const [maUpColors, setMaUpColors] = useState({ hma60: '#00D5FF' }) // 3분 H 상승색 기본값(사용자 지정)
   const [maDownColors, setMaDownColors] = useState({})
@@ -454,6 +486,8 @@ export default function BacktestChart() {
   const swingStateRef = useRef({ prevSpread: null, direction: null, legExtreme: null }) // 지그재그 스윙 탐지용 진행 상태
   const sidewaysBandRef = useRef(null)       // BackgroundBandsPrimitive 인스턴스
   const sidewaysSegmentsRef = useRef([])     // 로드된 구간 전체에서 미리 찾아둔 횡보 구간 [{startIdx,endIdx,startTime,endTime}]
+  const sessionBandRefs = useRef({})         // sessionId -> BackgroundBandsPrimitive 인스턴스
+  const sessionSegmentsRef = useRef({})      // sessionId -> [{startIdx,endIdx,startTime,endTime}]
   const rowsRef = useRef([])
   const intervalRef = useRef(null)
   const indexRef = useRef(0)
@@ -583,6 +617,12 @@ export default function BacktestChart() {
 
     sidewaysBandRef.current = new BackgroundBandsPrimitive(hexToRgba(sidewaysColor, 0.15))
     series.attachPrimitive(sidewaysBandRef.current)
+
+    for (const s of SESSIONS) {
+      const p = new BackgroundBandsPrimitive(hexToRgba(sessionColors[s.id] || s.color, sessionOpacity))
+      series.attachPrimitive(p)
+      sessionBandRefs.current[s.id] = p
+    }
 
     // 기본으로 켜둔 볼린저/이평선은 toggleBand/toggleMA(클릭했을 때만 시리즈를 만듦)를 거치지 않으므로,
     // 마운트 시점에 켜져 있는 것들의 실제 차트 시리즈를 여기서 직접 만들어둔다.
@@ -734,6 +774,23 @@ export default function BacktestChart() {
     sidewaysBandRef.current?.setRanges(ranges)
   }
 
+  // 세션 배경도 횡보와 같은 방식 - 켜져 있는 세션만 재생 위치(idx)까지 잘라서 적용
+  const applySessionBands = (idx) => {
+    for (const session of SESSIONS) {
+      const primitive = sessionBandRefs.current[session.id]
+      if (!primitive) continue
+      if (!sessionEnabled[session.id]) { primitive.setRanges([]); continue }
+      const ranges = []
+      for (const seg of sessionSegmentsRef.current[session.id] || []) {
+        if (seg.startIdx >= idx) continue
+        const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
+        if (clippedEndIdx < seg.startIdx) continue
+        ranges.push({ from: seg.startTime, to: rowsRef.current[clippedEndIdx]?.time ?? seg.endTime })
+      }
+      primitive.setRanges(ranges)
+    }
+  }
+
   // RSI/MACD도 재생 위치(idx)를 앞서가면 안 되는 건 볼린저/이평선과 동일
   const applyRSIIndex = (idx) => {
     if (!rsiSeriesRef.current) return
@@ -827,6 +884,7 @@ export default function BacktestChart() {
     applyAllMarkers(idx)
     if (ribbonEnabled) recomputeSpreadExtremes(idx) // 슬라이더로 임의 위치 이동 - 되감기일 수 있어 처음부터 재스캔
     if (sidewaysEnabled) applySidewaysBands(idx)
+    applySessionBands(idx)
     indexRef.current = idx
     setPlayIndex(idx)
   }
@@ -835,6 +893,7 @@ export default function BacktestChart() {
   const applyIncrement = (from, to) => {
     if (ribbonEnabled) scanSpreadSwings(from, to, swingStateRef.current) // 재생은 항상 앞으로만 가므로 이어서 스캔
     if (sidewaysEnabled) applySidewaysBands(to)
+    applySessionBands(to)
     const rows = rowsRef.current
     for (let i = from; i < to; i++) {
       seriesRef.current?.update(rows[i])
@@ -1029,6 +1088,16 @@ export default function BacktestChart() {
           sidewaysSegmentsRef.current = rawSegments
             .map(seg => ({ ...seg, startTime: dayRows[seg.startIdx].time, endTime: dayRows[seg.endIdx].time }))
             .filter(seg => (seg.endTime - seg.startTime) / 60 + 1 >= MIN_SIDEWAYS_MIN)
+        }
+
+        // 세션 표시(아시아/유럽/뉴욕) - 이 차트 시간 라벨이 이미 KST라 SESSIONS의 시/종료시각을 그대로 씀
+        {
+          const newSessionSegments = {}
+          for (const session of SESSIONS) {
+            const hrs = sessionHours[session.id] || { start: session.startHour, end: session.endHour }
+            newSessionSegments[session.id] = findSessionSegmentsIn(dayRows, hrs.start, hrs.end)
+          }
+          sessionSegmentsRef.current = newSessionSegments
         }
 
         // RSI/MACD도 이평선처럼 그 구간 데이터만으론 워밍업이 부족할 수 있어 파일 전체로 계산 후 표시 구간만 자름
@@ -1415,6 +1484,61 @@ export default function BacktestChart() {
   const setSidewaysColor = (hex) => {
     setSidewaysColorState(hex)
     sidewaysBandRef.current?.setFillStyle(hexToRgba(hex, 0.15))
+  }
+
+  // 세션(아시아/유럽/뉴욕)은 서로 독립적으로 켜고 끔 - sessionEnabled state는 비동기라 여기서
+  // 바로 켤지 끌지(turningOn)를 계산해서 직접 primitive에 반영한다(리본/횡보 토글과 같은 패턴).
+  const toggleSession = (sessionId) => {
+    const turningOn = !sessionEnabled[sessionId]
+    setSessionEnabledState(prev => ({ ...prev, [sessionId]: turningOn }))
+    const primitive = sessionBandRefs.current[sessionId]
+    if (!primitive) return
+    if (!turningOn) { primitive.setRanges([]); return }
+    const idx = indexRef.current
+    const ranges = []
+    for (const seg of sessionSegmentsRef.current[sessionId] || []) {
+      if (seg.startIdx >= idx) continue
+      const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
+      if (clippedEndIdx < seg.startIdx) continue
+      ranges.push({ from: seg.startTime, to: rowsRef.current[clippedEndIdx]?.time ?? seg.endTime })
+    }
+    primitive.setRanges(ranges)
+  }
+
+  const setSessionColor = (sessionId, hex) => {
+    setSessionColorsState(prev => ({ ...prev, [sessionId]: hex }))
+    sessionBandRefs.current[sessionId]?.setFillStyle(hexToRgba(hex, sessionOpacity))
+  }
+
+  // 투명도는 세션 3개 공통(사용자 요청) - 각자 색은 그대로 두고 알파만 다시 계산해서 3개 다 갱신
+  const setSessionOpacityValue = (value) => {
+    setSessionOpacityState(value)
+    for (const s of SESSIONS) {
+      const color = sessionColors[s.id] || s.color
+      sessionBandRefs.current[s.id]?.setFillStyle(hexToRgba(color, value))
+    }
+  }
+
+  // 시간은 세션마다 따로(사용자 요청) - 바꾸면 이미 로드된 데이터에서 그 세션만 다시 스캔하고,
+  // 켜져 있으면 재생 위치까지 바로 반영한다.
+  const setSessionHour = (sessionId, which, value) => {
+    setSessionHoursState(prev => {
+      const next = { ...prev, [sessionId]: { ...prev[sessionId], [which]: value } }
+      const hrs = next[sessionId]
+      sessionSegmentsRef.current = { ...sessionSegmentsRef.current, [sessionId]: findSessionSegmentsIn(rowsRef.current, hrs.start, hrs.end) }
+      if (sessionEnabled[sessionId]) {
+        const idx = indexRef.current
+        const ranges = []
+        for (const seg of sessionSegmentsRef.current[sessionId]) {
+          if (seg.startIdx >= idx) continue
+          const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
+          if (clippedEndIdx < seg.startIdx) continue
+          ranges.push({ from: seg.startTime, to: rowsRef.current[clippedEndIdx]?.time ?? seg.endTime })
+        }
+        sessionBandRefs.current[sessionId]?.setRanges(ranges)
+      }
+      return next
+    })
   }
 
   // RSI - 자기만의 pane(index는 동적으로 계산: 현재 pane 개수 = 맨 끝에 새 pane) - v5 진짜 pane API
@@ -2214,6 +2338,68 @@ export default function BacktestChart() {
                   <div style={{ marginTop: 4, fontSize: 10, color: '#5a5f6a', lineHeight: 1.4 }}>
                     5분B 폭 &amp; 리본(M5-M90) 폭이 둘 다 로드된 구간 하위25%인 곳을 배경으로 표시
                   </div>
+                </div>
+              </CollapsibleCard>
+
+              <CollapsibleCard title="세션" maxWidth={170} defaultOpen={false}>
+                {SESSIONS.map(s => {
+                  const hrs = sessionHours[s.id] || { start: s.startHour, end: s.endHour }
+                  return (
+                    <div key={s.id} style={{ padding: '3px 0', borderBottom: '1px solid #1c2028' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!sessionEnabled[s.id]}
+                          onChange={() => toggleSession(s.id)}
+                          style={{ width: 13, height: 13, margin: 0, accentColor: sessionColors[s.id] || s.color, flexShrink: 0 }}
+                        />
+                        <span style={{ flex: 1 }}>{s.label}</span>
+                        <input
+                          type="color"
+                          value={sessionColors[s.id] || s.color}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => setSessionColor(s.id, e.target.value)}
+                          title="배경색 변경 가능"
+                          style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                        />
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                        <input
+                          type="number" min={0} max={23} value={hrs.start}
+                          onChange={e => setSessionHour(s.id, 'start', Math.min(23, Math.max(0, Number(e.target.value) || 0)))}
+                          style={{ width: 34, fontSize: 10, background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 3px' }}
+                        />
+                        <span>시 ~</span>
+                        <input
+                          type="number" min={0} max={23} value={hrs.end}
+                          onChange={e => setSessionHour(s.id, 'end', Math.min(23, Math.max(0, Number(e.target.value) || 0)))}
+                          style={{ width: 34, fontSize: 10, background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 3px' }}
+                        />
+                        <span>시</span>
+                      </div>
+                    </div>
+                  )
+                })}
+                <div style={{ marginTop: 6, fontSize: 10, color: '#5a5f6a', width: '100%', boxSizing: 'border-box' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3, whiteSpace: 'nowrap' }}>
+                    <span>투명도(공통)</span>
+                    <input
+                      type="number" min={5} max={100} step={5}
+                      value={Math.round(sessionOpacity * 100)}
+                      onChange={e => {
+                        const pct = Math.min(100, Math.max(5, Number(e.target.value) || 0))
+                        setSessionOpacityValue(pct / 100)
+                      }}
+                      style={{ width: 36, fontSize: 10, background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 3px' }}
+                    />
+                    <span>%</span>
+                  </div>
+                  <input
+                    type="range" min={0.05} max={1} step={0.05}
+                    value={sessionOpacity}
+                    onChange={e => setSessionOpacityValue(Number(e.target.value))}
+                    style={{ width: '100%', boxSizing: 'border-box', display: 'block', margin: 0 }}
+                  />
                 </div>
               </CollapsibleCard>
 
