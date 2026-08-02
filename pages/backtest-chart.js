@@ -243,9 +243,13 @@ function findSessionSegmentsIn(rows, startHour, endHour) {
 }
 
 // 리본 전용 - 오를 땐 라임/내릴 땐 레드로(Madrid 원본 색, 사용자 요청 "트레이딩뷰처럼").
-// lightweight-charts는 선 하나 안에서 구간별 색을 못 바꾸므로, 선마다 상승구간 시리즈(라임)와
-// 하락구간 시리즈(레드) 둘로 쪼개서 겹쳐 그린다. 색이 바뀌는 경계에서는 두 시리즈 모두에 그
-// 경계점을 포함시켜(중복) 끊어져 보이지 않게 이어붙인다.
+// lightweight-charts는 선 하나 안에서 구간별 색을 못 바꾸므로, 예전엔 상승/하락 구간을 시리즈
+// 2개(라임/레드)로 쪼개서 겹쳐 그리는 방식을 썼는데 - 방향이 짧은 간격으로 자주 바뀌는 구간(예:
+// 봉우리 근처에서 위아래로 몇 번 꺾이는 곳)에서 경계점 중복 처리가 두 시리즈 모두에 겹쳐 들어가며
+// "선이 2개로 보인다"는 증상을 만들었음(사용자 지적, 여러 번 시도해도 완전히 못 없앰).
+// 근본적으로 다른 방식으로 교체 - 캔들 한 칸(i-1→i)마다 그 구간만의 방향 색으로 캔버스에 직접
+// 선분을 그리는 프리미티브. 시리즈를 여러 개 겹치는 게 아니라 매번 정확히 "선분 1개"만 그리므로
+// 구조적으로 이중선이 생길 수 없다.
 const RIBBON_LIME = '#00FF00'
 const RIBBON_RED = '#FF0000'
 // 리본 18개 + "3분 H"(hma60, 사용자 요청) - 이 id들은 단색 대신 상승/하락 두 색으로 동적 렌더링한다.
@@ -253,7 +257,7 @@ const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60'])
 const isDualColor = (maId) => DUAL_COLOR_IDS.has(maId)
 const RIBBON_IDS = new Set(MADRID_RIBBON.map(m => m.id))
 const isRibbonId = (maId) => RIBBON_IDS.has(maId)
-// hex(#RRGGBB) -> rgba(r,g,b,alpha) 문자열 - 리본 18개 선에만 투명도를 적용할 때 씀(hma3는 불투명 유지, 사용자 요청)
+// hex(#RRGGBB) -> rgba(r,g,b,alpha) 문자열
 function hexToRgba(hex, alpha) {
   const h = (hex || '#000000').replace('#', '')
   const r = parseInt(h.substring(0, 2), 16)
@@ -261,28 +265,76 @@ function hexToRgba(hex, alpha) {
   const b = parseInt(h.substring(4, 6), 16)
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
-function splitRibbonBySlope(points) {
-  const n = points.length
-  const lime = new Array(n).fill(null)
-  const red = new Array(n).fill(null)
-  let lastState = null
-  for (let i = 1; i < n; i++) {
-    const p0 = points[i - 1], p1 = points[i]
-    if (!p0 || !p1) { lastState = null; continue }
-    const state = p1.value >= p0.value ? 'lime' : 'red'
-    const own = state === 'lime' ? lime : red
-    const other = state === 'lime' ? red : lime
-    if (lastState !== state) own[i - 1] = p0 // 색 바뀌는 경계점은 새 색 쪽에도 포함시켜 이어붙임
-    own[i] = p1
-    // 반대 색 배열엔 값 대신 빈 자리(time만 있고 value는 없는 whitespace)를 남긴다.
-    // 그냥 null로 두면 applyMAIndex의 filter(Boolean)이 이 구간을 통째로 걷어내버려서,
-    // 멀리 떨어진(다른 색 구간 건너편) 같은 색 점들끼리 직선으로 이어붙는 버그가 생긴다
-    // (선이 2개로 보인다는 증상의 원인) - whitespace는 filter(Boolean)엔 살아남지만
-    // lightweight-charts가 선을 끊어주는 지점으로 인식해서 대각선이 안 생긴다.
-    if (other[i] == null) other[i] = { time: p1.time }
-    lastState = state
+// points는 로드된 구간 전체와 같은 길이의 배열, 인덱스 i가 캔들 i번째에 대응(값 없으면 null) -
+// bandDataRef/maDataRef가 쓰는 것과 동일한 인덱싱. logicalToCoordinate(i)로 좌표를 구해서
+// (SessionBoxesPrimitive와 같은 이유 - 아직 재생 안 된 시각도 timeToCoordinate보다 안전) i-1→i
+// 구간마다 상승/하락 색으로 선분 하나씩 그린다.
+class DualColorLinePrimitive {
+  constructor(upHex, downHex, alpha, lineWidth, dashed) {
+    this._points = []
+    this._chart = null
+    this._series = null
+    this._requestUpdate = null
+    this._upHex = upHex
+    this._downHex = downHex
+    this._alpha = alpha
+    this._lineWidth = lineWidth
+    this._dashed = dashed
   }
-  return { lime, red }
+  attached({ chart, series, requestUpdate }) {
+    this._chart = chart
+    this._series = series
+    this._requestUpdate = requestUpdate
+  }
+  detached() {
+    this._chart = null
+    this._series = null
+  }
+  updateAllViews() {}
+  paneViews() {
+    return [{
+      renderer: () => ({
+        draw: (target) => {
+          if (!this._chart || !this._series || this._points.length < 2) return
+          const ts = this._chart.timeScale()
+          target.useBitmapCoordinateSpace((scope) => {
+            const ctx = scope.context
+            const hRatio = scope.horizontalPixelRatio
+            const vRatio = scope.verticalPixelRatio
+            ctx.save()
+            ctx.lineWidth = this._lineWidth
+            ctx.lineJoin = 'round'
+            ctx.lineCap = 'round'
+            if (this._dashed) ctx.setLineDash([6 * hRatio, 4 * hRatio])
+            for (let i = 1; i < this._points.length; i++) {
+              const p0 = this._points[i - 1], p1 = this._points[i]
+              if (p0 == null || p1 == null) continue
+              const x0 = ts.logicalToCoordinate(i - 1)
+              const x1 = ts.logicalToCoordinate(i)
+              if (x0 == null || x1 == null) continue
+              const y0 = this._series.priceToCoordinate(p0)
+              const y1 = this._series.priceToCoordinate(p1)
+              if (y0 == null || y1 == null) continue
+              ctx.strokeStyle = hexToRgba(p1 >= p0 ? this._upHex : this._downHex, this._alpha)
+              ctx.beginPath()
+              ctx.moveTo(x0 * hRatio, y0 * vRatio)
+              ctx.lineTo(x1 * hRatio, y1 * vRatio)
+              ctx.stroke()
+            }
+            ctx.restore()
+          })
+        },
+      }),
+    }]
+  }
+  setPoints(values) { // values: 인덱스 정렬된 순수 숫자(또는 null) 배열 - {time,value} 객체 아님
+    this._points = values
+    this._requestUpdate?.()
+  }
+  setUpColor(hex) { this._upHex = hex; this._requestUpdate?.() }
+  setDownColor(hex) { this._downHex = hex; this._requestUpdate?.() }
+  setAlpha(alpha) { this._alpha = alpha; this._requestUpdate?.() }
+  setLineWidth(width) { this._lineWidth = width; this._requestUpdate?.() }
 }
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
@@ -616,7 +668,8 @@ export default function BacktestChart() {
   const bandDataRef = useRef({})     // bandId -> { upper, middle, lower } - 선택한 날짜분, 워밍업 포함해서 계산됨
   const bandSeriesRef = useRef({})   // bandId -> { upper, middle, lower } lightweight-charts 라인 시리즈
   const maDataRef = useRef({})       // maId -> [{time,value}|null] - 선택한 날짜분, 워밍업 포함해서 계산됨
-  const maSeriesRef = useRef({})     // maId -> lightweight-charts 라인 시리즈 (밴드와 달리 선 1개)
+  const maSeriesRef = useRef({})     // maId -> lightweight-charts 라인 시리즈 (밴드와 달리 선 1개) - 단색(DUAL_COLOR_IDS 아닌) 것만
+  const maDualPrimitiveRef = useRef({}) // maId -> DualColorLinePrimitive 인스턴스 (DUAL_COLOR_IDS 전용, 리본18+hma60)
   const rsiDataRef = useRef([])      // [{time,value}|null] - 선택한 날짜분
   const rsiSeriesRef = useRef(null)
   const macdDataRef = useRef({ macd: [], signal: [], hist: [] }) // 각각 [{time,value}|null]
@@ -762,12 +815,11 @@ export default function BacktestChart() {
       const width = maWidths[ma.id] || ma.lineWidth
       if (isDualColor(ma.id)) {
         const alpha = isRibbonId(ma.id) ? ribbonOpacity : 1
-        maSeriesRef.current[ma.id + '_lime'] = chart.addSeries(LineSeries, {
-          color: hexToRgba(maUpColors[ma.id] || RIBBON_LIME, alpha), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
-        })
-        maSeriesRef.current[ma.id + '_red'] = chart.addSeries(LineSeries, {
-          color: hexToRgba(maDownColors[ma.id] || RIBBON_RED, alpha), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
-        })
+        const p = new DualColorLinePrimitive(
+          maUpColors[ma.id] || RIBBON_LIME, maDownColors[ma.id] || RIBBON_RED, alpha, width, ma.lineStyle === 2,
+        )
+        series.attachPrimitive(p)
+        maDualPrimitiveRef.current[ma.id] = p
       } else {
         const color = maColors[ma.id] || ma.color
         maSeriesRef.current[ma.id] = chart.addSeries(LineSeries, {
@@ -818,8 +870,18 @@ export default function BacktestChart() {
     series.setData(data.slice(0, idx).filter(Boolean))
   }
 
+  // DUAL_COLOR_IDS(리본18+hma60) 전용 - DualColorLinePrimitive는 순수 숫자(또는 null) 배열을 받는다
+  // (own/other로 쪼갠 시리즈가 아니라 원본 값 그대로 넘기고, 색은 그릴 때마다 직접 계산함).
+  const applyDualMAIndex = (maId, idx) => {
+    const primitive = maDualPrimitiveRef.current[maId]
+    const data = maDataRef.current[maId]
+    if (!primitive || !data) return
+    primitive.setPoints(data.slice(0, idx).map(p => p ? p.value : null))
+  }
+
   const syncMA = (idx) => {
     Object.keys(maSeriesRef.current).forEach(maId => applyMAIndex(maId, idx))
+    Object.keys(maDualPrimitiveRef.current).forEach(maId => applyDualMAIndex(maId, idx))
   }
 
   // 리본 가장 바깥선(M5-M90, madrid05/madrid90) 폭 - 세로선용. 리본 체크와 무관하게 maDataRef엔 항상 계산돼 있음.
@@ -1163,11 +1225,8 @@ export default function BacktestChart() {
           }
           newMaData[ma.id] = points
         }
-        for (const dualId of DUAL_COLOR_IDS) {
-          const { lime, red } = splitRibbonBySlope(newMaData[dualId])
-          newMaData[dualId + '_lime'] = lime
-          newMaData[dualId + '_red'] = red
-        }
+        // DUAL_COLOR_IDS(리본18+hma60)는 더 이상 별도 분할 배열을 안 만든다 - DualColorLinePrimitive가
+        // 위 newMaData[ma.id](원본 {time,value} 배열) 그대로를 받아서 그릴 때마다 직접 방향을 계산한다.
         maDataRef.current = newMaData
 
         // 횡보 구간(사용자 요청) - 5분B 폭 & 리본(M5-M90) 폭이 둘 다 "이번에 로드된 구간" 안에서
@@ -1541,8 +1600,7 @@ export default function BacktestChart() {
   const setMAWidth = (maId, width) => {
     setMaWidths(prev => ({ ...prev, [maId]: width }))
     if (isDualColor(maId)) {
-      maSeriesRef.current[maId + '_lime']?.applyOptions({ lineWidth: width })
-      maSeriesRef.current[maId + '_red']?.applyOptions({ lineWidth: width })
+      maDualPrimitiveRef.current[maId]?.setLineWidth(width)
     } else {
       maSeriesRef.current[maId]?.applyOptions({ lineWidth: width })
     }
@@ -1555,8 +1613,7 @@ export default function BacktestChart() {
       return next
     })
     if (isDualColor(ma.id)) {
-      maSeriesRef.current[ma.id + '_lime']?.applyOptions({ lineWidth: ma.lineWidth })
-      maSeriesRef.current[ma.id + '_red']?.applyOptions({ lineWidth: ma.lineWidth })
+      maDualPrimitiveRef.current[ma.id]?.setLineWidth(ma.lineWidth)
     } else {
       maSeriesRef.current[ma.id]?.applyOptions({ lineWidth: ma.lineWidth })
     }
@@ -1564,17 +1621,17 @@ export default function BacktestChart() {
 
   // DUAL_COLOR_IDS(리본 + hma60) 전용 - 커스텀 안 골랐으면 RIBBON_LIME/RIBBON_RED 기본값.
   // 이름이 candle up/down색 설정 함수(setUpColor/setDownColor, 위쪽에 있음)랑 겹쳐서 Dual 접두어로 구분.
+  // DualColorLinePrimitive는 hex 원색 + 투명도를 따로 들고 있다가 그릴 때 합치므로, 여기선 항상
+  // hex 원색만 넘긴다(투명도가 섞인 rgba를 저장/전달하지 않음).
   const getDualUpColor = (maId) => maUpColors[maId] || RIBBON_LIME
   const getDualDownColor = (maId) => maDownColors[maId] || RIBBON_RED
   const setDualUpColor = (maId, color) => {
     setMaUpColors(prev => ({ ...prev, [maId]: color }))
-    const applied = isRibbonId(maId) ? hexToRgba(color, ribbonOpacity) : color
-    maSeriesRef.current[maId + '_lime']?.applyOptions({ color: applied })
+    maDualPrimitiveRef.current[maId]?.setUpColor(color)
   }
   const setDualDownColor = (maId, color) => {
     setMaDownColors(prev => ({ ...prev, [maId]: color }))
-    const applied = isRibbonId(maId) ? hexToRgba(color, ribbonOpacity) : color
-    maSeriesRef.current[maId + '_red']?.applyOptions({ color: applied })
+    maDualPrimitiveRef.current[maId]?.setDownColor(color)
   }
   // 리본 카드의 "세트" 컬러피커 - 리본 선 전부의 상승/하락 색을 한번에 바꾼다
   const setRibbonUpColor = (color) => { for (const ma of MADRID_RIBBON) setDualUpColor(ma.id, color) }
@@ -1583,8 +1640,7 @@ export default function BacktestChart() {
   const setRibbonOpacityValue = (value) => {
     setRibbonOpacityState(value)
     for (const ma of MADRID_RIBBON) {
-      maSeriesRef.current[ma.id + '_lime']?.applyOptions({ color: hexToRgba(getDualUpColor(ma.id), value) })
-      maSeriesRef.current[ma.id + '_red']?.applyOptions({ color: hexToRgba(getDualDownColor(ma.id), value) })
+      maDualPrimitiveRef.current[ma.id]?.setAlpha(value)
     }
   }
 
@@ -1596,19 +1652,14 @@ export default function BacktestChart() {
 
     if (turningOn) {
       if (dual) {
-        if (!maSeriesRef.current[maId + '_lime'] && chartRef.current) {
+        if (!maDualPrimitiveRef.current[maId] && seriesRef.current) {
           const width = getMAWidth(ma)
           const alpha = isRibbonId(maId) ? ribbonOpacity : 1
-          maSeriesRef.current[maId + '_lime'] = chartRef.current.addSeries(LineSeries, {
-            color: hexToRgba(getDualUpColor(maId), alpha), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
-          })
-          maSeriesRef.current[maId + '_red'] = chartRef.current.addSeries(LineSeries, {
-            color: hexToRgba(getDualDownColor(maId), alpha), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
-          })
-          bumpMarkerLayer()
+          const p = new DualColorLinePrimitive(getDualUpColor(maId), getDualDownColor(maId), alpha, width, ma.lineStyle === 2)
+          seriesRef.current.attachPrimitive(p)
+          maDualPrimitiveRef.current[maId] = p
         }
-        applyMAIndex(maId + '_lime', indexRef.current)
-        applyMAIndex(maId + '_red', indexRef.current)
+        applyDualMAIndex(maId, indexRef.current)
       } else {
         if (!maSeriesRef.current[maId] && chartRef.current) {
           const color = getMAColor(ma)
@@ -1623,12 +1674,9 @@ export default function BacktestChart() {
       }
     } else {
       if (dual) {
-        for (const suffix of ['_lime', '_red']) {
-          const key = maId + suffix
-          const s = maSeriesRef.current[key]
-          if (s && chartRef.current) chartRef.current.removeSeries(s)
-          delete maSeriesRef.current[key]
-        }
+        const p = maDualPrimitiveRef.current[maId]
+        if (p && seriesRef.current) seriesRef.current.detachPrimitive(p)
+        delete maDualPrimitiveRef.current[maId]
       } else {
         const s = maSeriesRef.current[maId]
         if (s && chartRef.current) chartRef.current.removeSeries(s)
