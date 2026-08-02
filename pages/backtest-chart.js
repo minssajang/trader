@@ -223,7 +223,7 @@ export default function BacktestChart() {
   const [total, setTotal] = useState(0)
   // 기본 셋팅(사용자 요청) - 1분 볼린저는 중간선만, 5분/15분/1시간 볼린저는 전체 표시
   const [enabledBands, setEnabledBands] = useState({ sma20: true, sma100: true, sma300: true, sma1200: true })
-  const [lineVisibility, setLineVisibility] = useState({ 'sma20:upper': false, 'sma20:lower': false }) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true)
+  const [lineVisibility, setLineVisibility] = useState({}) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true, 1분B 상/하도 기본 켜짐 - 사용자 요청)
   const [bandColors, setBandColors] = useState({}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
   // 기본 셋팅 - 3분/5분/15분 H, 1분/5분 W17, 1시간 W4 이평선 체크
   const [enabledMA, setEnabledMA] = useState({ hma60: true, hma100: true, hma300: true, wma17_1m: true, wma17_5m: true, wma4_1h: true })
@@ -1972,7 +1972,7 @@ export default function BacktestChart() {
                 })}
               </CollapsibleCard>
 
-              <CollapsibleCard title="이평선" maxWidth={170}>
+              <CollapsibleCard title="이평선" maxWidth={170} defaultOpen={false}>
                 {MOVING_AVERAGES.map(ma => {
                   const on = !!enabledMA[ma.id]
                   const dual = isDualColor(ma.id)
@@ -2060,7 +2060,7 @@ export default function BacktestChart() {
                 })}
               </CollapsibleCard>
 
-              <CollapsibleCard title="리본" maxWidth={170}>
+              <CollapsibleCard title="리본" maxWidth={170} defaultOpen={false}>
                 <div style={{ padding: '1px 0' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
@@ -2096,7 +2096,7 @@ export default function BacktestChart() {
                 </div>
               </CollapsibleCard>
 
-              <CollapsibleCard title="보조지표" maxWidth={170}>
+              <CollapsibleCard title="보조지표" maxWidth={170} defaultOpen={false}>
                 <div style={{ padding: '3px 0' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
@@ -2180,19 +2180,19 @@ export default function BacktestChart() {
                 </div>
               </CollapsibleCard>
 
-              <CollapsibleCard title="크로스 신호" maxWidth={170}>
+              <CollapsibleCard title="크로스 신호" maxWidth={170} defaultOpen={false}>
                 {renderCrossRow('골든크로스', goldenShape, setGoldenShape, goldenColor, setGoldenColor, goldenSize, setGoldenSize)}
                 {renderCrossRow('데드크로스', deadShape, setDeadShape, deadColor, setDeadColor, deadSize, setDeadSize)}
                 {renderPairSlots(crossPairs, setCrossPair, MOVING_AVERAGES, '크로스')}
               </CollapsibleCard>
 
-              <CollapsibleCard title="더블비 신호" maxWidth={170}>
+              <CollapsibleCard title="더블비 신호" maxWidth={170} defaultOpen={false}>
                 {renderCrossRow('더블비 롱', doubleBShapeLong, setDoubleBShapeLong, doubleBColorLong, setDoubleBColorLong, doubleBSizeLong, setDoubleBSizeLong)}
                 {renderCrossRow('더블비 숏', doubleBShapeShort, setDoubleBShapeShort, doubleBColorShort, setDoubleBColorShort, doubleBSizeShort, setDoubleBSizeShort)}
                 {renderPairSlots(doubleBPairs, setDoubleBPair, DOUBLE_B_LINE_OPTIONS, '더블비')}
               </CollapsibleCard>
 
-              <CollapsibleCard title="볼린저 눌림 신호" maxWidth={170}>
+              <CollapsibleCard title="볼린저 눌림 신호" maxWidth={170} defaultOpen={false}>
                 {renderCrossRow('눌림 롱', bollInnerShapeLong, setBollInnerShapeLong, bollInnerColorLong, setBollInnerColorLong, bollInnerSizeLong, setBollInnerSizeLong)}
                 {renderCrossRow('눌림 숏', bollInnerShapeShort, setBollInnerShapeShort, bollInnerColorShort, setBollInnerColorShort, bollInnerSizeShort, setBollInnerSizeShort)}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -2387,7 +2387,7 @@ export default function BacktestChart() {
               </div>
 
               <div style={{ marginTop: 16 }}>
-                <CollapsibleCard title="⚙ 반자동" maxWidth="none">
+                <CollapsibleCard title="⚙ 반자동" maxWidth="none" defaultOpen={false}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
                     <input
                       type="checkbox" checked={semiAutoEnabled}
@@ -2432,7 +2432,7 @@ export default function BacktestChart() {
               {/* 시뮬레이션 - 반자동과 조건 구성/계산 로직은 동일하고, 켜고 끄는 체크와 진입 타임라인만 별도라
                   반자동과 동시에 켜두고 서로 다른 조건 조합을 비교해볼 수 있다. 날짜 선택/재생은 위 차트 컨트롤 그대로 공용으로 쓴다. */}
               <div style={{ marginTop: 16 }}>
-                <CollapsibleCard title="🧪 시뮬레이션" maxWidth="none">
+                <CollapsibleCard title="🧪 시뮬레이션" maxWidth="none" defaultOpen={false}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
                     <input
                       type="checkbox" checked={simulationEnabled}
