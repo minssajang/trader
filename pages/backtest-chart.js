@@ -11,6 +11,32 @@ import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, MADRID_RIBBON, comp
 // 리본도 같은 파이프라인을 공유한다 - 화면에서만 "리본" 카드로 따로 묶어서 보여준다(사용자 요청).
 const ALL_MA = [...MOVING_AVERAGES, ...MADRID_RIBBON]
 
+// 리본 전용 - 오를 땐 라임/내릴 땐 레드로(Madrid 원본 색, 사용자 요청 "트레이딩뷰처럼").
+// lightweight-charts는 선 하나 안에서 구간별 색을 못 바꾸므로, 선마다 상승구간 시리즈(라임)와
+// 하락구간 시리즈(레드) 둘로 쪼개서 겹쳐 그린다. 색이 바뀌는 경계에서는 두 시리즈 모두에 그
+// 경계점을 포함시켜(중복) 끊어져 보이지 않게 이어붙인다.
+const RIBBON_LIME = '#00FF00'
+const RIBBON_RED = '#FF0000'
+// 리본 18개 + "3분 H"(hma60, 사용자 요청) - 이 id들은 단색 대신 상승/하락 두 색으로 동적 렌더링한다.
+const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60'])
+const isDualColor = (maId) => DUAL_COLOR_IDS.has(maId)
+function splitRibbonBySlope(points) {
+  const n = points.length
+  const lime = new Array(n).fill(null)
+  const red = new Array(n).fill(null)
+  let lastState = null
+  for (let i = 1; i < n; i++) {
+    const p0 = points[i - 1], p1 = points[i]
+    if (!p0 || !p1) { lastState = null; continue }
+    const state = p1.value >= p0.value ? 'lime' : 'red'
+    const arr = state === 'lime' ? lime : red
+    if (lastState !== state) arr[i - 1] = p0 // 색 바뀌는 경계점은 새 색 쪽에도 포함시켜 이어붙임
+    arr[i] = p1
+    lastState = state
+  }
+  return { lime, red }
+}
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
 
@@ -204,6 +230,12 @@ export default function BacktestChart() {
   const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
   // 기본 셋팅 - 위 6개 이평선 전부 두께 3
   const [maWidths, setMaWidths] = useState({ hma60: 3, hma100: 3, hma300: 3, wma17_1m: 3, wma17_5m: 3, wma4_1h: 3 }) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
+  // 리본(Madrid, M5~M90)은 18개 선을 하나하나 켜고 끄지 않고 통째로 한 세트로 취급한다(사용자 요청) -
+  // 체크박스 하나로 MADRID_RIBBON 전체를 한번에 토글.
+  const [ribbonEnabled, setRibbonEnabledState] = useState(false)
+  // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
+  const [maUpColors, setMaUpColors] = useState({})
+  const [maDownColors, setMaDownColors] = useState({})
   // RSI/MACD - 기간은 표준값(14 / 12,26,9)으로 고정, 색상만 커스터마이징 가능. 기본은 꺼짐(체크해야 나옴)
   const [enabledRSI, setEnabledRSI] = useState(false)
   const [rsiColor, setRsiColorState] = useState(DEFAULT_RSI_COLOR)
@@ -423,11 +455,20 @@ export default function BacktestChart() {
     }
     for (const ma of ALL_MA) {
       if (!enabledMA[ma.id]) continue
-      const color = maColors[ma.id] || ma.color
       const width = maWidths[ma.id] || ma.lineWidth
-      maSeriesRef.current[ma.id] = chart.addSeries(LineSeries, {
-        color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
-      })
+      if (isDualColor(ma.id)) {
+        maSeriesRef.current[ma.id + '_lime'] = chart.addSeries(LineSeries, {
+          color: maUpColors[ma.id] || RIBBON_LIME, lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+        })
+        maSeriesRef.current[ma.id + '_red'] = chart.addSeries(LineSeries, {
+          color: maDownColors[ma.id] || RIBBON_RED, lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+        })
+      } else {
+        const color = maColors[ma.id] || ma.color
+        maSeriesRef.current[ma.id] = chart.addSeries(LineSeries, {
+          color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
+        })
+      }
     }
 
     markerSeriesRef.current = chart.addSeries(LineSeries, {
@@ -719,6 +760,11 @@ export default function BacktestChart() {
           }
           newMaData[ma.id] = points
         }
+        for (const dualId of DUAL_COLOR_IDS) {
+          const { lime, red } = splitRibbonBySlope(newMaData[dualId])
+          newMaData[dualId + '_lime'] = lime
+          newMaData[dualId + '_red'] = red
+        }
         maDataRef.current = newMaData
 
         // RSI/MACD도 이평선처럼 그 구간 데이터만으론 워밍업이 부족할 수 있어 파일 전체로 계산 후 표시 구간만 자름
@@ -983,7 +1029,12 @@ export default function BacktestChart() {
 
   const setMAWidth = (maId, width) => {
     setMaWidths(prev => ({ ...prev, [maId]: width }))
-    maSeriesRef.current[maId]?.applyOptions({ lineWidth: width })
+    if (isDualColor(maId)) {
+      maSeriesRef.current[maId + '_lime']?.applyOptions({ lineWidth: width })
+      maSeriesRef.current[maId + '_red']?.applyOptions({ lineWidth: width })
+    } else {
+      maSeriesRef.current[maId]?.applyOptions({ lineWidth: width })
+    }
   }
 
   const resetMAWidth = (ma) => {
@@ -992,30 +1043,82 @@ export default function BacktestChart() {
       delete next[ma.id]
       return next
     })
-    maSeriesRef.current[ma.id]?.applyOptions({ lineWidth: ma.lineWidth })
+    if (isDualColor(ma.id)) {
+      maSeriesRef.current[ma.id + '_lime']?.applyOptions({ lineWidth: ma.lineWidth })
+      maSeriesRef.current[ma.id + '_red']?.applyOptions({ lineWidth: ma.lineWidth })
+    } else {
+      maSeriesRef.current[ma.id]?.applyOptions({ lineWidth: ma.lineWidth })
+    }
   }
+
+  // DUAL_COLOR_IDS(리본 18개 + hma60) 전용 - 커스텀 안 골랐으면 RIBBON_LIME/RIBBON_RED 기본값
+  const getUpColor = (maId) => maUpColors[maId] || RIBBON_LIME
+  const getDownColor = (maId) => maDownColors[maId] || RIBBON_RED
+  const setUpColor = (maId, color) => {
+    setMaUpColors(prev => ({ ...prev, [maId]: color }))
+    maSeriesRef.current[maId + '_lime']?.applyOptions({ color })
+  }
+  const setDownColor = (maId, color) => {
+    setMaDownColors(prev => ({ ...prev, [maId]: color }))
+    maSeriesRef.current[maId + '_red']?.applyOptions({ color })
+  }
+  // 리본 카드의 "세트" 컬러피커 - 18개 선 전부의 상승/하락 색을 한번에 바꾼다
+  const setRibbonUpColor = (color) => { for (const ma of MADRID_RIBBON) setUpColor(ma.id, color) }
+  const setRibbonDownColor = (color) => { for (const ma of MADRID_RIBBON) setDownColor(ma.id, color) }
 
   const toggleMA = (maId) => {
     const turningOn = !enabledMA[maId]
     setEnabledMA(prev => ({ ...prev, [maId]: turningOn }))
+    const ma = ALL_MA.find(m => m.id === maId)
+    const dual = isDualColor(maId)
 
     if (turningOn) {
-      if (!maSeriesRef.current[maId] && chartRef.current) {
-        const ma = ALL_MA.find(m => m.id === maId)
-        const color = getMAColor(ma)
-        const width = getMAWidth(ma)
-        // 각 이평선마다 정의된(또는 커스텀) 굵기 + 실선/점선 스타일 그대로
-        maSeriesRef.current[maId] = chartRef.current.addSeries(LineSeries, {
-          color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
-        })
-        bumpMarkerLayer()
+      if (dual) {
+        if (!maSeriesRef.current[maId + '_lime'] && chartRef.current) {
+          const width = getMAWidth(ma)
+          maSeriesRef.current[maId + '_lime'] = chartRef.current.addSeries(LineSeries, {
+            color: getUpColor(maId), lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+          })
+          maSeriesRef.current[maId + '_red'] = chartRef.current.addSeries(LineSeries, {
+            color: getDownColor(maId), lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+          })
+          bumpMarkerLayer()
+        }
+        applyMAIndex(maId + '_lime', indexRef.current)
+        applyMAIndex(maId + '_red', indexRef.current)
+      } else {
+        if (!maSeriesRef.current[maId] && chartRef.current) {
+          const color = getMAColor(ma)
+          const width = getMAWidth(ma)
+          // 각 이평선마다 정의된(또는 커스텀) 굵기 + 실선/점선 스타일 그대로
+          maSeriesRef.current[maId] = chartRef.current.addSeries(LineSeries, {
+            color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
+          })
+          bumpMarkerLayer()
+        }
+        applyMAIndex(maId, indexRef.current)
       }
-      applyMAIndex(maId, indexRef.current)
     } else {
-      const s = maSeriesRef.current[maId]
-      if (s && chartRef.current) chartRef.current.removeSeries(s)
-      delete maSeriesRef.current[maId]
+      if (dual) {
+        for (const suffix of ['_lime', '_red']) {
+          const key = maId + suffix
+          const s = maSeriesRef.current[key]
+          if (s && chartRef.current) chartRef.current.removeSeries(s)
+          delete maSeriesRef.current[key]
+        }
+      } else {
+        const s = maSeriesRef.current[maId]
+        if (s && chartRef.current) chartRef.current.removeSeries(s)
+        delete maSeriesRef.current[maId]
+      }
     }
+  }
+
+  // 리본(MADRID_RIBBON) 18개를 한 세트로 묶어서 통째로 켜고 끈다 - toggleMA가 이미 dual-color를
+  // 알아서 처리하므로 id별로 반복 호출만 하면 된다.
+  const toggleRibbon = () => {
+    setRibbonEnabledState(prev => !prev)
+    for (const ma of MADRID_RIBBON) toggleMA(ma.id)
   }
 
   // RSI - 자기만의 pane(index는 동적으로 계산: 현재 pane 개수 = 맨 끝에 새 pane) - v5 진짜 pane API
@@ -1872,7 +1975,8 @@ export default function BacktestChart() {
               <CollapsibleCard title="이평선" maxWidth={170}>
                 {MOVING_AVERAGES.map(ma => {
                   const on = !!enabledMA[ma.id]
-                  const color = getMAColor(ma)
+                  const dual = isDualColor(ma.id)
+                  const color = dual ? getUpColor(ma.id) : getMAColor(ma)
                   const isCustomColor = !!maColors[ma.id]
                   const width = getMAWidth(ma)
                   const isCustomWidth = !!maWidths[ma.id]
@@ -1886,14 +1990,35 @@ export default function BacktestChart() {
                           style={{ width: 13, height: 13, margin: 0, accentColor: color, flexShrink: 0 }}
                         />
                         <span style={{ flex: 1 }}>{ma.label}</span>
-                        <input
-                          type="color"
-                          value={color}
-                          onClick={e => e.stopPropagation()}
-                          onChange={e => setMAColor(ma.id, e.target.value)}
-                          title="색상변경 가능"
-                          style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
-                        />
+                        {dual ? (
+                          <>
+                            <input
+                              type="color"
+                              value={getUpColor(ma.id)}
+                              onClick={e => e.stopPropagation()}
+                              onChange={e => setUpColor(ma.id, e.target.value)}
+                              title="상승 구간 색상"
+                              style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                            />
+                            <input
+                              type="color"
+                              value={getDownColor(ma.id)}
+                              onClick={e => e.stopPropagation()}
+                              onChange={e => setDownColor(ma.id, e.target.value)}
+                              title="하락 구간 색상"
+                              style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                            />
+                          </>
+                        ) : (
+                          <input
+                            type="color"
+                            value={color}
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => setMAColor(ma.id, e.target.value)}
+                            title="색상변경 가능"
+                            style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                          />
+                        )}
                       </label>
                       {on && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3 }}>
@@ -1912,7 +2037,7 @@ export default function BacktestChart() {
                               }}
                             >{w}</button>
                           ))}
-                          {isCustomColor && (
+                          {!dual && isCustomColor && (
                             <button
                               type="button"
                               onClick={() => resetMAColor(ma)}
@@ -1936,69 +2061,39 @@ export default function BacktestChart() {
               </CollapsibleCard>
 
               <CollapsibleCard title="리본" maxWidth={170}>
-                {MADRID_RIBBON.map(ma => {
-                  const on = !!enabledMA[ma.id]
-                  const color = getMAColor(ma)
-                  const isCustomColor = !!maColors[ma.id]
-                  const width = getMAWidth(ma)
-                  const isCustomWidth = !!maWidths[ma.id]
-                  return (
-                    <div key={ma.id} style={{ padding: '1px 0' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          onChange={() => toggleMA(ma.id)}
-                          style={{ width: 13, height: 13, margin: 0, accentColor: color, flexShrink: 0 }}
-                        />
-                        <span style={{ flex: 1 }}>{ma.label}</span>
-                        <input
-                          type="color"
-                          value={color}
-                          onClick={e => e.stopPropagation()}
-                          onChange={e => setMAColor(ma.id, e.target.value)}
-                          title="색상변경 가능"
-                          style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
-                        />
-                      </label>
-                      {on && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3 }}>
-                          {MA_WIDTHS.map(w => (
-                            <button
-                              key={w}
-                              type="button"
-                              onClick={() => setMAWidth(ma.id, w)}
-                              title={`굵기 ${w}`}
-                              style={{
-                                fontSize: 10, padding: '2px 6px', borderRadius: 5,
-                                border: `1px solid ${width === w ? color : '#2a2e38'}`,
-                                background: width === w ? `${color}22` : 'none',
-                                color: width === w ? color : '#5a5f6a',
-                                cursor: 'pointer',
-                              }}
-                            >{w}</button>
-                          ))}
-                          {isCustomColor && (
-                            <button
-                              type="button"
-                              onClick={() => resetMAColor(ma)}
-                              title="기본 색상으로"
-                              style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer', marginLeft: 'auto' }}
-                            >색↺</button>
-                          )}
-                          {isCustomWidth && (
-                            <button
-                              type="button"
-                              onClick={() => resetMAWidth(ma)}
-                              title="기본 굵기로"
-                              style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer' }}
-                            >굵↺</button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                <div style={{ padding: '1px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={ribbonEnabled}
+                      onChange={toggleRibbon}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: RIBBON_LIME, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>Madrid 리본(M5~M90)</span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                      상승
+                      <input
+                        type="color"
+                        value={getUpColor('madrid05')}
+                        onChange={e => setRibbonUpColor(e.target.value)}
+                        title="상승 구간 색상(리본 18개 전체 적용)"
+                        style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                      하락
+                      <input
+                        type="color"
+                        value={getDownColor('madrid05')}
+                        onChange={e => setRibbonDownColor(e.target.value)}
+                        title="하락 구간 색상(리본 18개 전체 적용)"
+                        style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                    </label>
+                  </div>
+                </div>
               </CollapsibleCard>
 
               <CollapsibleCard title="보조지표" maxWidth={170}>
