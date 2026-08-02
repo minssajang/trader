@@ -2076,7 +2076,7 @@ export default function BacktestChart() {
                       상승
                       <input
                         type="color"
-                        value={getDualUpColor('madrid_ribbon')}
+                        value={getDualUpColor('madrid05')}
                         onChange={e => setRibbonUpColor(e.target.value)}
                         title="상승 구간 색상(리본 18개 전체 적용)"
                         style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
@@ -2086,7 +2086,7 @@ export default function BacktestChart() {
                       하락
                       <input
                         type="color"
-                        value={getDualDownColor('madrid_ribbon')}
+                        value={getDualDownColor('madrid05')}
                         onChange={e => setRibbonDownColor(e.target.value)}
                         title="하락 구간 색상(리본 18개 전체 적용)"
                         style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
