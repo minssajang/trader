@@ -125,7 +125,7 @@ const SIDEWAYS_BAND_COLOR = '#FFEB3B' // 횡보 구간 배경 기본색(옅은 �
 // 세션 표시 전용(사용자 요청) - 차트 전체 높이를 채우는 BackgroundBandsPrimitive와 달리, 그 세션
 // 동안의 실제 고가/저가에 맞춰 점선 테두리 사각형만 그린다(안은 채우지 않음).
 class SessionBoxesPrimitive {
-  constructor(hexColor, fillAlpha) {
+  constructor(hexColor, fillAlpha, borderWidth = 1, borderAlpha = 1) {
     this._boxes = [] // [{fromIndex, toIndex, high, low}] - 시각(time) 대신 캔들 순번(logical index) 기준.
     // time 기준으로 좌표를 구하면 아직 화면에 안 그려진(재생 안 된) 캔들 시각은 timeToCoordinate가
     // null을 반환해서 좌표를 못 구하는데, logicalToCoordinate는 데이터가 실제로 그려졌는지와
@@ -133,8 +133,10 @@ class SessionBoxesPrimitive {
     this._chart = null
     this._series = null
     this._requestUpdate = null
-    this._hexColor = hexColor       // 테두리(항상 불투명) + 채우기(투명도 적용) 둘 다의 기본 색
-    this._fillAlpha = fillAlpha     // 안쪽 채우기 투명도(사용자 요청 - "선"이 아니라 "채우기"에 적용)
+    this._hexColor = hexColor       // 테두리 + 채우기 둘 다의 기본 색
+    this._fillAlpha = fillAlpha     // 안쪽 채우기 투명도("선"이 아니라 "채우기"에 적용)
+    this._borderWidth = borderWidth // 테두리 두께(px) - 세션 3개 공통
+    this._borderAlpha = borderAlpha // 테두리 투명도 - 세션 3개 공통
   }
   attached({ chart, series, requestUpdate }) {
     this._chart = chart
@@ -157,9 +159,9 @@ class SessionBoxesPrimitive {
             const hRatio = scope.horizontalPixelRatio
             const vRatio = scope.verticalPixelRatio
             ctx.save()
-            ctx.strokeStyle = this._hexColor
+            ctx.strokeStyle = hexToRgba(this._hexColor, this._borderAlpha)
             ctx.fillStyle = hexToRgba(this._hexColor, this._fillAlpha)
-            ctx.lineWidth = 1
+            ctx.lineWidth = this._borderWidth
             ctx.setLineDash([4, 3])
             for (const b of this._boxes) {
               const x1 = ts.logicalToCoordinate(b.fromIndex)
@@ -192,6 +194,14 @@ class SessionBoxesPrimitive {
   }
   setFillAlpha(alpha) {
     this._fillAlpha = alpha
+    this._requestUpdate?.()
+  }
+  setBorderWidth(width) {
+    this._borderWidth = width
+    this._requestUpdate?.()
+  }
+  setBorderAlpha(alpha) {
+    this._borderAlpha = alpha
     this._requestUpdate?.()
   }
 }
@@ -500,6 +510,9 @@ export default function BacktestChart() {
   const [sessionColors, setSessionColorsState] = useState(rs.sessionColors ?? Object.fromEntries(SESSIONS.map(s => [s.id, s.color])))
   const [sessionHours, setSessionHoursState] = useState(rs.sessionHours ?? Object.fromEntries(SESSIONS.map(s => [s.id, { start: s.startHour, end: s.endHour }]))) // 세션마다 독립 (사용자 요청)
   const [sessionOpacity, setSessionOpacityState] = useState(rs.sessionOpacity ?? 0.15) // 세션 3개 공통 투명도(사용자 요청 - 색은 따로, 투명도는 같이)
+  // 테두리 두께/투명도도 채우기 투명도와 같은 방식(세션 3개 공통) - 기본은 두께1/불투명(기존과 동일 외관)
+  const [sessionBorderWidth, setSessionBorderWidthState] = useState(rs.sessionBorderWidth ?? 1)
+  const [sessionBorderOpacity, setSessionBorderOpacityState] = useState(rs.sessionBorderOpacity ?? 1)
   // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
   const [maUpColors, setMaUpColors] = useState(rs.maUpColors ?? { hma60: '#00D5FF' }) // 3분 H 상승색 기본값(사용자 지정)
   const [maDownColors, setMaDownColors] = useState(rs.maDownColors ?? {})
@@ -727,7 +740,7 @@ export default function BacktestChart() {
     series.attachPrimitive(sidewaysBandRef.current)
 
     for (const s of SESSIONS) {
-      const p = new SessionBoxesPrimitive(sessionColors[s.id] || s.color, sessionOpacity)
+      const p = new SessionBoxesPrimitive(sessionColors[s.id] || s.color, sessionOpacity, sessionBorderWidth, sessionBorderOpacity)
       series.attachPrimitive(p)
       sessionBandRefs.current[s.id] = p
     }
@@ -1360,7 +1373,7 @@ export default function BacktestChart() {
         enabledMA, maColors, maWidths, maUpColors, maDownColors,
         ribbonEnabled, ribbonOpacity,
         sidewaysEnabled, sidewaysColor,
-        sessionEnabled, sessionColors, sessionHours, sessionOpacity,
+        sessionEnabled, sessionColors, sessionHours, sessionOpacity, sessionBorderWidth, sessionBorderOpacity,
         enabledRSI, rsiColor,
         enabledMACD, macdLineColor, macdSignalColor,
         enabledMACD5, macd5LineColor, macd5SignalColor,
@@ -1379,7 +1392,7 @@ export default function BacktestChart() {
     enabledMA, maColors, maWidths, maUpColors, maDownColors,
     ribbonEnabled, ribbonOpacity,
     sidewaysEnabled, sidewaysColor,
-    sessionEnabled, sessionColors, sessionHours, sessionOpacity,
+    sessionEnabled, sessionColors, sessionHours, sessionOpacity, sessionBorderWidth, sessionBorderOpacity,
     enabledRSI, rsiColor,
     enabledMACD, macdLineColor, macdSignalColor,
     enabledMACD5, macd5LineColor, macd5SignalColor,
@@ -1681,6 +1694,20 @@ export default function BacktestChart() {
     setSessionOpacityState(value)
     for (const s of SESSIONS) {
       sessionBandRefs.current[s.id]?.setFillAlpha(value)
+    }
+  }
+
+  // 테두리 두께/투명도도 채우기 투명도와 같은 패턴 - 세션 3개 공통
+  const setSessionBorderWidthValue = (value) => {
+    setSessionBorderWidthState(value)
+    for (const s of SESSIONS) {
+      sessionBandRefs.current[s.id]?.setBorderWidth(value)
+    }
+  }
+  const setSessionBorderOpacityValue = (value) => {
+    setSessionBorderOpacityState(value)
+    for (const s of SESSIONS) {
+      sessionBandRefs.current[s.id]?.setBorderAlpha(value)
     }
   }
 
@@ -2509,9 +2536,6 @@ export default function BacktestChart() {
                       style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
                     />
                   </label>
-                  <div style={{ marginTop: 4, fontSize: 10, color: '#5a5f6a', lineHeight: 1.4 }}>
-                    5분B 폭 &amp; 리본(M5-M90) 폭이 둘 다 로드된 구간 하위25%인 곳을 배경으로 표시
-                  </div>
                 </div>
               </CollapsibleCard>
 
@@ -2572,6 +2596,45 @@ export default function BacktestChart() {
                     type="range" min={0.05} max={1} step={0.05}
                     value={sessionOpacity}
                     onChange={e => setSessionOpacityValue(Number(e.target.value))}
+                    style={{ width: '100%', boxSizing: 'border-box', display: 'block', margin: 0 }}
+                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, marginBottom: 3, whiteSpace: 'nowrap' }}>
+                    <span>테두리 두께(공통)</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {MA_WIDTHS.map(w => (
+                      <button
+                        key={w}
+                        type="button"
+                        onClick={() => setSessionBorderWidthValue(w)}
+                        title={`두께 ${w}`}
+                        style={{
+                          fontSize: 10, padding: '2px 6px', borderRadius: 5,
+                          border: `1px solid ${sessionBorderWidth === w ? '#e8eaed' : '#2a2e38'}`,
+                          background: sessionBorderWidth === w ? '#e8eaed22' : 'none',
+                          color: sessionBorderWidth === w ? '#e8eaed' : '#5a5f6a',
+                          cursor: 'pointer',
+                        }}
+                      >{w}</button>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, marginBottom: 3, whiteSpace: 'nowrap' }}>
+                    <span>테두리 투명도(공통)</span>
+                    <input
+                      type="number" min={5} max={100} step={5}
+                      value={Math.round(sessionBorderOpacity * 100)}
+                      onChange={e => {
+                        const pct = Math.min(100, Math.max(5, Number(e.target.value) || 0))
+                        setSessionBorderOpacityValue(pct / 100)
+                      }}
+                      style={{ width: 36, fontSize: 10, background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 3px' }}
+                    />
+                    <span>%</span>
+                  </div>
+                  <input
+                    type="range" min={0.05} max={1} step={0.05}
+                    value={sessionBorderOpacity}
+                    onChange={e => setSessionBorderOpacityValue(Number(e.target.value))}
                     style={{ width: '100%', boxSizing: 'border-box', display: 'block', margin: 0 }}
                   />
                 </div>
