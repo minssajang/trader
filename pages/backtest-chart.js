@@ -457,10 +457,10 @@ export default function BacktestChart() {
       const width = maWidths[ma.id] || ma.lineWidth
       if (isDualColor(ma.id)) {
         maSeriesRef.current[ma.id + '_lime'] = chart.addSeries(LineSeries, {
-          color: maUpColors[ma.id] || RIBBON_LIME, lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+          color: maUpColors[ma.id] || RIBBON_LIME, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
         })
         maSeriesRef.current[ma.id + '_red'] = chart.addSeries(LineSeries, {
-          color: maDownColors[ma.id] || RIBBON_RED, lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+          color: maDownColors[ma.id] || RIBBON_RED, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
         })
       } else {
         const color = maColors[ma.id] || ma.color
@@ -1077,10 +1077,10 @@ export default function BacktestChart() {
         if (!maSeriesRef.current[maId + '_lime'] && chartRef.current) {
           const width = getMAWidth(ma)
           maSeriesRef.current[maId + '_lime'] = chartRef.current.addSeries(LineSeries, {
-            color: getDualUpColor(maId), lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+            color: getDualUpColor(maId), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
           })
           maSeriesRef.current[maId + '_red'] = chartRef.current.addSeries(LineSeries, {
-            color: getDualDownColor(maId), lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+            color: getDualDownColor(maId), lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
           })
           bumpMarkerLayer()
         }
