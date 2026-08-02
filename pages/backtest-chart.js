@@ -5,7 +5,11 @@ import { createChart, CrosshairMode, CandlestickSeries, LineSeries, HistogramSer
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
-import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, computeMA, rollingRSI, rollingMACD } from '../lib/indicators'
+import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, MADRID_RIBBON, computeMA, rollingRSI, rollingMACD } from '../lib/indicators'
+
+// 이평선 데이터 계산/토글 파이프라인(maDataRef/maSeriesRef/enabledMA 등)은 id로만 구분하므로
+// 리본도 같은 파이프라인을 공유한다 - 화면에서만 "리본" 카드로 따로 묶어서 보여준다(사용자 요청).
+const ALL_MA = [...MOVING_AVERAGES, ...MADRID_RIBBON]
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
@@ -417,7 +421,7 @@ export default function BacktestChart() {
         lower: chart.addSeries(LineSeries, { color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:lower`] !== false }),
       }
     }
-    for (const ma of MOVING_AVERAGES) {
+    for (const ma of ALL_MA) {
       if (!enabledMA[ma.id]) continue
       const color = maColors[ma.id] || ma.color
       const width = maWidths[ma.id] || ma.lineWidth
@@ -707,7 +711,7 @@ export default function BacktestChart() {
         bandDataRef.current = newBandData
 
         const newMaData = {}
-        for (const ma of MOVING_AVERAGES) {
+        for (const ma of ALL_MA) {
           const vals = computeMA(ma, closes)
           const points = []
           for (let i = startIdx; i < endIdx; i++) {
@@ -997,7 +1001,7 @@ export default function BacktestChart() {
 
     if (turningOn) {
       if (!maSeriesRef.current[maId] && chartRef.current) {
-        const ma = MOVING_AVERAGES.find(m => m.id === maId)
+        const ma = ALL_MA.find(m => m.id === maId)
         const color = getMAColor(ma)
         const width = getMAWidth(ma)
         // 각 이평선마다 정의된(또는 커스텀) 굵기 + 실선/점선 스타일 그대로
@@ -1458,7 +1462,7 @@ export default function BacktestChart() {
       }
     }
     const movingAverages = {}
-    for (const ma of MOVING_AVERAGES) {
+    for (const ma of ALL_MA) {
       const d = maDataRef.current[ma.id]
       if (!d) continue
       movingAverages[ma.id] = { label: ma.label, values: d.slice(0, idx).filter(Boolean) }
@@ -1867,6 +1871,72 @@ export default function BacktestChart() {
 
               <CollapsibleCard title="이평선" maxWidth={170}>
                 {MOVING_AVERAGES.map(ma => {
+                  const on = !!enabledMA[ma.id]
+                  const color = getMAColor(ma)
+                  const isCustomColor = !!maColors[ma.id]
+                  const width = getMAWidth(ma)
+                  const isCustomWidth = !!maWidths[ma.id]
+                  return (
+                    <div key={ma.id} style={{ padding: '1px 0' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() => toggleMA(ma.id)}
+                          style={{ width: 13, height: 13, margin: 0, accentColor: color, flexShrink: 0 }}
+                        />
+                        <span style={{ flex: 1 }}>{ma.label}</span>
+                        <input
+                          type="color"
+                          value={color}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => setMAColor(ma.id, e.target.value)}
+                          title="색상변경 가능"
+                          style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                        />
+                      </label>
+                      {on && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3 }}>
+                          {MA_WIDTHS.map(w => (
+                            <button
+                              key={w}
+                              type="button"
+                              onClick={() => setMAWidth(ma.id, w)}
+                              title={`굵기 ${w}`}
+                              style={{
+                                fontSize: 10, padding: '2px 6px', borderRadius: 5,
+                                border: `1px solid ${width === w ? color : '#2a2e38'}`,
+                                background: width === w ? `${color}22` : 'none',
+                                color: width === w ? color : '#5a5f6a',
+                                cursor: 'pointer',
+                              }}
+                            >{w}</button>
+                          ))}
+                          {isCustomColor && (
+                            <button
+                              type="button"
+                              onClick={() => resetMAColor(ma)}
+                              title="기본 색상으로"
+                              style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer', marginLeft: 'auto' }}
+                            >색↺</button>
+                          )}
+                          {isCustomWidth && (
+                            <button
+                              type="button"
+                              onClick={() => resetMAWidth(ma)}
+                              title="기본 굵기로"
+                              style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer' }}
+                            >굵↺</button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </CollapsibleCard>
+
+              <CollapsibleCard title="리본" maxWidth={170}>
+                {MADRID_RIBBON.map(ma => {
                   const on = !!enabledMA[ma.id]
                   const color = getMAColor(ma)
                   const isCustomColor = !!maColors[ma.id]
