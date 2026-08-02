@@ -1050,20 +1050,21 @@ export default function BacktestChart() {
     }
   }
 
-  // DUAL_COLOR_IDS(리본 18개 + hma60) 전용 - 커스텀 안 골랐으면 RIBBON_LIME/RIBBON_RED 기본값
-  const getUpColor = (maId) => maUpColors[maId] || RIBBON_LIME
-  const getDownColor = (maId) => maDownColors[maId] || RIBBON_RED
-  const setUpColor = (maId, color) => {
+  // DUAL_COLOR_IDS(리본 + hma60) 전용 - 커스텀 안 골랐으면 RIBBON_LIME/RIBBON_RED 기본값.
+  // 이름이 candle up/down색 설정 함수(setUpColor/setDownColor, 위쪽에 있음)랑 겹쳐서 Dual 접두어로 구분.
+  const getDualUpColor = (maId) => maUpColors[maId] || RIBBON_LIME
+  const getDualDownColor = (maId) => maDownColors[maId] || RIBBON_RED
+  const setDualUpColor = (maId, color) => {
     setMaUpColors(prev => ({ ...prev, [maId]: color }))
     maSeriesRef.current[maId + '_lime']?.applyOptions({ color })
   }
-  const setDownColor = (maId, color) => {
+  const setDualDownColor = (maId, color) => {
     setMaDownColors(prev => ({ ...prev, [maId]: color }))
     maSeriesRef.current[maId + '_red']?.applyOptions({ color })
   }
-  // 리본 카드의 "세트" 컬러피커 - 18개 선 전부의 상승/하락 색을 한번에 바꾼다
-  const setRibbonUpColor = (color) => { for (const ma of MADRID_RIBBON) setUpColor(ma.id, color) }
-  const setRibbonDownColor = (color) => { for (const ma of MADRID_RIBBON) setDownColor(ma.id, color) }
+  // 리본 카드의 "세트" 컬러피커 - 리본 선 전부의 상승/하락 색을 한번에 바꾼다
+  const setRibbonUpColor = (color) => { for (const ma of MADRID_RIBBON) setDualUpColor(ma.id, color) }
+  const setRibbonDownColor = (color) => { for (const ma of MADRID_RIBBON) setDualDownColor(ma.id, color) }
 
   const toggleMA = (maId) => {
     const turningOn = !enabledMA[maId]
@@ -1076,10 +1077,10 @@ export default function BacktestChart() {
         if (!maSeriesRef.current[maId + '_lime'] && chartRef.current) {
           const width = getMAWidth(ma)
           maSeriesRef.current[maId + '_lime'] = chartRef.current.addSeries(LineSeries, {
-            color: getUpColor(maId), lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+            color: getDualUpColor(maId), lineWidth: width, lastValueVisible: false, priceLineVisible: false,
           })
           maSeriesRef.current[maId + '_red'] = chartRef.current.addSeries(LineSeries, {
-            color: getDownColor(maId), lineWidth: width, lastValueVisible: false, priceLineVisible: false,
+            color: getDualDownColor(maId), lineWidth: width, lastValueVisible: false, priceLineVisible: false,
           })
           bumpMarkerLayer()
         }
@@ -1975,7 +1976,7 @@ export default function BacktestChart() {
                 {MOVING_AVERAGES.map(ma => {
                   const on = !!enabledMA[ma.id]
                   const dual = isDualColor(ma.id)
-                  const color = dual ? getUpColor(ma.id) : getMAColor(ma)
+                  const color = dual ? getDualUpColor(ma.id) : getMAColor(ma)
                   const isCustomColor = !!maColors[ma.id]
                   const width = getMAWidth(ma)
                   const isCustomWidth = !!maWidths[ma.id]
@@ -1993,17 +1994,17 @@ export default function BacktestChart() {
                           <>
                             <input
                               type="color"
-                              value={getUpColor(ma.id)}
+                              value={getDualUpColor(ma.id)}
                               onClick={e => e.stopPropagation()}
-                              onChange={e => setUpColor(ma.id, e.target.value)}
+                              onChange={e => setDualUpColor(ma.id, e.target.value)}
                               title="상승 구간 색상"
                               style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
                             />
                             <input
                               type="color"
-                              value={getDownColor(ma.id)}
+                              value={getDualDownColor(ma.id)}
                               onClick={e => e.stopPropagation()}
-                              onChange={e => setDownColor(ma.id, e.target.value)}
+                              onChange={e => setDualDownColor(ma.id, e.target.value)}
                               title="하락 구간 색상"
                               style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
                             />
@@ -2075,7 +2076,7 @@ export default function BacktestChart() {
                       상승
                       <input
                         type="color"
-                        value={getUpColor('madrid_ribbon')}
+                        value={getDualUpColor('madrid_ribbon')}
                         onChange={e => setRibbonUpColor(e.target.value)}
                         title="상승 구간 색상(리본 18개 전체 적용)"
                         style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
@@ -2085,7 +2086,7 @@ export default function BacktestChart() {
                       하락
                       <input
                         type="color"
-                        value={getDownColor('madrid_ribbon')}
+                        value={getDualDownColor('madrid_ribbon')}
                         onChange={e => setRibbonDownColor(e.target.value)}
                         title="하락 구간 색상(리본 18개 전체 적용)"
                         style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
