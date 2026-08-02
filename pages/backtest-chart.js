@@ -252,6 +252,12 @@ function findSessionSegmentsIn(rows, startHour, endHour) {
 // 구조적으로 이중선이 생길 수 없다.
 const RIBBON_LIME = '#00FF00'
 const RIBBON_RED = '#FF0000'
+// DUAL_COLOR_IDS 중 "원래 단색이 있던" 것들의 상승/하락 기본 색상 - maUpColors/maDownColors에
+// 커스텀 값이 없을 때 RIBBON_LIME/RIBBON_RED 대신 여기서 먼저 찾는다(getDualUpColor/getDualDownColor).
+// 3분H(#00D5FF)/5분H(#FF9800, 원래 단색이던 오렌지)는 사용자 지정, W(wma) 3개는 "색은 원래대로,
+// 구조만 dual"이라는 요청이라 상승/하락 둘 다 원래 단색 그대로 넣어둠.
+const DUAL_DEFAULT_UP_COLOR = { hma60: '#00D5FF', hma100: '#FF9800', wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
+const DUAL_DEFAULT_DOWN_COLOR = { wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
 // 리본 18개 + "3분/5분/15분 H"(hma60/hma100/hma300, 사용자 요청) - 이 id들은 단색 대신
 // 상승/하락 두 색으로 동적 렌더링한다.
 const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60', 'hma100', 'hma300', 'wma17_1m', 'wma17_5m', 'wma4_1h'])
@@ -577,17 +583,14 @@ export default function BacktestChart() {
   // 테두리 두께/투명도도 채우기 투명도와 같은 방식(세션 3개 공통) - 기본은 두께1/불투명(기존과 동일 외관)
   const [sessionBorderWidth, setSessionBorderWidthState] = useState(rs.sessionBorderWidth ?? 1)
   const [sessionBorderOpacity, setSessionBorderOpacityState] = useState(rs.sessionBorderOpacity ?? 1)
-  // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
-  // 3분H 상승색(#00D5FF)/5분H 상승색(#FF9800, 원래 단색이던 오렌지 유지)은 사용자 지정 기본값.
-  // W(wma) 3개는 dual-color로 바뀌어도 상승/하락 색을 똑같이(원래 단색 그대로) 맞춰달라는 요청이라
-  // 두 state 모두에 같은 색을 넣어둠 - 구조는 dual이지만 방향과 무관하게 항상 원래 색으로 보임.
-  const [maUpColors, setMaUpColors] = useState(rs.maUpColors ?? {
-    hma60: '#00D5FF', hma100: '#FF9800',
-    wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B',
-  })
-  const [maDownColors, setMaDownColors] = useState(rs.maDownColors ?? {
-    wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B',
-  })
+  // DUAL_COLOR_IDS(리본 18개 + hma60/hma100/hma300/W3개)의 상승/하락 색 - maId -> 커스텀 색.
+  // 기본값은 여기 useState 초기값이 아니라 DUAL_DEFAULT_UP_COLOR/DOWN_COLOR(모듈 상수, getDualUpColor/
+  // getDualDownColor에서 조회)에 둔다 - localStorage에 예전 세션에서 저장해둔 maUpColors/maDownColors가
+  // 있으면 그 객체가 통째로 복원되면서(스프레드가 아니라 rs.maUpColors ?? {...} 형태라) 여기서 새로
+  // 추가한 키가 씹혀버리는 버그가 있었음(5분H 오렌지/W3개 원래색이 리본 기본색인 라임/레드로 바뀌어
+  // 보였음 - 사용자 지적). 기본값을 읽기 시점 조회로 옮기면 이 문제가 구조적으로 안 생긴다.
+  const [maUpColors, setMaUpColors] = useState(rs.maUpColors ?? {})
+  const [maDownColors, setMaDownColors] = useState(rs.maDownColors ?? {})
   // RSI/MACD - 기간은 표준값(14 / 12,26,9)으로 고정, 색상만 커스터마이징 가능. 기본은 꺼짐(체크해야 나옴)
   const [enabledRSI, setEnabledRSI] = useState(rs.enabledRSI ?? false)
   const [rsiColor, setRsiColorState] = useState(rs.rsiColor ?? DEFAULT_RSI_COLOR)
@@ -836,7 +839,7 @@ export default function BacktestChart() {
       if (isDualColor(ma.id)) {
         const alpha = isRibbonId(ma.id) ? ribbonOpacity : 1
         const p = new DualColorLinePrimitive(
-          maUpColors[ma.id] || RIBBON_LIME, maDownColors[ma.id] || RIBBON_RED, alpha, width, ma.lineStyle,
+          getDualUpColor(ma.id), getDualDownColor(ma.id), alpha, width, ma.lineStyle,
         )
         series.attachPrimitive(p)
         maDualPrimitiveRef.current[ma.id] = p
@@ -1643,8 +1646,8 @@ export default function BacktestChart() {
   // 이름이 candle up/down색 설정 함수(setUpColor/setDownColor, 위쪽에 있음)랑 겹쳐서 Dual 접두어로 구분.
   // DualColorLinePrimitive는 hex 원색 + 투명도를 따로 들고 있다가 그릴 때 합치므로, 여기선 항상
   // hex 원색만 넘긴다(투명도가 섞인 rgba를 저장/전달하지 않음).
-  const getDualUpColor = (maId) => maUpColors[maId] || RIBBON_LIME
-  const getDualDownColor = (maId) => maDownColors[maId] || RIBBON_RED
+  const getDualUpColor = (maId) => maUpColors[maId] || DUAL_DEFAULT_UP_COLOR[maId] || RIBBON_LIME
+  const getDualDownColor = (maId) => maDownColors[maId] || DUAL_DEFAULT_DOWN_COLOR[maId] || RIBBON_RED
   const setDualUpColor = (maId, color) => {
     setMaUpColors(prev => ({ ...prev, [maId]: color }))
     maDualPrimitiveRef.current[maId]?.setUpColor(color)
