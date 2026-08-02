@@ -233,7 +233,7 @@ export default function BacktestChart() {
   // 리본(Madrid) - MACD처럼 체크박스 하나가 켜고 끄는 세트(사용자 요청).
   const [ribbonEnabled, setRibbonEnabledState] = useState(false)
   // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
-  const [maUpColors, setMaUpColors] = useState({})
+  const [maUpColors, setMaUpColors] = useState({ hma60: '#00D5FF' }) // 3분 H 상승색 기본값(사용자 지정)
   const [maDownColors, setMaDownColors] = useState({})
   // RSI/MACD - 기간은 표준값(14 / 12,26,9)으로 고정, 색상만 커스터마이징 가능. 기본은 꺼짐(체크해야 나옴)
   const [enabledRSI, setEnabledRSI] = useState(false)
