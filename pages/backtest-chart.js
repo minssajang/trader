@@ -11,6 +11,58 @@ import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, MADRID_RIBBON, comp
 // 리본도 같은 파이프라인을 공유한다 - 화면에서만 "리본" 카드로 따로 묶어서 보여준다(사용자 요청).
 const ALL_MA = [...MOVING_AVERAGES, ...MADRID_RIBBON]
 
+// 리본 가장 바깥선(M5-M90) 폭이 "지금까지 관측된 것 중" 가장 크게 벌어진/좁아진 지점에 세로선(사용자
+// 요청). lightweight-charts엔 세로선 기본 기능이 없어서 캔버스에 직접 그리는 프리미티브를 새로 만든다
+// (v5 attachPrimitive/paneViews 방식). 새로운 최대/최소가 나오면 setTime으로 위치만 옮겨서 다시 그림.
+class VerticalLinePrimitive {
+  constructor(color) {
+    this._time = null
+    this._chart = null
+    this._requestUpdate = null
+    this._color = color
+  }
+  attached({ chart, requestUpdate }) {
+    this._chart = chart
+    this._requestUpdate = requestUpdate
+  }
+  detached() {
+    this._chart = null
+  }
+  updateAllViews() {}
+  paneViews() {
+    return [{
+      renderer: () => ({
+        draw: (target) => {
+          if (this._time == null || !this._chart) return
+          const x = this._chart.timeScale().timeToCoordinate(this._time)
+          if (x == null) return
+          target.useBitmapCoordinateSpace((scope) => {
+            const ctx = scope.context
+            const ratio = scope.horizontalPixelRatio
+            const px = Math.round(x * ratio) + 0.5
+            ctx.save()
+            ctx.strokeStyle = this._color
+            ctx.lineWidth = 1
+            ctx.setLineDash([4, 3])
+            ctx.beginPath()
+            ctx.moveTo(px, 0)
+            ctx.lineTo(px, scope.bitmapSize.height)
+            ctx.stroke()
+            ctx.restore()
+          })
+        },
+      }),
+    }]
+  }
+  setTime(time) {
+    if (this._time === time) return
+    this._time = time
+    this._requestUpdate?.()
+  }
+}
+const MAX_SPREAD_LINE_COLOR = '#FFEB3B' // 가장 크게 벌어진 지점(노랑)
+const MIN_SPREAD_LINE_COLOR = '#00E5FF' // 가장 좁게 뭉친 지점(하늘)
+
 // 리본 전용 - 오를 땐 라임/내릴 땐 레드로(Madrid 원본 색, 사용자 요청 "트레이딩뷰처럼").
 // lightweight-charts는 선 하나 안에서 구간별 색을 못 바꾸므로, 선마다 상승구간 시리즈(라임)와
 // 하락구간 시리즈(레드) 둘로 쪼개서 겹쳐 그린다. 색이 바뀌는 경계에서는 두 시리즈 모두에 그
@@ -332,6 +384,12 @@ export default function BacktestChart() {
   const seriesRef = useRef(null)
   const markerSeriesRef = useRef(null) // 투명 라인 시리즈 - 마커 전용. 다른 라인이 새로 추가될 때마다 지웠다 다시 만들어서 항상 맨 위(가장 나중에 추가된 시리즈)에 오게 함
   const markersPrimitiveRef = useRef(null) // v5: series.setMarkers() 대신 createSeriesMarkers(series, markers)가 반환하는 primitive를 씀
+  // 리본 외곽선(M5-M90) 폭이 "확정된" 국소 고점/저점 중 지금까지 최댓값/최솟값일 때만 세로선 위치를 옮김(방식 B, 사용자 요청)
+  const maxSpreadLineRef = useRef(null)   // VerticalLinePrimitive 인스턴스(노랑, 발산 최대)
+  const minSpreadLineRef = useRef(null)   // VerticalLinePrimitive 인스턴스(하늘, 수축 최소)
+  const maxSpreadRef = useRef({ time: null, value: -Infinity })
+  const minSpreadRef = useRef({ time: null, value: Infinity })
+  const swingStateRef = useRef({ prevSpread: null, direction: null, legExtreme: null }) // 지그재그 스윙 탐지용 진행 상태
   const rowsRef = useRef([])
   const intervalRef = useRef(null)
   const indexRef = useRef(0)
@@ -454,6 +512,11 @@ export default function BacktestChart() {
     chartRef.current = chart
     seriesRef.current = series
 
+    maxSpreadLineRef.current = new VerticalLinePrimitive(MAX_SPREAD_LINE_COLOR)
+    minSpreadLineRef.current = new VerticalLinePrimitive(MIN_SPREAD_LINE_COLOR)
+    series.attachPrimitive(maxSpreadLineRef.current)
+    series.attachPrimitive(minSpreadLineRef.current)
+
     // 기본으로 켜둔 볼린저/이평선은 toggleBand/toggleMA(클릭했을 때만 시리즈를 만듦)를 거치지 않으므로,
     // 마운트 시점에 켜져 있는 것들의 실제 차트 시리즈를 여기서 직접 만들어둔다.
     // (마커 시리즈는 항상 "가장 나중에 추가된 것 = 맨 위"여야 하므로 이 시리즈들보다 뒤에 만든다)
@@ -529,6 +592,66 @@ export default function BacktestChart() {
 
   const syncMA = (idx) => {
     Object.keys(maSeriesRef.current).forEach(maId => applyMAIndex(maId, idx))
+  }
+
+  // 리본 가장 바깥선(M5-M90, madrid05/madrid90) 폭 - 세로선용. 리본 체크와 무관하게 maDataRef엔 항상 계산돼 있음.
+  const spreadAt = (i) => {
+    const m5 = maDataRef.current['madrid05']
+    const m90 = maDataRef.current['madrid90']
+    if (!m5 || !m90) return null
+    const a = m5[i], b = m90[i]
+    if (!a || !b) return null
+    return { value: Math.abs(b.value - a.value), time: a.time }
+  }
+
+  // 지그재그 스윙 탐지(방식 B) - 확장→수축으로 꺾이는 순간 직전 구간의 최댓값이 "확정된 국소 고점",
+  // 수축→확장으로 꺾이는 순간 직전 구간의 최솟값이 "확정된 국소 저점". 그게 지금까지 기록보다
+  // 크면(작으면)만 세로선을 그 자리로 옮긴다. state는 호출 사이에 이어서 쓰는 진행 상태(swingStateRef).
+  const scanSpreadSwings = (fromIdx, toIdx, state) => {
+    for (let i = fromIdx; i < toIdx; i++) {
+      const s = spreadAt(i)
+      if (!s) continue
+      if (state.prevSpread == null) {
+        state.prevSpread = s.value
+        state.direction = null
+        state.legExtreme = s
+        continue
+      }
+      if (s.value >= state.prevSpread) {
+        if (state.direction === 'down') {
+          if (state.legExtreme.value < minSpreadRef.current.value) {
+            minSpreadRef.current = state.legExtreme
+            minSpreadLineRef.current?.setTime(state.legExtreme.time)
+          }
+          state.legExtreme = s
+        } else if (s.value > state.legExtreme.value) {
+          state.legExtreme = s
+        }
+        state.direction = 'up'
+      } else {
+        if (state.direction === 'up') {
+          if (state.legExtreme.value > maxSpreadRef.current.value) {
+            maxSpreadRef.current = state.legExtreme
+            maxSpreadLineRef.current?.setTime(state.legExtreme.time)
+          }
+          state.legExtreme = s
+        } else if (s.value < state.legExtreme.value) {
+          state.legExtreme = s
+        }
+        state.direction = 'down'
+      }
+      state.prevSpread = s.value
+    }
+  }
+
+  // 재생 위치를 임의로 옮길 때(슬라이더 스크럽 등)는 처음부터 다시 스캔해야 한다(되감기일 수 있어서)
+  const recomputeSpreadExtremes = (idx) => {
+    swingStateRef.current = { prevSpread: null, direction: null, legExtreme: null }
+    maxSpreadRef.current = { time: null, value: -Infinity }
+    minSpreadRef.current = { time: null, value: Infinity }
+    scanSpreadSwings(0, idx, swingStateRef.current)
+    maxSpreadLineRef.current?.setTime(maxSpreadRef.current.time)
+    minSpreadLineRef.current?.setTime(minSpreadRef.current.time)
   }
 
   // RSI/MACD도 재생 위치(idx)를 앞서가면 안 되는 건 볼린저/이평선과 동일
@@ -622,12 +745,14 @@ export default function BacktestChart() {
     syncMACD(idx)
     syncMACD5(idx)
     applyAllMarkers(idx)
+    if (ribbonEnabled) recomputeSpreadExtremes(idx) // 슬라이더로 임의 위치 이동 - 되감기일 수 있어 처음부터 재스캔
     indexRef.current = idx
     setPlayIndex(idx)
   }
 
   // 캔들을 하나씩 update()로 이어붙이는 게 setData 전체 재계산보다 가볍다
   const applyIncrement = (from, to) => {
+    if (ribbonEnabled) scanSpreadSwings(from, to, swingStateRef.current) // 재생은 항상 앞으로만 가므로 이어서 스캔
     const rows = rowsRef.current
     for (let i = from; i < to; i++) {
       seriesRef.current?.update(rows[i])
@@ -1143,8 +1268,16 @@ export default function BacktestChart() {
   // 리본(MADRID_RIBBON) 18개를 한 세트로 묶어서 통째로 켜고 끈다 - toggleMA가 이미 dual-color를
   // 알아서 처리하므로 id별로 반복 호출만 하면 된다.
   const toggleRibbon = () => {
-    setRibbonEnabledState(prev => !prev)
+    const turningOn = !ribbonEnabled
+    setRibbonEnabledState(turningOn)
     for (const ma of MADRID_RIBBON) toggleMA(ma.id)
+    // 발산 최대/수축 최소 세로선도 리본 체크와 같이 켜고 끈다
+    if (turningOn) {
+      recomputeSpreadExtremes(indexRef.current)
+    } else {
+      maxSpreadLineRef.current?.setTime(null)
+      minSpreadLineRef.current?.setTime(null)
+    }
   }
 
   // RSI - 자기만의 pane(index는 동적으로 계산: 현재 pane 개수 = 맨 끝에 새 pane) - v5 진짜 pane API
