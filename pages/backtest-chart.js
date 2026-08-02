@@ -230,8 +230,7 @@ export default function BacktestChart() {
   const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
   // 기본 셋팅 - 위 6개 이평선 전부 두께 3
   const [maWidths, setMaWidths] = useState({ hma60: 3, hma100: 3, hma300: 3, wma17_1m: 3, wma17_5m: 3, wma4_1h: 3 }) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
-  // 리본(Madrid, M5~M90)은 18개 선을 하나하나 켜고 끄지 않고 통째로 한 세트로 취급한다(사용자 요청) -
-  // 체크박스 하나로 MADRID_RIBBON 전체를 한번에 토글.
+  // 리본(Madrid) - MACD처럼 체크박스 하나가 켜고 끄는 세트(사용자 요청).
   const [ribbonEnabled, setRibbonEnabledState] = useState(false)
   // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
   const [maUpColors, setMaUpColors] = useState({})
@@ -2069,14 +2068,14 @@ export default function BacktestChart() {
                       onChange={toggleRibbon}
                       style={{ width: 13, height: 13, margin: 0, accentColor: RIBBON_LIME, flexShrink: 0 }}
                     />
-                    <span style={{ flex: 1 }}>Madrid 리본(M5~M90)</span>
+                    <span style={{ flex: 1 }}>리본</span>
                   </label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
                       상승
                       <input
                         type="color"
-                        value={getUpColor('madrid05')}
+                        value={getUpColor('madrid_ribbon')}
                         onChange={e => setRibbonUpColor(e.target.value)}
                         title="상승 구간 색상(리본 18개 전체 적용)"
                         style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
@@ -2086,7 +2085,7 @@ export default function BacktestChart() {
                       하락
                       <input
                         type="color"
-                        value={getDownColor('madrid05')}
+                        value={getDownColor('madrid_ribbon')}
                         onChange={e => setRibbonDownColor(e.target.value)}
                         title="하락 구간 색상(리본 18개 전체 적용)"
                         style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
