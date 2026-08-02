@@ -252,8 +252,9 @@ function findSessionSegmentsIn(rows, startHour, endHour) {
 // 구조적으로 이중선이 생길 수 없다.
 const RIBBON_LIME = '#00FF00'
 const RIBBON_RED = '#FF0000'
-// 리본 18개 + "3분 H"(hma60, 사용자 요청) - 이 id들은 단색 대신 상승/하락 두 색으로 동적 렌더링한다.
-const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60'])
+// 리본 18개 + "3분/5분/15분 H"(hma60/hma100/hma300, 사용자 요청) - 이 id들은 단색 대신
+// 상승/하락 두 색으로 동적 렌더링한다.
+const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60', 'hma100', 'hma300'])
 const isDualColor = (maId) => DUAL_COLOR_IDS.has(maId)
 const RIBBON_IDS = new Set(MADRID_RIBBON.map(m => m.id))
 const isRibbonId = (maId) => RIBBON_IDS.has(maId)
@@ -269,8 +270,19 @@ function hexToRgba(hex, alpha) {
 // bandDataRef/maDataRef가 쓰는 것과 동일한 인덱싱. logicalToCoordinate(i)로 좌표를 구해서
 // (SessionBoxesPrimitive와 같은 이유 - 아직 재생 안 된 시각도 timeToCoordinate보다 안전) i-1→i
 // 구간마다 상승/하락 색으로 선분 하나씩 그린다.
+// lineStyle: lightweight-charts LineStyle 값 그대로(0=실선, 1=점(dot), 2=대시, 3=긴대시, 4=성긴점).
+// 점(dot)은 대시 배열을 [두께, 간격]으로 아주 짧게 주고 lineCap을 round로 해서 각 조각이 동그란
+// 점처럼 보이게 만드는 흔한 캔버스 트릭 - lightweight-charts 내장 Dotted 스타일과 같은 방식.
+function dashPatternForStyle(lineStyle, lineWidth, hRatio) {
+  const w = lineWidth * hRatio
+  if (lineStyle === 1) return [w, w * 2]           // 점(dot)
+  if (lineStyle === 2) return [6 * hRatio, 4 * hRatio] // 대시
+  if (lineStyle === 3) return [12 * hRatio, 6 * hRatio] // 긴 대시
+  if (lineStyle === 4) return [w, w * 4]           // 성긴 점
+  return [] // 0 = 실선
+}
 class DualColorLinePrimitive {
-  constructor(upHex, downHex, alpha, lineWidth, dashed) {
+  constructor(upHex, downHex, alpha, lineWidth, lineStyle) {
     this._points = []
     this._chart = null
     this._series = null
@@ -279,7 +291,7 @@ class DualColorLinePrimitive {
     this._downHex = downHex
     this._alpha = alpha
     this._lineWidth = lineWidth
-    this._dashed = dashed
+    this._lineStyle = lineStyle
   }
   attached({ chart, series, requestUpdate }) {
     this._chart = chart
@@ -305,7 +317,7 @@ class DualColorLinePrimitive {
             ctx.lineWidth = this._lineWidth
             ctx.lineJoin = 'round'
             ctx.lineCap = 'round'
-            if (this._dashed) ctx.setLineDash([6 * hRatio, 4 * hRatio])
+            ctx.setLineDash(dashPatternForStyle(this._lineStyle, this._lineWidth, hRatio))
             for (let i = 1; i < this._points.length; i++) {
               const p0 = this._points[i - 1], p1 = this._points[i]
               if (p0 == null || p1 == null) continue
@@ -816,7 +828,7 @@ export default function BacktestChart() {
       if (isDualColor(ma.id)) {
         const alpha = isRibbonId(ma.id) ? ribbonOpacity : 1
         const p = new DualColorLinePrimitive(
-          maUpColors[ma.id] || RIBBON_LIME, maDownColors[ma.id] || RIBBON_RED, alpha, width, ma.lineStyle === 2,
+          maUpColors[ma.id] || RIBBON_LIME, maDownColors[ma.id] || RIBBON_RED, alpha, width, ma.lineStyle,
         )
         series.attachPrimitive(p)
         maDualPrimitiveRef.current[ma.id] = p
@@ -1655,7 +1667,7 @@ export default function BacktestChart() {
         if (!maDualPrimitiveRef.current[maId] && seriesRef.current) {
           const width = getMAWidth(ma)
           const alpha = isRibbonId(maId) ? ribbonOpacity : 1
-          const p = new DualColorLinePrimitive(getDualUpColor(maId), getDualDownColor(maId), alpha, width, ma.lineStyle === 2)
+          const p = new DualColorLinePrimitive(getDualUpColor(maId), getDualDownColor(maId), alpha, width, ma.lineStyle)
           seriesRef.current.attachPrimitive(p)
           maDualPrimitiveRef.current[maId] = p
         }
