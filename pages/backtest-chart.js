@@ -122,6 +122,72 @@ class BackgroundBandsPrimitive {
 }
 const SIDEWAYS_BAND_COLOR = '#FFEB3B' // 횡보 구간 배경 기본색(옅은 노랑) - 알파는 적용할 때 따로 낮춤
 
+// 세션 표시 전용(사용자 요청) - 차트 전체 높이를 채우는 BackgroundBandsPrimitive와 달리, 그 세션
+// 동안의 실제 고가/저가에 맞춰 점선 테두리 사각형만 그린다(안은 채우지 않음).
+class SessionBoxesPrimitive {
+  constructor(strokeColor) {
+    this._boxes = [] // [{fromIndex, toIndex, high, low}] - 시각(time) 대신 캔들 순번(logical index) 기준.
+    // time 기준으로 좌표를 구하면 아직 화면에 안 그려진(재생 안 된) 캔들 시각은 timeToCoordinate가
+    // null을 반환해서 좌표를 못 구하는데, logicalToCoordinate는 데이터가 실제로 그려졌는지와
+    // 무관하게 순번만으로 위치를 계산해줘서 항상 정확한 자리에 그려진다(사용자가 찾아낸 버그 수정).
+    this._chart = null
+    this._series = null
+    this._requestUpdate = null
+    this._strokeColor = strokeColor
+  }
+  attached({ chart, series, requestUpdate }) {
+    this._chart = chart
+    this._series = series
+    this._requestUpdate = requestUpdate
+  }
+  detached() {
+    this._chart = null
+    this._series = null
+  }
+  updateAllViews() {}
+  paneViews() {
+    return [{
+      renderer: () => ({
+        draw: (target) => {
+          if (!this._chart || !this._series || !this._boxes.length) return
+          const ts = this._chart.timeScale()
+          target.useBitmapCoordinateSpace((scope) => {
+            const ctx = scope.context
+            const hRatio = scope.horizontalPixelRatio
+            const vRatio = scope.verticalPixelRatio
+            ctx.save()
+            ctx.strokeStyle = this._strokeColor
+            ctx.lineWidth = 1
+            ctx.setLineDash([4, 3])
+            for (const b of this._boxes) {
+              const x1 = ts.logicalToCoordinate(b.fromIndex)
+              const x2 = ts.logicalToCoordinate(b.toIndex)
+              if (x1 == null || x2 == null) continue
+              const yHigh = this._series.priceToCoordinate(b.high)
+              const yLow = this._series.priceToCoordinate(b.low)
+              if (yHigh == null || yLow == null) continue
+              const left = Math.min(x1, x2) * hRatio
+              const right = Math.max(x1, x2) * hRatio
+              const top = Math.min(yHigh, yLow) * vRatio
+              const bottom = Math.max(yHigh, yLow) * vRatio
+              ctx.strokeRect(left, top, Math.max(1, right - left), Math.max(1, bottom - top))
+            }
+            ctx.restore()
+          })
+        },
+      }),
+    }]
+  }
+  setBoxes(boxes) {
+    this._boxes = boxes
+    this._requestUpdate?.()
+  }
+  setStrokeColor(color) {
+    this._strokeColor = color
+    this._requestUpdate?.()
+  }
+}
+
 // 세션 표시(사용자가 공유한 Pine 스크립트에서 세션 부분만 분리, 사용자 요청) - 시작/종료 시각은
 // 한국시간(KST) 기준이고, 이 차트의 시간 라벨이 이미 KST와 동일(SESSION_OPENS 주석 참고)이라
 // 그대로 쓴다. endHour <= startHour면 자정을 넘어가는 세션(뉴욕: 21시~다음날 5시).
@@ -146,7 +212,14 @@ function findSessionSegmentsIn(rows, startHour, endHour) {
     if (!inSession && segStart != null) { segs.push({ startIdx: segStart, endIdx: i - 1 }); segStart = null }
   }
   if (segStart != null) segs.push({ startIdx: segStart, endIdx: rows.length - 1 })
-  return segs.map(seg => ({ ...seg, startTime: rows[seg.startIdx].time, endTime: rows[seg.endIdx].time }))
+  return segs.map(seg => {
+    let high = -Infinity, low = Infinity
+    for (let i = seg.startIdx; i <= seg.endIdx; i++) {
+      if (rows[i].high > high) high = rows[i].high
+      if (rows[i].low < low) low = rows[i].low
+    }
+    return { ...seg, startTime: rows[seg.startIdx].time, endTime: rows[seg.endIdx].time, high, low }
+  })
 }
 
 // 리본 전용 - 오를 땐 라임/내릴 땐 레드로(Madrid 원본 색, 사용자 요청 "트레이딩뷰처럼").
@@ -619,7 +692,7 @@ export default function BacktestChart() {
     series.attachPrimitive(sidewaysBandRef.current)
 
     for (const s of SESSIONS) {
-      const p = new BackgroundBandsPrimitive(hexToRgba(sessionColors[s.id] || s.color, sessionOpacity))
+      const p = new SessionBoxesPrimitive(hexToRgba(sessionColors[s.id] || s.color, sessionOpacity))
       series.attachPrimitive(p)
       sessionBandRefs.current[s.id] = p
     }
@@ -774,20 +847,22 @@ export default function BacktestChart() {
     sidewaysBandRef.current?.setRanges(ranges)
   }
 
-  // 세션 배경도 횡보와 같은 방식 - 켜져 있는 세션만 재생 위치(idx)까지 잘라서 적용
+  // 세션 배경 - 캔들이 아직 안 그려진(재생 안 된) 곳엔 미리 그리면 안 된다(사용자 지적) - 횡보와
+  // 같은 방식으로 재생 위치(idx)까지 그려진 캔들 범위 안에서만 자라난다. index 기준으로 잘라서
+  // 넘기면(fromIndex/toIndex) logicalToCoordinate가 항상 정확한 자리를 계산해준다.
   const applySessionBands = (idx) => {
     for (const session of SESSIONS) {
       const primitive = sessionBandRefs.current[session.id]
       if (!primitive) continue
-      if (!sessionEnabled[session.id]) { primitive.setRanges([]); continue }
-      const ranges = []
+      if (!sessionEnabled[session.id]) { primitive.setBoxes([]); continue }
+      const boxes = []
       for (const seg of sessionSegmentsRef.current[session.id] || []) {
         if (seg.startIdx >= idx) continue
         const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
         if (clippedEndIdx < seg.startIdx) continue
-        ranges.push({ from: seg.startTime, to: rowsRef.current[clippedEndIdx]?.time ?? seg.endTime })
+        boxes.push({ fromIndex: seg.startIdx, toIndex: clippedEndIdx, high: seg.high, low: seg.low })
       }
-      primitive.setRanges(ranges)
+      primitive.setBoxes(boxes)
     }
   }
 
@@ -884,7 +959,7 @@ export default function BacktestChart() {
     applyAllMarkers(idx)
     if (ribbonEnabled) recomputeSpreadExtremes(idx) // 슬라이더로 임의 위치 이동 - 되감기일 수 있어 처음부터 재스캔
     if (sidewaysEnabled) applySidewaysBands(idx)
-    applySessionBands(idx)
+    applySessionBands(idx) // 세션도 횡보처럼 재생(그려진 캔들) 범위 안에서만 표시(사용자 지적)
     indexRef.current = idx
     setPlayIndex(idx)
   }
@@ -1493,21 +1568,21 @@ export default function BacktestChart() {
     setSessionEnabledState(prev => ({ ...prev, [sessionId]: turningOn }))
     const primitive = sessionBandRefs.current[sessionId]
     if (!primitive) return
-    if (!turningOn) { primitive.setRanges([]); return }
+    if (!turningOn) { primitive.setBoxes([]); return }
     const idx = indexRef.current
-    const ranges = []
+    const boxes = []
     for (const seg of sessionSegmentsRef.current[sessionId] || []) {
       if (seg.startIdx >= idx) continue
       const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
       if (clippedEndIdx < seg.startIdx) continue
-      ranges.push({ from: seg.startTime, to: rowsRef.current[clippedEndIdx]?.time ?? seg.endTime })
+      boxes.push({ fromIndex: seg.startIdx, toIndex: clippedEndIdx, high: seg.high, low: seg.low })
     }
-    primitive.setRanges(ranges)
+    primitive.setBoxes(boxes)
   }
 
   const setSessionColor = (sessionId, hex) => {
     setSessionColorsState(prev => ({ ...prev, [sessionId]: hex }))
-    sessionBandRefs.current[sessionId]?.setFillStyle(hexToRgba(hex, sessionOpacity))
+    sessionBandRefs.current[sessionId]?.setStrokeColor(hexToRgba(hex, sessionOpacity))
   }
 
   // 투명도는 세션 3개 공통(사용자 요청) - 각자 색은 그대로 두고 알파만 다시 계산해서 3개 다 갱신
@@ -1515,7 +1590,7 @@ export default function BacktestChart() {
     setSessionOpacityState(value)
     for (const s of SESSIONS) {
       const color = sessionColors[s.id] || s.color
-      sessionBandRefs.current[s.id]?.setFillStyle(hexToRgba(color, value))
+      sessionBandRefs.current[s.id]?.setStrokeColor(hexToRgba(color, value))
     }
   }
 
@@ -1528,14 +1603,14 @@ export default function BacktestChart() {
       sessionSegmentsRef.current = { ...sessionSegmentsRef.current, [sessionId]: findSessionSegmentsIn(rowsRef.current, hrs.start, hrs.end) }
       if (sessionEnabled[sessionId]) {
         const idx = indexRef.current
-        const ranges = []
+        const boxes = []
         for (const seg of sessionSegmentsRef.current[sessionId]) {
           if (seg.startIdx >= idx) continue
           const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
           if (clippedEndIdx < seg.startIdx) continue
-          ranges.push({ from: seg.startTime, to: rowsRef.current[clippedEndIdx]?.time ?? seg.endTime })
+          boxes.push({ fromIndex: seg.startIdx, toIndex: clippedEndIdx, high: seg.high, low: seg.low })
         }
-        sessionBandRefs.current[sessionId]?.setRanges(ranges)
+        sessionBandRefs.current[sessionId]?.setBoxes(boxes)
       }
       return next
     })
