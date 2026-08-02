@@ -63,6 +63,65 @@ class VerticalLinePrimitive {
 const MAX_SPREAD_LINE_COLOR = '#FFEB3B' // 가장 크게 벌어진 지점(노랑)
 const MIN_SPREAD_LINE_COLOR = '#00E5FF' // 가장 좁게 뭉친 지점(하늘)
 
+// 횡보 구간 배경 표시(사용자 요청) - VerticalLinePrimitive와 같은 방식이지만 선 1개가 아니라
+// 여러 개의 [from,to] 시간 구간을 옅은 색 사각형으로 캔들 뒤에 채운다(zOrder: 'bottom').
+class BackgroundBandsPrimitive {
+  constructor(fillStyle) {
+    this._ranges = [] // [{from, to}] (unix seconds)
+    this._chart = null
+    this._requestUpdate = null
+    this._fillStyle = fillStyle
+  }
+  attached({ chart, requestUpdate }) {
+    this._chart = chart
+    this._requestUpdate = requestUpdate
+  }
+  detached() {
+    this._chart = null
+  }
+  updateAllViews() {}
+  paneViews() {
+    return [{
+      zOrder: () => 'bottom',
+      renderer: () => ({
+        draw: (target) => {
+          if (!this._chart || !this._ranges.length) return
+          const ts = this._chart.timeScale()
+          target.useBitmapCoordinateSpace((scope) => {
+            const ctx = scope.context
+            const ratio = scope.horizontalPixelRatio
+            const width = scope.bitmapSize.width
+            const height = scope.bitmapSize.height
+            ctx.save()
+            ctx.fillStyle = this._fillStyle
+            for (const r of this._ranges) {
+              let x1 = ts.timeToCoordinate(r.from)
+              let x2 = ts.timeToCoordinate(r.to)
+              if (x1 == null && x2 == null) continue
+              if (x1 == null) x1 = 0
+              if (x2 == null) x2 = width / ratio
+              const left = Math.max(0, Math.min(x1, x2) * ratio)
+              const right = Math.min(width, Math.max(x1, x2) * ratio)
+              if (right <= left) continue
+              ctx.fillRect(left, 0, right - left, height)
+            }
+            ctx.restore()
+          })
+        },
+      }),
+    }]
+  }
+  setRanges(ranges) {
+    this._ranges = ranges
+    this._requestUpdate?.()
+  }
+  setFillStyle(fillStyle) {
+    this._fillStyle = fillStyle
+    this._requestUpdate?.()
+  }
+}
+const SIDEWAYS_BAND_COLOR = '#FFEB3B' // 횡보 구간 배경 기본색(옅은 노랑) - 알파는 적용할 때 따로 낮춤
+
 // 리본 전용 - 오를 땐 라임/내릴 땐 레드로(Madrid 원본 색, 사용자 요청 "트레이딩뷰처럼").
 // lightweight-charts는 선 하나 안에서 구간별 색을 못 바꾸므로, 선마다 상승구간 시리즈(라임)와
 // 하락구간 시리즈(레드) 둘로 쪼개서 겹쳐 그린다. 색이 바뀌는 경계에서는 두 시리즈 모두에 그
@@ -298,6 +357,9 @@ export default function BacktestChart() {
   // 리본(Madrid) - MACD처럼 체크박스 하나가 켜고 끄는 세트(사용자 요청).
   const [ribbonEnabled, setRibbonEnabledState] = useState(true) // 기본 체크(사용자 요청)
   const [ribbonOpacity, setRibbonOpacityState] = useState(0.2) // 리본 18개 선 전용 투명도(0~1, 기본 20%, 사용자 요청) - hma3는 영향 없음
+  // 횡보 구간 배경 표시(사용자 요청) - 5분B 폭 & 리본 폭이 둘 다 로드된 구간 하위25%일 때 배경을 옅게 칠함
+  const [sidewaysEnabled, setSidewaysEnabledState] = useState(false)
+  const [sidewaysColor, setSidewaysColorState] = useState(SIDEWAYS_BAND_COLOR)
   // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
   const [maUpColors, setMaUpColors] = useState({ hma60: '#00D5FF' }) // 3분 H 상승색 기본값(사용자 지정)
   const [maDownColors, setMaDownColors] = useState({})
@@ -390,6 +452,8 @@ export default function BacktestChart() {
   const maxSpreadRef = useRef({ time: null, value: -Infinity })
   const minSpreadRef = useRef({ time: null, value: Infinity })
   const swingStateRef = useRef({ prevSpread: null, direction: null, legExtreme: null }) // 지그재그 스윙 탐지용 진행 상태
+  const sidewaysBandRef = useRef(null)       // BackgroundBandsPrimitive 인스턴스
+  const sidewaysSegmentsRef = useRef([])     // 로드된 구간 전체에서 미리 찾아둔 횡보 구간 [{startIdx,endIdx,startTime,endTime}]
   const rowsRef = useRef([])
   const intervalRef = useRef(null)
   const indexRef = useRef(0)
@@ -516,6 +580,9 @@ export default function BacktestChart() {
     minSpreadLineRef.current = new VerticalLinePrimitive(MIN_SPREAD_LINE_COLOR)
     series.attachPrimitive(maxSpreadLineRef.current)
     series.attachPrimitive(minSpreadLineRef.current)
+
+    sidewaysBandRef.current = new BackgroundBandsPrimitive(hexToRgba(sidewaysColor, 0.15))
+    series.attachPrimitive(sidewaysBandRef.current)
 
     // 기본으로 켜둔 볼린저/이평선은 toggleBand/toggleMA(클릭했을 때만 시리즈를 만듦)를 거치지 않으므로,
     // 마운트 시점에 켜져 있는 것들의 실제 차트 시리즈를 여기서 직접 만들어둔다.
@@ -654,6 +721,19 @@ export default function BacktestChart() {
     minSpreadLineRef.current?.setTime(minSpreadRef.current.time)
   }
 
+  // 횡보 구간 배경 - 재생 위치(idx)까지 드러난 구간만 표시(아직 안 지난 미래 구간은 안 보여줌).
+  // 구간이 idx에 걸쳐 있으면 거기까지만 잘라서 보여준다.
+  const applySidewaysBands = (idx) => {
+    const ranges = []
+    for (const seg of sidewaysSegmentsRef.current) {
+      if (seg.startIdx >= idx) continue
+      const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
+      if (clippedEndIdx < seg.startIdx) continue
+      ranges.push({ from: seg.startTime, to: rowsRef.current[clippedEndIdx]?.time ?? seg.endTime })
+    }
+    sidewaysBandRef.current?.setRanges(ranges)
+  }
+
   // RSI/MACD도 재생 위치(idx)를 앞서가면 안 되는 건 볼린저/이평선과 동일
   const applyRSIIndex = (idx) => {
     if (!rsiSeriesRef.current) return
@@ -746,6 +826,7 @@ export default function BacktestChart() {
     syncMACD5(idx)
     applyAllMarkers(idx)
     if (ribbonEnabled) recomputeSpreadExtremes(idx) // 슬라이더로 임의 위치 이동 - 되감기일 수 있어 처음부터 재스캔
+    if (sidewaysEnabled) applySidewaysBands(idx)
     indexRef.current = idx
     setPlayIndex(idx)
   }
@@ -753,6 +834,7 @@ export default function BacktestChart() {
   // 캔들을 하나씩 update()로 이어붙이는 게 setData 전체 재계산보다 가볍다
   const applyIncrement = (from, to) => {
     if (ribbonEnabled) scanSpreadSwings(from, to, swingStateRef.current) // 재생은 항상 앞으로만 가므로 이어서 스캔
+    if (sidewaysEnabled) applySidewaysBands(to)
     const rows = rowsRef.current
     for (let i = from; i < to; i++) {
       seriesRef.current?.update(rows[i])
@@ -905,6 +987,49 @@ export default function BacktestChart() {
           newMaData[dualId + '_red'] = red
         }
         maDataRef.current = newMaData
+
+        // 횡보 구간(사용자 요청) - 5분B 폭 & 리본(M5-M90) 폭이 둘 다 "이번에 로드된 구간" 안에서
+        // 하위25%일 때 횡보로 본다. 임계값은 로드할 때마다 그 구간 분포로 다시 잡음(고정값 아님).
+        {
+          const bw100 = newBandData['sma100']
+          const ribbon5 = newMaData['madrid05']
+          const ribbon90 = newMaData['madrid90']
+          const widthAt = (i) => {
+            const u = bw100?.upper[i], l = bw100?.lower[i]
+            return (u && l) ? u.value - l.value : null
+          }
+          const spreadAt2 = (i) => {
+            const a = ribbon5?.[i], b = ribbon90?.[i]
+            return (a && b) ? Math.abs(b.value - a.value) : null
+          }
+          const pct = (arr, p) => {
+            if (!arr.length) return null
+            const s = [...arr].sort((a, b) => a - b)
+            return s[Math.min(Math.floor(s.length * p), s.length - 1)]
+          }
+          const widths = [], spreads = []
+          for (let i = 0; i < dayRows.length; i++) {
+            const w = widthAt(i); if (w != null) widths.push(w)
+            const s = spreadAt2(i); if (s != null) spreads.push(s)
+          }
+          const bandThresh = pct(widths, 0.25)
+          const ribbonThresh = pct(spreads, 0.25)
+          const rawSegments = []
+          if (bandThresh != null && ribbonThresh != null) {
+            let segStart = null
+            for (let i = 0; i < dayRows.length; i++) {
+              const w = widthAt(i), s = spreadAt2(i)
+              const isSide = w != null && s != null && w <= bandThresh && s <= ribbonThresh
+              if (isSide && segStart == null) segStart = i
+              if (!isSide && segStart != null) { rawSegments.push({ startIdx: segStart, endIdx: i - 1 }); segStart = null }
+            }
+            if (segStart != null) rawSegments.push({ startIdx: segStart, endIdx: dayRows.length - 1 })
+          }
+          const MIN_SIDEWAYS_MIN = 5 // 1~2캔들짜리 노이즈 제외
+          sidewaysSegmentsRef.current = rawSegments
+            .map(seg => ({ ...seg, startTime: dayRows[seg.startIdx].time, endTime: dayRows[seg.endIdx].time }))
+            .filter(seg => (seg.endTime - seg.startTime) / 60 + 1 >= MIN_SIDEWAYS_MIN)
+        }
 
         // RSI/MACD도 이평선처럼 그 구간 데이터만으론 워밍업이 부족할 수 있어 파일 전체로 계산 후 표시 구간만 자름
         const rsiVals = rollingRSI(closes, RSI_PERIOD)
@@ -1278,6 +1403,18 @@ export default function BacktestChart() {
       maxSpreadLineRef.current?.setTime(null)
       minSpreadLineRef.current?.setTime(null)
     }
+  }
+
+  const toggleSideways = () => {
+    const turningOn = !sidewaysEnabled
+    setSidewaysEnabledState(turningOn)
+    if (turningOn) applySidewaysBands(indexRef.current)
+    else sidewaysBandRef.current?.setRanges([])
+  }
+
+  const setSidewaysColor = (hex) => {
+    setSidewaysColorState(hex)
+    sidewaysBandRef.current?.setFillStyle(hexToRgba(hex, 0.15))
   }
 
   // RSI - 자기만의 pane(index는 동적으로 계산: 현재 pane 개수 = 맨 끝에 새 pane) - v5 진짜 pane API
@@ -1748,21 +1885,6 @@ export default function BacktestChart() {
     }
   }
 
-  // "📋 데이터" 버튼 - 사람이 눌러서 JSON 파일로 다운로드(기존 그대로 둠).
-  const exportChartData = () => {
-    const payload = buildChartDataPayload()
-    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    const dateLabel = selectedDate ? (selectedDateTo ? `${selectedDate}_${selectedDateTo}` : selectedDate) : 'chart'
-    a.href = url
-    a.download = `${symbol}_${dateLabel}_${payload.playIndex}봉_data.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-
   // Claude가 Browser 도구로 이 페이지에 직접 접속했을 때, 파일 다운로드 없이 브라우저 콘솔에서
   // `window.getBacktestChartData()`를 호출해서 지금 이 화면 상태(재생위치까지)를 바로 읽어갈 수 있게
   // window에 노출해둔다. 렌더될 때마다 최신 클로저로 갱신(각 값이 바뀔 때마다 새로 만들어도 비용 거의 없음).
@@ -2068,6 +2190,31 @@ export default function BacktestChart() {
                   maxWidth={170}
                   bare
                 />
+              </CollapsibleCard>
+
+              <CollapsibleCard title="횡보" maxWidth={170} defaultOpen={false}>
+                <div style={{ padding: '1px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={sidewaysEnabled}
+                      onChange={toggleSideways}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: sidewaysColor, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>횡보 구간 표시</span>
+                    <input
+                      type="color"
+                      value={sidewaysColor}
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => setSidewaysColor(e.target.value)}
+                      title="배경색 변경 가능"
+                      style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                    />
+                  </label>
+                  <div style={{ marginTop: 4, fontSize: 10, color: '#5a5f6a', lineHeight: 1.4 }}>
+                    5분B 폭 &amp; 리본(M5-M90) 폭이 둘 다 로드된 구간 하위25%인 곳을 배경으로 표시
+                  </div>
+                </div>
               </CollapsibleCard>
 
               <CollapsibleCard title="볼린저" maxWidth={170}>
@@ -2460,11 +2607,6 @@ export default function BacktestChart() {
                   background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
                   padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
                 }}>📸 스샷</button>
-
-                <button onClick={exportChartData} disabled={!total} title="지금까지 재생된 캔들+볼린저+이평선+RSI+MACD 값을 JSON으로 저장" style={{
-                  background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
-                  padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
-                }}>📋 데이터</button>
 
                 {SPEEDS.map(s => {
                   const secs = REALTIME_MS / s / 1000
