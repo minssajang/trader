@@ -254,7 +254,7 @@ const RIBBON_LIME = '#00FF00'
 const RIBBON_RED = '#FF0000'
 // 리본 18개 + "3분/5분/15분 H"(hma60/hma100/hma300, 사용자 요청) - 이 id들은 단색 대신
 // 상승/하락 두 색으로 동적 렌더링한다.
-const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60', 'hma100', 'hma300'])
+const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60', 'hma100', 'hma300', 'wma17_1m', 'wma17_5m', 'wma4_1h'])
 const isDualColor = (maId) => DUAL_COLOR_IDS.has(maId)
 const RIBBON_IDS = new Set(MADRID_RIBBON.map(m => m.id))
 const isRibbonId = (maId) => RIBBON_IDS.has(maId)
@@ -578,8 +578,16 @@ export default function BacktestChart() {
   const [sessionBorderWidth, setSessionBorderWidthState] = useState(rs.sessionBorderWidth ?? 1)
   const [sessionBorderOpacity, setSessionBorderOpacityState] = useState(rs.sessionBorderOpacity ?? 1)
   // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
-  const [maUpColors, setMaUpColors] = useState(rs.maUpColors ?? { hma60: '#00D5FF' }) // 3분 H 상승색 기본값(사용자 지정)
-  const [maDownColors, setMaDownColors] = useState(rs.maDownColors ?? {})
+  // 3분H 상승색(#00D5FF)/5분H 상승색(#FF9800, 원래 단색이던 오렌지 유지)은 사용자 지정 기본값.
+  // W(wma) 3개는 dual-color로 바뀌어도 상승/하락 색을 똑같이(원래 단색 그대로) 맞춰달라는 요청이라
+  // 두 state 모두에 같은 색을 넣어둠 - 구조는 dual이지만 방향과 무관하게 항상 원래 색으로 보임.
+  const [maUpColors, setMaUpColors] = useState(rs.maUpColors ?? {
+    hma60: '#00D5FF', hma100: '#FF9800',
+    wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B',
+  })
+  const [maDownColors, setMaDownColors] = useState(rs.maDownColors ?? {
+    wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B',
+  })
   // RSI/MACD - 기간은 표준값(14 / 12,26,9)으로 고정, 색상만 커스터마이징 가능. 기본은 꺼짐(체크해야 나옴)
   const [enabledRSI, setEnabledRSI] = useState(rs.enabledRSI ?? false)
   const [rsiColor, setRsiColorState] = useState(rs.rsiColor ?? DEFAULT_RSI_COLOR)
