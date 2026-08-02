@@ -236,13 +236,16 @@ export default function BacktestChart() {
   const [lineVisibility, setLineVisibility] = useState({}) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true, 1분B 상/하도 기본 켜짐 - 사용자 요청)
   const [bandColors, setBandColors] = useState({}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
   // 기본 셋팅 - 3분/5분/15분 H, 1분/5분 W17, 1시간 W4 이평선 체크
-  const [enabledMA, setEnabledMA] = useState({ hma60: true, hma100: true, hma300: true, wma17_1m: true, wma17_5m: true, wma4_1h: true })
+  const [enabledMA, setEnabledMA] = useState({
+    hma60: true, hma100: true, hma300: true, wma17_1m: true, wma17_5m: true, wma4_1h: true,
+    ...Object.fromEntries(MADRID_RIBBON.map(m => [m.id, true])), // 리본 기본 체크(사용자 요청)
+  })
   const [maColors, setMaColors] = useState({}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
   // 기본 셋팅 - 위 6개 이평선 전부 두께 3
   const [maWidths, setMaWidths] = useState({ hma60: 3, hma100: 3, hma300: 3, wma17_1m: 3, wma17_5m: 3, wma4_1h: 3 }) // maId -> 커스텀 선 굵기 (없으면 MOVING_AVERAGES 기본 lineWidth)
   // 리본(Madrid) - MACD처럼 체크박스 하나가 켜고 끄는 세트(사용자 요청).
-  const [ribbonEnabled, setRibbonEnabledState] = useState(false)
-  const [ribbonOpacity, setRibbonOpacityState] = useState(0.5) // 리본 18개 선 전용 투명도(0~1, 사용자 요청) - hma3는 영향 없음
+  const [ribbonEnabled, setRibbonEnabledState] = useState(true) // 기본 체크(사용자 요청)
+  const [ribbonOpacity, setRibbonOpacityState] = useState(0.2) // 리본 18개 선 전용 투명도(0~1, 기본 20%, 사용자 요청) - hma3는 영향 없음
   // DUAL_COLOR_IDS(리본 18개 + hma60)의 상승/하락 색 - maId -> 커스텀 색(없으면 RIBBON_LIME/RIBBON_RED)
   const [maUpColors, setMaUpColors] = useState({ hma60: '#00D5FF' }) // 3분 H 상승색 기본값(사용자 지정)
   const [maDownColors, setMaDownColors] = useState({})
@@ -2117,7 +2120,22 @@ export default function BacktestChart() {
                     </label>
                   </div>
                   <div style={{ marginTop: 5, fontSize: 10, color: '#5a5f6a', width: '100%', boxSizing: 'border-box' }}>
-                    <div style={{ marginBottom: 3, whiteSpace: 'nowrap' }}>투명도 {Math.round(ribbonOpacity * 100)}%</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3, whiteSpace: 'nowrap' }}>
+                      <span>투명도</span>
+                      <input
+                        type="number"
+                        min={10}
+                        max={100}
+                        step={5}
+                        value={Math.round(ribbonOpacity * 100)}
+                        onChange={e => {
+                          const pct = Math.min(100, Math.max(10, Number(e.target.value) || 0))
+                          setRibbonOpacityValue(pct / 100)
+                        }}
+                        style={{ width: 36, fontSize: 10, background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 3px' }}
+                      />
+                      <span>%</span>
+                    </div>
                     <input
                       type="range"
                       min={0.1}
