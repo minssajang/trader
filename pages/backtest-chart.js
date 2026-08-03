@@ -717,6 +717,8 @@ export default function BacktestChart() {
       return raw ? JSON.parse(raw) : []
     } catch { return [] }
   })
+  // 차트를 마우스로 클릭했을 때 뜨는 라벨 선택 팝업 - { idx, x, y } | null (x/y는 차트 컨테이너 기준 좌표)
+  const [clickPopup, setClickPopup] = useState(null)
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -924,6 +926,13 @@ export default function BacktestChart() {
     chart.subscribeCrosshairMove((param) => {
       if (param.logical == null || !rowsRef.current.length) { hoveredIdxRef.current = null; return }
       hoveredIdxRef.current = Math.max(0, Math.min(Math.round(param.logical), rowsRef.current.length - 1))
+    })
+
+    // 차트를 마우스로 클릭하면 그 자리에 라벨 선택 팝업을 띄운다(숫자키 대신 클릭으로도 마킹 가능하게)
+    chart.subscribeClick((param) => {
+      if (param.logical == null || !rowsRef.current.length || !param.point) { setClickPopup(null); return }
+      const idx = Math.max(0, Math.min(Math.round(param.logical), rowsRef.current.length - 1))
+      setClickPopup({ idx, x: param.point.x, y: param.point.y })
     })
 
     const onResize = () => chart.applyOptions({ width: containerRef.current.clientWidth })
@@ -1152,12 +1161,13 @@ export default function BacktestChart() {
     markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers, ...annotationMarkers].sort((a, b) => a.time - b.time))
   }
 
-  // 라벨링 버튼(또는 숫자키) - 차트에 마우스를 올려두고 있으면 그 크로스헤어 캔들에, 아니면 재생
-  // 위치(카메라) 캔들에 마커를 찍는다. 전부 ref만 읽으므로 키보드 리스너에서 최신값으로 호출해도 안전.
+  // 라벨링 버튼(또는 숫자키, 또는 차트 클릭 팝업) - explicitIdx가 있으면 그 캔들에(클릭 팝업),
+  // 없으면 차트에 마우스를 올려두고 있으면 그 크로스헤어 캔들에, 아니면 재생 위치(카메라) 캔들에
+  // 마커를 찍는다. 전부 ref만 읽으므로 키보드 리스너에서 최신값으로 호출해도 안전.
   // 진입롱/진입숏은 같은 자리에 손절도 자동으로 같이 찍고(사용자 요청), 청산을 찍으면 그 손절은
   // 더 이상 유효하지 않으니 같이 지운다(직전 진입 하나만 추적 - 겹쳐 진입하는 경우는 없다고 가정).
-  const addAnnotation = (type) => {
-    const idx = hoveredIdxRef.current != null ? hoveredIdxRef.current : indexRef.current - 1
+  const addAnnotation = (type, explicitIdx) => {
+    const idx = explicitIdx != null ? explicitIdx : (hoveredIdxRef.current != null ? hoveredIdxRef.current : indexRef.current - 1)
     const row = rowsRef.current[idx]
     if (!row) return
 
@@ -1251,6 +1261,7 @@ export default function BacktestChart() {
   addAnnotationRef.current = addAnnotation
   useEffect(() => {
     const onKeyDown = (e) => {
+      if (e.key === 'Escape') { setClickPopup(null); return }
       const tag = document.activeElement?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       const i = Number(e.key) - 1
@@ -3307,8 +3318,56 @@ export default function BacktestChart() {
                 >{summerTime ? '☀ 서머타임 (+6h)' : '❄ 윈터타임 (+7h)'}</button>
               </div>
 
-              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16 }}>
+              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, position: 'relative' }}>
                 <div ref={containerRef} style={{ width: '100%', height: 860 }} />
+
+                {clickPopup && (
+                  <>
+                    <div
+                      onClick={() => setClickPopup(null)}
+                      style={{ position: 'absolute', inset: 0, zIndex: 10 }}
+                    />
+                    <div
+                      style={{
+                        position: 'absolute', left: clickPopup.x, top: clickPopup.y,
+                        transform: 'translate(-50%, calc(-100% - 12px))', zIndex: 11,
+                        background: '#171a21', border: '1px solid #4CAF50', borderRadius: 10,
+                        padding: 8, display: 'flex', flexDirection: 'column', gap: 4,
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.5)', minWidth: 150,
+                      }}
+                    >
+                      {annotations.filter(a => a.idx === clickPopup.idx).length > 0 && (
+                        <>
+                          <div style={{ fontSize: 10.5, color: '#9aa0ab', padding: '0 2px' }}>이 캔들의 라벨 - 눌러서 삭제</div>
+                          {annotations.filter(a => a.idx === clickPopup.idx).map(a => (
+                            <button
+                              key={a.id}
+                              type="button"
+                              onClick={() => { removeAnnotation(a.id); setClickPopup(null) }}
+                              style={{
+                                background: `${ANNOTATION_STYLES[a.type].color}22`, color: ANNOTATION_STYLES[a.type].color,
+                                border: `1px solid ${ANNOTATION_STYLES[a.type].color}`, borderRadius: 7,
+                                padding: '6px 10px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', textAlign: 'left',
+                              }}
+                            >✕ {ANNOTATION_STYLES[a.type].text} 삭제</button>
+                          ))}
+                          <div style={{ borderTop: '1px solid #2a2e38', margin: '4px 0' }} />
+                        </>
+                      )}
+                      {ANNOTATION_BUTTONS.map(([type, label], i) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => { addAnnotation(type, clickPopup.idx); setClickPopup(null) }}
+                          style={{
+                            background: 'none', color: ANNOTATION_STYLES[type].color, border: `1px solid ${ANNOTATION_STYLES[type].color}`,
+                            borderRadius: 7, padding: '6px 10px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', textAlign: 'left',
+                          }}
+                        ><span style={{ opacity: 0.6, marginRight: 5 }}>{i + 1}</span>{label}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', marginTop: 16 }}>
