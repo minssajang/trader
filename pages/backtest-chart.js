@@ -206,6 +206,79 @@ class SessionBoxesPrimitive {
   }
 }
 
+// 라벨링(📍 라벨링) 마커 - lightweight-charts 기본 markers API(aboveBar/belowBar/inBar)는 캔들
+// 위/아래 고정 위치에만 붙일 수 있어서, 클릭하거나 마우스를 올린 정확한 가격(십자선 세로 위치)에
+// 못 찍는 문제가 있었다(사용자 지적). 세션박스와 같은 방식으로 직접 캔버스에 그려서 (time, price)
+// 정확한 좌표에 도형+텍스트를 찍는다.
+class AnnotationMarkersPrimitive {
+  constructor() {
+    this._markers = [] // [{time, price, color, shape, text}]
+    this._chart = null
+    this._series = null
+    this._requestUpdate = null
+  }
+  attached({ chart, series, requestUpdate }) {
+    this._chart = chart
+    this._series = series
+    this._requestUpdate = requestUpdate
+  }
+  detached() {
+    this._chart = null
+    this._series = null
+  }
+  updateAllViews() {}
+  paneViews() {
+    return [{
+      renderer: () => ({
+        draw: (target) => {
+          if (!this._chart || !this._series || !this._markers.length) return
+          const ts = this._chart.timeScale()
+          target.useBitmapCoordinateSpace((scope) => {
+            const ctx = scope.context
+            const hRatio = scope.horizontalPixelRatio
+            const vRatio = scope.verticalPixelRatio
+            ctx.save()
+            const r = 6 * hRatio
+            for (const m of this._markers) {
+              const x = ts.timeToCoordinate(m.time)
+              const y = this._series.priceToCoordinate(m.price)
+              if (x == null || y == null) continue
+              const px = x * hRatio, py = y * vRatio + (m.offset || 0) * vRatio
+              ctx.fillStyle = m.color
+              ctx.strokeStyle = m.color
+              if (m.shape === 'arrowUp') {
+                ctx.beginPath()
+                ctx.moveTo(px, py - r); ctx.lineTo(px - r, py + r); ctx.lineTo(px + r, py + r)
+                ctx.closePath(); ctx.fill()
+              } else if (m.shape === 'arrowDown') {
+                ctx.beginPath()
+                ctx.moveTo(px, py + r); ctx.lineTo(px - r, py - r); ctx.lineTo(px + r, py - r)
+                ctx.closePath(); ctx.fill()
+              } else if (m.shape === 'square') {
+                ctx.fillRect(px - r, py - r, r * 2, r * 2)
+              } else {
+                ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill()
+              }
+              if (m.text) {
+                ctx.font = `${Math.round(11 * vRatio)}px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif`
+                ctx.textAlign = 'center'
+                const below = m.shape === 'arrowDown'
+                ctx.textBaseline = below ? 'top' : 'bottom'
+                ctx.fillText(m.text, px, below ? py + r + 3 * vRatio : py - r - 3 * vRatio)
+              }
+            }
+            ctx.restore()
+          })
+        },
+      }),
+    }]
+  }
+  setMarkers(markers) {
+    this._markers = markers
+    this._requestUpdate?.()
+  }
+}
+
 // 세션 표시(사용자가 공유한 Pine 스크립트에서 세션 부분만 분리, 사용자 요청) - 시작/종료 시각은
 // 한국시간(KST) 기준이고, 이 차트의 시간 라벨이 이미 KST와 동일(SESSION_OPENS 주석 참고)이라
 // 그대로 쓴다. endHour <= startHour면 자정을 넘어가는 세션(뉴욕: 21시~다음날 5시).
@@ -432,10 +505,11 @@ const ANNOTATION_STYLES = {
   sideways_end: { position: 'aboveBar', color: '#FFEB3B', shape: 'circle', text: '횡보끝' },
   trend_start: { position: 'belowBar', color: '#4FC3F7', shape: 'circle', text: '추세시작' },
   trend_end: { position: 'belowBar', color: '#4FC3F7', shape: 'circle', text: '추세끝' },
-  // 진입롱/진입숏과 동시에 같은 캔들에 자동으로 같이 찍는 손절 마커(사용자 요청) - 진입 마커랑
-  // 겹쳐 안 보이지 않게 반대쪽(entry_long은 아래화살표라 손절은 위쪽, 그 반대도 마찬가지)에 그린다.
-  stop_loss_long: { position: 'aboveBar', color: '#FF9800', shape: 'square', text: '손절' },
-  stop_loss_short: { position: 'belowBar', color: '#FF9800', shape: 'square', text: '손절' },
+  // 진입롱/진입숏과 동시에 정확히 같은 가격(price)에 자동으로 같이 찍는 손절 마커(사용자 요청).
+  // 마커가 이제 정확한 가격에 그려지다 보니 진입과 완전히 같은 자리에 겹쳐버려서, 데이터(price)는
+  // 그대로 두고 화면에 그릴 때만 세로로 살짝(offset, px) 띄워서 둘 다 보이게 한다.
+  stop_loss_long: { color: '#FF9800', shape: 'square', text: '손절', offset: -20 },
+  stop_loss_short: { color: '#FF9800', shape: 'square', text: '손절', offset: 20 },
 }
 const ANNOTATION_BUTTONS = [
   ['entry_long', '진입롱'], ['entry_short', '진입숏'],
@@ -734,6 +808,7 @@ export default function BacktestChart() {
   const sidewaysBandRef = useRef(null)       // BackgroundBandsPrimitive 인스턴스
   const sidewaysSegmentsRef = useRef([])     // 로드된 구간 전체에서 미리 찾아둔 횡보 구간 [{startIdx,endIdx,startTime,endTime}]
   const sessionBandRefs = useRef({})         // sessionId -> BackgroundBandsPrimitive 인스턴스
+  const annotationPrimitiveRef = useRef(null) // AnnotationMarkersPrimitive 인스턴스 - 라벨링 마커를 정확한 가격 위치에 그림
   const sessionSegmentsRef = useRef({})      // sessionId -> [{startIdx,endIdx,startTime,endTime}]
   const rowsRef = useRef([])
   const intervalRef = useRef(null)
@@ -758,6 +833,7 @@ export default function BacktestChart() {
   const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
   const annotationsRef = useRef([]) // annotations state의 최신값 거울(재생 루프/applyAllMarkers가 클로저 stale 없이 읽기 위함)
   const hoveredIdxRef = useRef(null) // 크로스헤어가 지금 가리키는 캔들 인덱스(라벨링 위치) - 차트 밖이면 null(그때는 재생 위치를 씀)
+  const hoveredPriceRef = useRef(null) // 크로스헤어의 정확한 세로 위치(가격) - 라벨 마커를 여기 그대로 찍는다
   const pendingStopLossIdRef = useRef(null) // 진입과 같이 자동으로 찍은 손절 마커의 id - 청산을 찍으면 이걸 같이 지운다
   const pendingViewIdxRef = useRef(null) // 재생 중 화면 이동 요청을 requestAnimationFrame으로 묶어내기 위한 대기값
   const viewRafRef = useRef(null)
@@ -810,6 +886,7 @@ export default function BacktestChart() {
     setAnnotations([])
     pendingStopLossIdRef.current = null
     markersPrimitiveRef.current?.setMarkers([])
+    annotationPrimitiveRef.current?.setMarkers([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
@@ -879,6 +956,9 @@ export default function BacktestChart() {
     sidewaysBandRef.current = new BackgroundBandsPrimitive(hexToRgba(sidewaysColor, 0.15))
     series.attachPrimitive(sidewaysBandRef.current)
 
+    annotationPrimitiveRef.current = new AnnotationMarkersPrimitive()
+    series.attachPrimitive(annotationPrimitiveRef.current)
+
     for (const s of SESSIONS) {
       const p = new SessionBoxesPrimitive(sessionColors[s.id] || s.color, sessionOpacity, sessionBorderWidth, sessionBorderOpacity)
       series.attachPrimitive(p)
@@ -924,15 +1004,18 @@ export default function BacktestChart() {
     // 라벨링 버튼이 어느 캔들에 마킹할지 - 크로스헤어(마우스 올린 위치)가 있으면 그 캔들을 쓴다
     // (마우스가 차트 밖으로 나가면 param.logical이 없어져 null로 돌아가고, 그때는 재생 위치를 씀)
     chart.subscribeCrosshairMove((param) => {
-      if (param.logical == null || !rowsRef.current.length) { hoveredIdxRef.current = null; return }
+      if (param.logical == null || !param.point || !rowsRef.current.length) { hoveredIdxRef.current = null; hoveredPriceRef.current = null; return }
       hoveredIdxRef.current = Math.max(0, Math.min(Math.round(param.logical), rowsRef.current.length - 1))
+      hoveredPriceRef.current = seriesRef.current?.coordinateToPrice(param.point.y) ?? null
     })
 
-    // 차트를 마우스로 클릭하면 그 자리에 라벨 선택 팝업을 띄운다(숫자키 대신 클릭으로도 마킹 가능하게)
+    // 차트를 마우스로 클릭하면 그 자리(십자선 세로 위치 그대로)에 라벨 선택 팝업을 띄운다
+    // (숫자키 대신 클릭으로도 마킹 가능하게)
     chart.subscribeClick((param) => {
       if (param.logical == null || !rowsRef.current.length || !param.point) { setClickPopup(null); return }
       const idx = Math.max(0, Math.min(Math.round(param.logical), rowsRef.current.length - 1))
-      setClickPopup({ idx, x: param.point.x, y: param.point.y })
+      const price = seriesRef.current?.coordinateToPrice(param.point.y) ?? null
+      setClickPopup({ idx, price, x: param.point.x, y: param.point.y })
     })
 
     const onResize = () => chart.applyOptions({ width: containerRef.current.clientWidth })
@@ -1154,11 +1237,15 @@ export default function BacktestChart() {
     const sessionMarkers = sessionPointsRef.current
       .map(p => ({ time: p.time, position: 'aboveBar', color: p.color, shape: 'circle', size: 1, text: p.label }))
 
-    // 라벨링(수동 마킹) - 다른 신호와 동일하게 항상 전체 표시
-    const annotationMarkers = annotationsRef.current
-      .map(p => ({ time: p.time, position: ANNOTATION_STYLES[p.type].position, color: ANNOTATION_STYLES[p.type].color, shape: ANNOTATION_STYLES[p.type].shape, size: 4, text: ANNOTATION_STYLES[p.type].text }))
+    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers].sort((a, b) => a.time - b.time))
 
-    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers, ...annotationMarkers].sort((a, b) => a.time - b.time))
+    // 라벨링(수동 마킹)은 기본 markers API가 아니라 별도 프리미티브로 정확한 가격 위치에 그린다
+    annotationPrimitiveRef.current?.setMarkers(
+      annotationsRef.current.map(p => ({
+        time: p.time, price: p.price, offset: ANNOTATION_STYLES[p.type].offset || 0,
+        color: ANNOTATION_STYLES[p.type].color, shape: ANNOTATION_STYLES[p.type].shape, text: ANNOTATION_STYLES[p.type].text,
+      }))
+    )
   }
 
   // 라벨링 버튼(또는 숫자키, 또는 차트 클릭 팝업) - explicitIdx가 있으면 그 캔들에(클릭 팝업),
@@ -1166,10 +1253,12 @@ export default function BacktestChart() {
   // 마커를 찍는다. 전부 ref만 읽으므로 키보드 리스너에서 최신값으로 호출해도 안전.
   // 진입롱/진입숏은 같은 자리에 손절도 자동으로 같이 찍고(사용자 요청), 청산을 찍으면 그 손절은
   // 더 이상 유효하지 않으니 같이 지운다(직전 진입 하나만 추적 - 겹쳐 진입하는 경우는 없다고 가정).
-  const addAnnotation = (type, explicitIdx) => {
+  const addAnnotation = (type, explicitIdx, explicitPrice) => {
     const idx = explicitIdx != null ? explicitIdx : (hoveredIdxRef.current != null ? hoveredIdxRef.current : indexRef.current - 1)
     const row = rowsRef.current[idx]
     if (!row) return
+    // 마커는 캔들 상/하단이 아니라 클릭·크로스헤어의 정확한 세로 위치(가격)에 찍는다(사용자 지적)
+    const price = explicitPrice != null ? explicitPrice : (hoveredPriceRef.current != null ? hoveredPriceRef.current : row.close)
 
     let next = annotationsRef.current
     if (type === 'exit' && pendingStopLossIdRef.current != null) {
@@ -1177,13 +1266,13 @@ export default function BacktestChart() {
       pendingStopLossIdRef.current = null
     }
 
-    const entry = { id: `${Date.now()}_${Math.random()}`, type, idx, time: row.time, price: row.close }
+    const entry = { id: `${Date.now()}_${Math.random()}`, type, idx, time: row.time, price }
     next = [...next, entry]
 
     if (type === 'entry_long' || type === 'entry_short') {
       const stopLoss = {
         id: `${entry.id}_sl`, type: type === 'entry_long' ? 'stop_loss_long' : 'stop_loss_short',
-        idx, time: row.time, price: row.close,
+        idx, time: row.time, price,
       }
       next = [...next, stopLoss]
       pendingStopLossIdRef.current = stopLoss.id
@@ -1384,6 +1473,7 @@ export default function BacktestChart() {
     setAnnotations([])
     pendingStopLossIdRef.current = null
     markersPrimitiveRef.current?.setMarkers([])
+    annotationPrimitiveRef.current?.setMarkers([])
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
     setPlayIndex(0)
@@ -1620,6 +1710,7 @@ export default function BacktestChart() {
     setAnnotations([])
     pendingStopLossIdRef.current = null
     markersPrimitiveRef.current?.setMarkers([])
+    annotationPrimitiveRef.current?.setMarkers([])
     setPositions([])
   }
 
@@ -3358,7 +3449,7 @@ export default function BacktestChart() {
                         <button
                           key={type}
                           type="button"
-                          onClick={() => { addAnnotation(type, clickPopup.idx); setClickPopup(null) }}
+                          onClick={() => { addAnnotation(type, clickPopup.idx, clickPopup.price); setClickPopup(null) }}
                           style={{
                             background: 'none', color: ANNOTATION_STYLES[type].color, border: `1px solid ${ANNOTATION_STYLES[type].color}`,
                             borderRadius: 7, padding: '6px 10px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', textAlign: 'left',
