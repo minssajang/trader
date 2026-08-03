@@ -546,6 +546,8 @@ const BACKTEST_STATE_KEY = 'backtestChartState'
 // 브라우저를 완전히 닫았다 열어도 유지된다(위 BACKTEST_STATE_KEY는 심볼/날짜/재생위치 같은 "지금 뭘
 // 보고 있었는지" 세션 복귀용이라 성격이 달라서 별도 키로 분리 유지).
 const CHART_SETTINGS_KEY = 'backtestChartSettings'
+// 라벨링(📍 라벨링) 구간 스냅샷 모음 - 서버로 바로 안 보내고 여기에 이름 붙여 쌓아뒀다가 한 번에 다운로드
+const COLLECTED_ANNOTATIONS_KEY = 'chartAnnotationsCollected'
 
 export default function BacktestChart() {
   // 마운트 시 딱 한 번만 sessionStorage를 읽어서 ref에 담아둔다(렌더 중 계산이라 useEffect보다 먼저 값이 준비됨).
@@ -703,7 +705,14 @@ export default function BacktestChart() {
   const [savingResults, setSavingResults] = useState(false)
   // 라벨링(학습용 마킹) - { id, type, idx, time, price } 목록. 매매(positions)와는 완전히 별개.
   const [annotations, setAnnotations] = useState([])
-  const [savingAnnotations, setSavingAnnotations] = useState(false)
+  const [snapshotName, setSnapshotName] = useState('') // 지금 구간에 붙일 이름(담기 전 입력)
+  const [collectedAnnotations, setCollectedAnnotations] = useState(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const raw = window.localStorage.getItem(COLLECTED_ANNOTATIONS_KEY)
+      return raw ? JSON.parse(raw) : []
+    } catch { return [] }
+  })
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -1132,7 +1141,7 @@ export default function BacktestChart() {
 
     // 라벨링(수동 마킹) - 다른 신호와 동일하게 항상 전체 표시
     const annotationMarkers = annotationsRef.current
-      .map(p => ({ time: p.time, position: ANNOTATION_STYLES[p.type].position, color: ANNOTATION_STYLES[p.type].color, shape: ANNOTATION_STYLES[p.type].shape, size: 2, text: ANNOTATION_STYLES[p.type].text }))
+      .map(p => ({ time: p.time, position: ANNOTATION_STYLES[p.type].position, color: ANNOTATION_STYLES[p.type].color, shape: ANNOTATION_STYLES[p.type].shape, size: 4, text: ANNOTATION_STYLES[p.type].text }))
 
     markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers, ...annotationMarkers].sort((a, b) => a.time - b.time))
   }
@@ -1156,30 +1165,57 @@ export default function BacktestChart() {
     applyAllMarkers(rowsRef.current.length)
   }
 
-  // 지금까지 찍은 라벨 + 재생 위치까지 드러난 차트 데이터(buildChartDataPayload와 동일 범위)를
-  // 함께 DB에 저장한다 - 나중에 이 기록을 모아 학습 데이터로 쓸 수 있게.
-  const saveAnnotations = async () => {
+  // 서버로 바로 보내지 않고, 이름을 붙여서 브라우저(localStorage)에 구간별로 모아둔다.
+  // 여러 구간을 이렇게 담아뒀다가 마지막에 downloadCollectedAnnotations로 한 번에 파일 다운로드.
+  const collectAnnotations = () => {
     if (annotations.length === 0) {
-      alert('저장할 라벨이 없습니다. 재생하면서 진입롱/진입숏/횡보/추세/청산 버튼으로 마킹해보세요.')
+      alert('담을 라벨이 없습니다. 차트에 마우스를 올리고 숫자키(1~7)로 먼저 마킹해보세요.')
       return
     }
-    setSavingAnnotations(true)
-    try {
-      const res = await fetch('/api/chart-annotations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol, date_from: selectedDate, date_to: selectedDateTo || selectedDate,
-          annotations,
-          chart_data: buildChartDataPayload(),
-        }),
-      })
-      if (!res.ok) throw new Error()
-      alert(`라벨 ${annotations.length}건을 저장했습니다.`)
-    } catch {
-      alert('저장에 실패했습니다.')
+    const name = snapshotName.trim()
+    if (!name) {
+      alert('이 구간의 이름을 입력해주세요.')
+      return
     }
-    setSavingAnnotations(false)
+    const snapshot = {
+      name, symbol, date_from: selectedDate, date_to: selectedDateTo || selectedDate,
+      annotations, chart_data: buildChartDataPayload(),
+      collected_at: new Date().toISOString(),
+    }
+    setCollectedAnnotations(prev => {
+      const next = [...prev, snapshot]
+      try { window.localStorage.setItem(COLLECTED_ANNOTATIONS_KEY, JSON.stringify(next)) } catch { /* 용량 초과 등은 무시 - 다운로드는 여전히 메모리 값 기준으로 됨 */ }
+      return next
+    })
+    setSnapshotName('')
+    annotationsRef.current = []
+    setAnnotations([])
+    applyAllMarkers(rowsRef.current.length)
+  }
+
+  const removeCollected = (i) => {
+    setCollectedAnnotations(prev => {
+      const next = prev.filter((_, idx) => idx !== i)
+      try { window.localStorage.setItem(COLLECTED_ANNOTATIONS_KEY, JSON.stringify(next)) } catch { /* 무시 */ }
+      return next
+    })
+  }
+
+  // 지금까지 담아둔 구간 전부를 JSON 파일 하나로 묶어 다운로드한다.
+  const downloadCollectedAnnotations = () => {
+    if (collectedAnnotations.length === 0) {
+      alert('담아둔 구간이 없습니다.')
+      return
+    }
+    const blob = new Blob([JSON.stringify(collectedAnnotations, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `chart_annotations_${symbol}_${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   // 라벨링 숫자키 단축키(1~7 = ANNOTATION_BUTTONS 순서) - 차트에 마우스를 올린 채 키만 눌러서
@@ -2668,7 +2704,8 @@ export default function BacktestChart() {
 
         <main style={{ maxWidth: 1500, margin: '0 auto', padding: '28px 20px 60px' }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>캔들 시뮬레이션 차트</h1>
-          <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>달력에서 데이터가 있는 날짜를 골라서, 그날 시세를 순서대로 재생해볼 수 있어요.</p>
+          <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 4 }}>달력에서 데이터가 있는 날짜를 골라서, 그날 시세를 순서대로 재생해볼 수 있어요.</p>
+          <p style={{ color: '#FF9800', fontSize: 12.5, marginBottom: 24 }}>⚠ 한 번에 너무 긴 기간을 불러오면 느려질 수 있어요 — 1주일 단위로 나눠서 보는 걸 추천해요.</p>
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             {/* 왼쪽 컬럼: 심볼버튼 / 달력 / 볼린저 리스트가 서로 붙어서 쌓인다 (오른쪽 차트 높이랑 무관하게) */}
@@ -3296,14 +3333,6 @@ export default function BacktestChart() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 14, fontWeight: 700 }}>📍 라벨링</span>
                   <span style={{ fontSize: 11.5, color: '#9aa0ab' }}>차트에 마우스를 올린 채 숫자키(1~7)를 누르면 그 캔들에 바로 마킹돼요(학습용 데이터)</span>
-                  <button
-                    type="button" onClick={saveAnnotations} disabled={savingAnnotations}
-                    style={{
-                      marginLeft: 'auto', fontSize: 12, padding: '5px 12px', borderRadius: 6, cursor: savingAnnotations ? 'default' : 'pointer',
-                      border: '1px solid #4CAF50', background: '#4CAF5022', color: '#4CAF50', fontWeight: 700,
-                      opacity: savingAnnotations ? 0.6 : 1,
-                    }}
-                  >{savingAnnotations ? '저장 중...' : `저장 (${annotations.length}건)`}</button>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -3326,6 +3355,7 @@ export default function BacktestChart() {
                     {annotations.map(a => (
                       <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5 }}>
                         <span style={{ color: ANNOTATION_STYLES[a.type].color, fontWeight: 700, width: 70 }}>{ANNOTATION_STYLES[a.type].text}</span>
+                        <span style={{ color: '#9aa0ab', width: 130 }}>{localTimeFormatter(a.time)}</span>
                         <span style={{ color: '#9aa0ab' }}>{a.price.toFixed(2)}</span>
                         <button
                           type="button" onClick={() => removeAnnotation(a.id)}
@@ -3333,6 +3363,37 @@ export default function BacktestChart() {
                         >삭제</button>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, paddingTop: 12, borderTop: '1px solid #2a2e38', flexWrap: 'wrap' }}>
+                  <input
+                    type="text" value={snapshotName} onChange={e => setSnapshotName(e.target.value)}
+                    placeholder="이 구간 이름(예: 26.04.18 오전 눌림)"
+                    style={{ flex: '1 1 220px', background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '7px 10px', fontSize: 13 }}
+                  />
+                  <button
+                    type="button" onClick={collectAnnotations}
+                    style={{ fontSize: 12, padding: '7px 14px', borderRadius: 6, cursor: 'pointer', border: '1px solid #4CAF50', background: '#4CAF5022', color: '#4CAF50', fontWeight: 700 }}
+                  >이 구간 담기 ({annotations.length}건)</button>
+                </div>
+
+                {collectedAnnotations.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    {collectedAnnotations.map((s, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5 }}>
+                        <span style={{ fontWeight: 700 }}>{s.name}</span>
+                        <span style={{ color: '#9aa0ab' }}>{s.annotations.length}건</span>
+                        <button
+                          type="button" onClick={() => removeCollected(i)}
+                          style={{ marginLeft: 'auto', fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
+                        >삭제</button>
+                      </div>
+                    ))}
+                    <button
+                      type="button" onClick={downloadCollectedAnnotations}
+                      style={{ marginTop: 8, width: '100%', fontSize: 13, padding: '9px 0', borderRadius: 8, cursor: 'pointer', border: '1px solid #4CAF50', background: '#4CAF5022', color: '#4CAF50', fontWeight: 700 }}
+                    >⬇ 담아둔 {collectedAnnotations.length}개 구간 전체 다운로드</button>
                   </div>
                 )}
               </div>
