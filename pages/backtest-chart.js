@@ -432,6 +432,10 @@ const ANNOTATION_STYLES = {
   sideways_end: { position: 'aboveBar', color: '#FFEB3B', shape: 'circle', text: '횡보끝' },
   trend_start: { position: 'belowBar', color: '#4FC3F7', shape: 'circle', text: '추세시작' },
   trend_end: { position: 'belowBar', color: '#4FC3F7', shape: 'circle', text: '추세끝' },
+  // 진입롱/진입숏과 동시에 같은 캔들에 자동으로 같이 찍는 손절 마커(사용자 요청) - 진입 마커랑
+  // 겹쳐 안 보이지 않게 반대쪽(entry_long은 아래화살표라 손절은 위쪽, 그 반대도 마찬가지)에 그린다.
+  stop_loss_long: { position: 'aboveBar', color: '#FF9800', shape: 'square', text: '손절' },
+  stop_loss_short: { position: 'belowBar', color: '#FF9800', shape: 'square', text: '손절' },
 }
 const ANNOTATION_BUTTONS = [
   ['entry_long', '진입롱'], ['entry_short', '진입숏'],
@@ -752,6 +756,7 @@ export default function BacktestChart() {
   const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
   const annotationsRef = useRef([]) // annotations state의 최신값 거울(재생 루프/applyAllMarkers가 클로저 stale 없이 읽기 위함)
   const hoveredIdxRef = useRef(null) // 크로스헤어가 지금 가리키는 캔들 인덱스(라벨링 위치) - 차트 밖이면 null(그때는 재생 위치를 씀)
+  const pendingStopLossIdRef = useRef(null) // 진입과 같이 자동으로 찍은 손절 마커의 id - 청산을 찍으면 이걸 같이 지운다
   const pendingViewIdxRef = useRef(null) // 재생 중 화면 이동 요청을 requestAnimationFrame으로 묶어내기 위한 대기값
   const viewRafRef = useRef(null)
   const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
@@ -801,6 +806,7 @@ export default function BacktestChart() {
     sessionPointsRef.current = []
     annotationsRef.current = []
     setAnnotations([])
+    pendingStopLossIdRef.current = null
     markersPrimitiveRef.current?.setMarkers([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
@@ -1148,14 +1154,33 @@ export default function BacktestChart() {
 
   // 라벨링 버튼(또는 숫자키) - 차트에 마우스를 올려두고 있으면 그 크로스헤어 캔들에, 아니면 재생
   // 위치(카메라) 캔들에 마커를 찍는다. 전부 ref만 읽으므로 키보드 리스너에서 최신값으로 호출해도 안전.
+  // 진입롱/진입숏은 같은 자리에 손절도 자동으로 같이 찍고(사용자 요청), 청산을 찍으면 그 손절은
+  // 더 이상 유효하지 않으니 같이 지운다(직전 진입 하나만 추적 - 겹쳐 진입하는 경우는 없다고 가정).
   const addAnnotation = (type) => {
     const idx = hoveredIdxRef.current != null ? hoveredIdxRef.current : indexRef.current - 1
     const row = rowsRef.current[idx]
     if (!row) return
-    annotationsRef.current = [...annotationsRef.current, {
-      id: `${Date.now()}_${Math.random()}`, type, idx, time: row.time, price: row.close,
-    }]
-    setAnnotations(annotationsRef.current)
+
+    let next = annotationsRef.current
+    if (type === 'exit' && pendingStopLossIdRef.current != null) {
+      next = next.filter(a => a.id !== pendingStopLossIdRef.current)
+      pendingStopLossIdRef.current = null
+    }
+
+    const entry = { id: `${Date.now()}_${Math.random()}`, type, idx, time: row.time, price: row.close }
+    next = [...next, entry]
+
+    if (type === 'entry_long' || type === 'entry_short') {
+      const stopLoss = {
+        id: `${entry.id}_sl`, type: type === 'entry_long' ? 'stop_loss_long' : 'stop_loss_short',
+        idx, time: row.time, price: row.close,
+      }
+      next = [...next, stopLoss]
+      pendingStopLossIdRef.current = stopLoss.id
+    }
+
+    annotationsRef.current = next
+    setAnnotations(next)
     applyAllMarkers(rowsRef.current.length)
   }
 
@@ -1190,6 +1215,7 @@ export default function BacktestChart() {
     setSnapshotName('')
     annotationsRef.current = []
     setAnnotations([])
+    pendingStopLossIdRef.current = null
     applyAllMarkers(rowsRef.current.length)
   }
 
@@ -1345,6 +1371,7 @@ export default function BacktestChart() {
     sessionPointsRef.current = []
     annotationsRef.current = []
     setAnnotations([])
+    pendingStopLossIdRef.current = null
     markersPrimitiveRef.current?.setMarkers([])
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
@@ -1580,6 +1607,7 @@ export default function BacktestChart() {
     sessionPointsRef.current = []
     annotationsRef.current = []
     setAnnotations([])
+    pendingStopLossIdRef.current = null
     markersPrimitiveRef.current?.setMarkers([])
     setPositions([])
   }
