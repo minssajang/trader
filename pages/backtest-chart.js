@@ -742,6 +742,7 @@ export default function BacktestChart() {
   const bollInnerSignalPointsRef = useRef([]) // 볼린저 눌림 신호(표시용) 전체 [{idx, time, side}]
   const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
   const annotationsRef = useRef([]) // annotations state의 최신값 거울(재생 루프/applyAllMarkers가 클로저 stale 없이 읽기 위함)
+  const hoveredIdxRef = useRef(null) // 크로스헤어가 지금 가리키는 캔들 인덱스(라벨링 위치) - 차트 밖이면 null(그때는 재생 위치를 씀)
   const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
   const closedTradesRef = useRef([]) // 청산된 거래 전체(수동/반자동/시뮬레이션 다 포함, source로 구분) - "결과 저장" 누르면 DB로 보냄
 
@@ -811,8 +812,13 @@ export default function BacktestChart() {
             const [y2, m2] = saved.selectedDate.split('-').map(Number)
             if (!Number.isNaN(y2) && !Number.isNaN(m2)) setViewDate(new Date(y2, m2 - 1, 1))
             await loadRange(saved.selectedDate, saved.selectedDateTo || saved.selectedDate, rows)
+            // loadRange가 이미 전체를 다 그려놨으므로(⚙ 셋팅과 동일), 여기선 데이터를 다시 자르지 않고
+            // 카메라(재생 위치)만 저장된 곳으로 되돌린다.
             if (!ignore && typeof saved.playIndex === 'number' && saved.playIndex > 0) {
-              applyIndex(Math.min(saved.playIndex, rowsRef.current.length))
+              const idx = Math.min(saved.playIndex, rowsRef.current.length)
+              indexRef.current = idx
+              setPlayIndex(idx)
+              scrollPlaybackView(idx)
             }
           }
         }
@@ -895,6 +901,13 @@ export default function BacktestChart() {
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     })
     markersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
+
+    // 라벨링 버튼이 어느 캔들에 마킹할지 - 크로스헤어(마우스 올린 위치)가 있으면 그 캔들을 쓴다
+    // (마우스가 차트 밖으로 나가면 param.logical이 없어져 null로 돌아가고, 그때는 재생 위치를 씀)
+    chart.subscribeCrosshairMove((param) => {
+      if (param.logical == null || !rowsRef.current.length) { hoveredIdxRef.current = null; return }
+      hoveredIdxRef.current = Math.max(0, Math.min(Math.round(param.logical), rowsRef.current.length - 1))
+    })
 
     const onResize = () => chart.applyOptions({ width: containerRef.current.clientWidth })
     window.addEventListener('resize', onResize)
@@ -1091,55 +1104,53 @@ export default function BacktestChart() {
     const iColorShort = overrides.bollInnerColorShort ?? bollInnerColorShort
     const iSizeShort = overrides.bollInnerSizeShort ?? bollInnerSizeShort
 
+    // ⚙ 셋팅 단계에서 차트가 이미 전 구간 다 그려진 채로 시작하므로(재생은 화면 스크롤일 뿐 데이터를
+    // 새로 드러내지 않음), 마커도 더 이상 재생 위치까지만 자르지 않고 항상 전체를 그린다.
     const crossMarkers = crossPointsRef.current
-      .filter(p => p.idx < idx)
       .map(p => p.type === 'golden'
         ? { time: p.time, position: 'belowBar', color: gColor, shape: gShape, size: gSize, text: '' }
         : { time: p.time, position: 'aboveBar', color: dColor, shape: dShape, size: dSize, text: '' })
 
     // 더블비 신호는 매수(롱)/매도(숏) 방향에 따라 서로 다른 모양·색상·크기로 그린다
     const doubleBMarkers = doubleBSignalPointsRef.current
-      .filter(p => p.idx < idx)
       .map(p => p.side === 'buy'
         ? { time: p.time, position: 'inBar', color: bColorLong, shape: bShapeLong, size: bSizeLong, text: '' }
         : { time: p.time, position: 'inBar', color: bColorShort, shape: bShapeShort, size: bSizeShort, text: '' })
 
     // 볼린저 눌림 신호도 더블비와 같은 방식 - 매수(롱)/매도(숏) 방향별로 다른 모양·색상·크기
     const bollInnerMarkers = bollInnerSignalPointsRef.current
-      .filter(p => p.idx < idx)
       .map(p => p.side === 'buy'
         ? { time: p.time, position: 'inBar', color: iColorLong, shape: iShapeLong, size: iSizeLong, text: '' }
         : { time: p.time, position: 'inBar', color: iColorShort, shape: iShapeShort, size: iSizeShort, text: '' })
 
     // 세계 3대 시장 개장 시각 - 매매 신호가 아니라 항상 고정으로 보여주는 참고 마커(텍스트로 세션 이름 표시)
     const sessionMarkers = sessionPointsRef.current
-      .filter(p => p.idx < idx)
       .map(p => ({ time: p.time, position: 'aboveBar', color: p.color, shape: 'circle', size: 1, text: p.label }))
 
-    // 라벨링(수동 마킹) - 다른 신호와 같은 방식으로 재생 위치(idx)까지 드러난 것만 표시
+    // 라벨링(수동 마킹) - 다른 신호와 동일하게 항상 전체 표시
     const annotationMarkers = annotationsRef.current
-      .filter(p => p.idx < idx)
       .map(p => ({ time: p.time, position: ANNOTATION_STYLES[p.type].position, color: ANNOTATION_STYLES[p.type].color, shape: ANNOTATION_STYLES[p.type].shape, size: 2, text: ANNOTATION_STYLES[p.type].text }))
 
     markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers, ...annotationMarkers].sort((a, b) => a.time - b.time))
   }
 
-  // 라벨링 버튼 클릭 - 지금까지 재생되어 드러난 마지막 캔들에 마커를 찍는다(currentPrice와 같은 기준)
+  // 라벨링 버튼(또는 숫자키) - 차트에 마우스를 올려두고 있으면 그 크로스헤어 캔들에, 아니면 재생
+  // 위치(카메라) 캔들에 마커를 찍는다. 전부 ref만 읽으므로 키보드 리스너에서 최신값으로 호출해도 안전.
   const addAnnotation = (type) => {
-    if (playIndex === 0) return
-    const row = rowsRef.current[playIndex - 1]
+    const idx = hoveredIdxRef.current != null ? hoveredIdxRef.current : indexRef.current - 1
+    const row = rowsRef.current[idx]
     if (!row) return
     annotationsRef.current = [...annotationsRef.current, {
-      id: `${Date.now()}_${Math.random()}`, type, idx: playIndex - 1, time: row.time, price: row.close,
+      id: `${Date.now()}_${Math.random()}`, type, idx, time: row.time, price: row.close,
     }]
     setAnnotations(annotationsRef.current)
-    applyAllMarkers(indexRef.current)
+    applyAllMarkers(rowsRef.current.length)
   }
 
   const removeAnnotation = (id) => {
     annotationsRef.current = annotationsRef.current.filter(a => a.id !== id)
     setAnnotations(annotationsRef.current)
-    applyAllMarkers(indexRef.current)
+    applyAllMarkers(rowsRef.current.length)
   }
 
   // 지금까지 찍은 라벨 + 재생 위치까지 드러난 차트 데이터(buildChartDataPayload와 동일 범위)를
@@ -1167,6 +1178,24 @@ export default function BacktestChart() {
     }
     setSavingAnnotations(false)
   }
+
+  // 라벨링 숫자키 단축키(1~7 = ANNOTATION_BUTTONS 순서) - 차트에 마우스를 올린 채 키만 눌러서
+  // 마킹할 수 있게(화면을 아래 버튼까지 오갈 필요 없이). ref만 쓰는 addAnnotation을 매 렌더 최신값으로
+  // 갈아끼워두고, 리스너 자체는 마운트 시 한 번만 건다.
+  const addAnnotationRef = useRef(addAnnotation)
+  addAnnotationRef.current = addAnnotation
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      const tag = document.activeElement?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      const i = Number(e.key) - 1
+      if (i < 0 || i >= ANNOTATION_BUTTONS.length) return
+      if (!rowsRef.current.length) return
+      addAnnotationRef.current(ANNOTATION_BUTTONS[i][0])
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   const applyIndex = (idx) => {
     const dayRows = rowsRef.current.slice(0, idx)
@@ -2340,11 +2369,11 @@ export default function BacktestChart() {
     })
   }
 
-  // 지금 재생 위치까지 실제로 화면에 그려진 데이터를 스샷(그림) 대신 숫자 그대로 뽑아낸다.
-  // 캔들 + 볼린저밴드 5개 + 이평선 전부 + RSI + MACD1/5 - 전부 재생 위치(playIndex) 이후(아직 안 지난)
-  // 구간은 제외하고 지금까지 드러난 만큼만 담는다(화면에 실제 그려진 것과 동일한 범위).
+  // 지금 불러온 구간 전체(캔들 + 볼린저밴드 5개 + 이평선 전부 + RSI + MACD1/5)를 숫자로 그대로 뽑아낸다.
+  // ⚙ 셋팅 단계에서 이미 전 구간이 다 그려져 있으므로(재생은 화면 스크롤일 뿐), 재생 위치(카메라)와
+  // 무관하게 항상 로드된 전체 범위를 담는다.
   const buildChartDataPayload = () => {
-    const idx = playIndex
+    const idx = rowsRef.current.length
     const bands = {}
     for (const band of BOLLINGER_BANDS) {
       const d = bandDataRef.current[band.id]
@@ -3248,7 +3277,7 @@ export default function BacktestChart() {
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 14, fontWeight: 700 }}>📍 라벨링</span>
-                  <span style={{ fontSize: 11.5, color: '#9aa0ab' }}>재생 중 지금 캔들에 마킹합니다(학습용 데이터)</span>
+                  <span style={{ fontSize: 11.5, color: '#9aa0ab' }}>차트에 마우스를 올린 채 숫자키(1~7)를 누르면 그 캔들에 바로 마킹돼요(학습용 데이터)</span>
                   <button
                     type="button" onClick={saveAnnotations} disabled={savingAnnotations}
                     style={{
@@ -3260,16 +3289,17 @@ export default function BacktestChart() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  {ANNOTATION_BUTTONS.map(([type, label]) => (
+                  {ANNOTATION_BUTTONS.map(([type, label], i) => (
                     <button
                       key={type}
                       type="button" onClick={() => addAnnotation(type)} disabled={!total}
+                      title={`숫자키 ${i + 1}`}
                       style={{
                         background: 'none', color: ANNOTATION_STYLES[type].color, border: `1px solid ${ANNOTATION_STYLES[type].color}`,
                         borderRadius: 9, padding: '8px 14px', fontSize: 13, fontWeight: 700,
                         cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
                       }}
-                    >{label}</button>
+                    ><span style={{ opacity: 0.6, marginRight: 5 }}>{i + 1}</span>{label}</button>
                   ))}
                 </div>
 
