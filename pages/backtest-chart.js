@@ -743,6 +743,8 @@ export default function BacktestChart() {
   const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
   const annotationsRef = useRef([]) // annotations state의 최신값 거울(재생 루프/applyAllMarkers가 클로저 stale 없이 읽기 위함)
   const hoveredIdxRef = useRef(null) // 크로스헤어가 지금 가리키는 캔들 인덱스(라벨링 위치) - 차트 밖이면 null(그때는 재생 위치를 씀)
+  const pendingViewIdxRef = useRef(null) // 재생 중 화면 이동 요청을 requestAnimationFrame으로 묶어내기 위한 대기값
+  const viewRafRef = useRef(null)
   const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
   const closedTradesRef = useRef([]) // 청산된 거래 전체(수동/반자동/시뮬레이션 다 포함, source로 구분) - "결과 저장" 누르면 DB로 보냄
 
@@ -920,6 +922,7 @@ export default function BacktestChart() {
   const stopPlayback = useCallback(() => {
     setPlaying(false)
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
+    if (viewRafRef.current != null) { cancelAnimationFrame(viewRafRef.current); viewRafRef.current = null }
   }, [])
 
   // 지표 라인은 봉 재생 위치(idx)를 절대 앞서가면 안 된다 - 아직 안 지난 미래 구간의
@@ -2426,6 +2429,22 @@ export default function BacktestChart() {
     ts.setVisibleLogicalRange({ from: idx - PLAYBACK_VIEW_BARS, to: idx })
   }
 
+  // 재생 중(특히 고배속)엔 setInterval 틱이 화면 페인트보다 훨씬 잦을 수 있어, 매 틱마다 바로
+  // scrollPlaybackView(무거운 차트 리렌더)와 setPlayIndex(리액트 리렌더)를 부르면 브라우저가
+  // 못 따라가서 입력이 밀린다(INP 저하). 여러 틱이 겹치면 requestAnimationFrame 한 번으로 묶어서
+  // 실제 화면 이동 + 리액트 갱신은 페인트당 최대 1번만 하게 한다(indexRef 자체는 매 틱 정확히 갱신).
+  const requestScrollPlaybackView = (idx) => {
+    pendingViewIdxRef.current = idx
+    if (viewRafRef.current != null) return
+    viewRafRef.current = requestAnimationFrame(() => {
+      viewRafRef.current = null
+      if (pendingViewIdxRef.current == null) return
+      const flushIdx = pendingViewIdxRef.current
+      scrollPlaybackView(flushIdx)
+      setPlayIndex(flushIdx)
+    })
+  }
+
   const play = () => {
     if (!rowsRef.current.length) return
     if (indexRef.current >= rowsRef.current.length) {
@@ -2446,8 +2465,7 @@ export default function BacktestChart() {
     intervalRef.current = setInterval(() => {
       const to = Math.min(indexRef.current + candlesPerTick, rowsRef.current.length)
       indexRef.current = to
-      setPlayIndex(to)
-      scrollPlaybackView(to)
+      requestScrollPlaybackView(to)
       if (to >= rowsRef.current.length) stopPlayback()
     }, tickMs)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
