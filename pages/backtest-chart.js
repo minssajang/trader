@@ -377,6 +377,7 @@ const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 const SPEEDS = [1, 2, 3, 5, 20, 60, 100, 200, 300, 500, 600, 1000]
 const REALTIME_MS = 60000
 const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
+const PLAYBACK_VIEW_BARS = 150 // 재생 중 화면에 보여주는 캔들 개수(카메라 폭) - ⚙ 셋팅으로 이미 다 그려진 차트 위를 이 폭만큼씩 스크롤한다
 const MA_WIDTHS = [1, 2, 3, 4]
 const RSI_PERIOD = 14
 const MACD_FAST = 12
@@ -2388,13 +2389,21 @@ export default function BacktestChart() {
     return () => { if (window.getBacktestChartData === buildChartDataPayload) delete window.getBacktestChartData }
   })
 
+  // '⚙ 셋팅' 단계에서 캔들/지표/마커가 이미 전부 그려져 있으므로(applyIndex(dayRows.length)),
+  // 재생/처음부터/슬라이더는 더 이상 데이터를 새로 그리지 않고 화면(카메라)만 옮긴다.
+  const scrollPlaybackView = (idx) => {
+    const ts = chartRef.current?.timeScale()
+    if (!ts) return
+    ts.setVisibleLogicalRange({ from: idx - PLAYBACK_VIEW_BARS, to: idx })
+  }
+
   const play = () => {
     if (!rowsRef.current.length) return
-    if (indexRef.current >= rowsRef.current.length) applyIndex(0)
-    // 재생 위치를 찾기 힘들다는 피드백 - 재생 시작할 때 차트를 지금 캔들이 보이는 오른쪽 끝으로 이동시킨다.
-    // 여기서 한 번만 옮겨두면, 그 뒤로 재생되면서 새 캔들이 추가될 때도 lightweight-charts가
-    // 오른쪽 끝에 붙어있는 상태를 기본적으로 계속 따라가 준다.
-    chartRef.current?.timeScale().scrollToPosition(0, true)
+    if (indexRef.current >= rowsRef.current.length) {
+      indexRef.current = 0
+      setPlayIndex(0)
+    }
+    scrollPlaybackView(indexRef.current)
     setPlaying(true)
   }
 
@@ -2406,9 +2415,10 @@ export default function BacktestChart() {
     const tickMs = Math.max(MIN_TICK_MS, idealMs)
     const candlesPerTick = Math.max(1, Math.round(speed * tickMs / REALTIME_MS))
     intervalRef.current = setInterval(() => {
-      const from = indexRef.current
-      const to = Math.min(from + candlesPerTick, rowsRef.current.length)
-      applyIncrement(from, to)
+      const to = Math.min(indexRef.current + candlesPerTick, rowsRef.current.length)
+      indexRef.current = to
+      setPlayIndex(to)
+      scrollPlaybackView(to)
       if (to >= rowsRef.current.length) stopPlayback()
     }, tickMs)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
@@ -2416,12 +2426,16 @@ export default function BacktestChart() {
 
   const reset = () => {
     stopPlayback()
-    applyIndex(0)
+    indexRef.current = 0
+    setPlayIndex(0)
+    scrollPlaybackView(0)
   }
 
   const scrub = (idx) => {
     stopPlayback()
-    applyIndex(idx)
+    indexRef.current = idx
+    setPlayIndex(idx)
+    scrollPlaybackView(idx)
   }
 
   const navigateMonth = (delta) => {
