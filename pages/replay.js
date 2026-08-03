@@ -522,20 +522,20 @@ function PairSelect({ value, onChange, options, placeholder = '-' }) {
 // 다른 페이지 갔다가 돌아왔을 때(뒤로가기 등, 컴포넌트가 완전히 언마운트/리마운트됨) 심볼·선택한 날짜·
 // 재생 위치가 리셋되던 문제 - 탭을 닫기 전까진 유지되는 sessionStorage에 저장해두고 마운트 시 복원한다.
 // (새로고침에도 유지되길 원하면 localStorage로 바꾸면 되지만, 여긴 "이 세션 동안만" 기준으로 sessionStorage 사용)
-const BACKTEST_STATE_KEY = 'backtestChartState'
+const REPLAY_STATE_KEY = 'replayChartState'
 // 지표/색상/굵기/모양 등 "차트 표시 설정" 전체는 localStorage에 저장(사용자 요청) - 새로고침은 물론
-// 브라우저를 완전히 닫았다 열어도 유지된다(위 BACKTEST_STATE_KEY는 심볼/날짜/재생위치 같은 "지금 뭘
+// 브라우저를 완전히 닫았다 열어도 유지된다(위 REPLAY_STATE_KEY는 심볼/날짜/재생위치 같은 "지금 뭘
 // 보고 있었는지" 세션 복귀용이라 성격이 달라서 별도 키로 분리 유지).
-const CHART_SETTINGS_KEY = 'backtestChartSettings'
+const REPLAY_SETTINGS_KEY = 'replayChartSettings'
 
-export default function BacktestChart() {
+export default function ReplayChart() {
   // 마운트 시 딱 한 번만 sessionStorage를 읽어서 ref에 담아둔다(렌더 중 계산이라 useEffect보다 먼저 값이 준비됨).
   const restoreRef = useRef(undefined)
   if (restoreRef.current === undefined) {
     restoreRef.current = null
     if (typeof window !== 'undefined') {
       try {
-        const raw = window.sessionStorage.getItem(BACKTEST_STATE_KEY)
+        const raw = window.sessionStorage.getItem(REPLAY_STATE_KEY)
         if (raw) restoreRef.current = JSON.parse(raw)
       } catch { /* 저장된 값이 깨져있으면 그냥 무시하고 기본값으로 시작 */ }
     }
@@ -547,7 +547,7 @@ export default function BacktestChart() {
     settingsRestoreRef.current = null
     if (typeof window !== 'undefined') {
       try {
-        const raw = window.localStorage.getItem(CHART_SETTINGS_KEY)
+        const raw = window.localStorage.getItem(REPLAY_SETTINGS_KEY)
         if (raw) settingsRestoreRef.current = JSON.parse(raw)
       } catch { /* 저장된 값이 깨져있으면 무시하고 기본값으로 시작 */ }
     }
@@ -1455,16 +1455,16 @@ export default function BacktestChart() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     try {
-      window.sessionStorage.setItem(BACKTEST_STATE_KEY, JSON.stringify({ symbol, selectedDate, selectedDateTo, playIndex, candleVisible }))
+      window.sessionStorage.setItem(REPLAY_STATE_KEY, JSON.stringify({ symbol, selectedDate, selectedDateTo, playIndex, candleVisible }))
     } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 - 그냥 다음번엔 복원 안 될 뿐 */ }
   }, [symbol, selectedDate, selectedDateTo, playIndex, candleVisible])
 
   // 차트 표시 설정(체크박스/색상/두께/시간/투명도/모양/크기/슬롯 선택 전부) 저장 - localStorage라 브라우저를
-  // 완전히 닫았다 열어도 유지된다. "초기화" 버튼을 눌렀을 때만 CHART_SETTINGS_KEY를 지우고 새로고침한다.
+  // 완전히 닫았다 열어도 유지된다. "초기화" 버튼을 눌렀을 때만 REPLAY_SETTINGS_KEY를 지우고 새로고침한다.
   useEffect(() => {
     if (typeof window === 'undefined') return
     try {
-      window.localStorage.setItem(CHART_SETTINGS_KEY, JSON.stringify({
+      window.localStorage.setItem(REPLAY_SETTINGS_KEY, JSON.stringify({
         enabledBands, lineVisibility, bandColors,
         enabledMA, maColors, maWidths, maUpColors, maDownColors,
         ribbonEnabled, ribbonOpacity,
@@ -1509,7 +1509,7 @@ export default function BacktestChart() {
     if (typeof window === 'undefined') return
     if (!window.confirm('차트 설정을 전부 기본값으로 초기화할까요? (심볼/날짜/재생위치는 유지됩니다)')) return
     try {
-      window.localStorage.removeItem(CHART_SETTINGS_KEY)
+      window.localStorage.removeItem(REPLAY_SETTINGS_KEY)
     } catch { /* ignore */ }
     window.location.reload()
   }
@@ -2287,11 +2287,11 @@ export default function BacktestChart() {
   }
 
   // Claude가 Browser 도구로 이 페이지에 직접 접속했을 때, 파일 다운로드 없이 브라우저 콘솔에서
-  // `window.getBacktestChartData()`를 호출해서 지금 이 화면 상태(재생위치까지)를 바로 읽어갈 수 있게
+  // `window.getReplayChartData()`를 호출해서 지금 이 화면 상태(재생위치까지)를 바로 읽어갈 수 있게
   // window에 노출해둔다. 렌더될 때마다 최신 클로저로 갱신(각 값이 바뀔 때마다 새로 만들어도 비용 거의 없음).
   useEffect(() => {
-    window.getBacktestChartData = buildChartDataPayload
-    return () => { if (window.getBacktestChartData === buildChartDataPayload) delete window.getBacktestChartData }
+    window.getReplayChartData = buildChartDataPayload
+    return () => { if (window.getReplayChartData === buildChartDataPayload) delete window.getReplayChartData }
   })
 
   const play = () => {
@@ -2495,7 +2495,7 @@ export default function BacktestChart() {
 
   return (
     <>
-      <Head><title>백테스팅 차트 시뮬레이션 — EasyTrade</title></Head>
+      <Head><title>리플레이 차트 시뮬레이션 — EasyTrade</title></Head>
       <div className="bt-page" style={{ minHeight: '100vh', background: '#0f1115', color: '#e8eaed', fontFamily: '-apple-system, "Segoe UI", "Malgun Gothic", sans-serif' }}>
         <style>{`
           /* styles/site.css의 전역 button { width:100%; margin-top:20px }이
@@ -2503,11 +2503,11 @@ export default function BacktestChart() {
           .bt-page button { width: auto; margin-top: 0; }
         `}</style>
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 28px', borderBottom: '1px solid #2a2e38' }}>
-          <BrandLogo label="백테스팅" />
+          <BrandLogo label="리플레이" />
           <nav style={{ display: 'flex', gap: 6 }}>
-            <span style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: 'rgba(76,175,80,0.15)', color: '#4CAF50', border: '1px solid #4CAF50' }}>캔들 재생</span>
+            <Link href="/backtest-chart" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>캔들 재생</Link>
             <Link href="/backtest-intraday" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>📈 일중 패턴</Link>
-            <Link href="/replay" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>🔁 리플레이</Link>
+            <span style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: 'rgba(76,175,80,0.15)', color: '#4CAF50', border: '1px solid #4CAF50' }}>🔁 리플레이</span>
           </nav>
         </header>
 
