@@ -421,6 +421,24 @@ const EMPTY_PAIR_SLOTS = [{ a: '', b: '' }, { a: '', b: '' }, { a: '', b: '' }]
 const DOUBLE_B_LINE_OPTIONS = BOLLINGER_BANDS.flatMap(b =>
   [['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => ({ id: `${b.id}:${which}`, label: `${b.label} ${wlabel}` }))
 )
+// 라벨링(학습용 수동 마킹) - 재생 위치의 캔들에 사용자가 직접 찍는 마커. 매매 포지션과 무관하게
+// 화면 표시 + DB 저장(학습 데이터화)만을 목적으로 한다.
+const ANNOTATION_STYLES = {
+  entry_long: { position: 'belowBar', color: '#26a69a', shape: 'arrowUp', text: '진입롱' },
+  entry_short: { position: 'aboveBar', color: '#ef5350', shape: 'arrowDown', text: '진입숏' },
+  exit: { position: 'inBar', color: '#e8eaed', shape: 'square', text: '청산' },
+  sideways_start: { position: 'aboveBar', color: '#FFEB3B', shape: 'circle', text: '횡보시작' },
+  sideways_end: { position: 'aboveBar', color: '#FFEB3B', shape: 'circle', text: '횡보끝' },
+  trend_start: { position: 'belowBar', color: '#4FC3F7', shape: 'circle', text: '추세시작' },
+  trend_end: { position: 'belowBar', color: '#4FC3F7', shape: 'circle', text: '추세끝' },
+}
+const ANNOTATION_BUTTONS = [
+  ['entry_long', '진입롱'], ['entry_short', '진입숏'],
+  ['sideways_start', '횡보시작'], ['sideways_end', '횡보끝'],
+  ['trend_start', '추세시작'], ['trend_end', '추세끝'],
+  ['exit', '청산'],
+]
+
 // 세계 3대 시장 개장 시각 - 전부 이 차트/일중패턴 차트의 시간 라벨(브로커 서버+서머타임 오프셋,
 // candleCsv.js 기준 한국시간과 동일) 기준 분(minute-of-day)이다. 유럽(런던)은 서머타임(BST) 기준
 // 08:00 런던시각=07:00 UTC=16:00 이 시간 라벨(사용자 확인) - 겨울(GMT)엔 17:00으로 밀림.
@@ -682,6 +700,9 @@ export default function BacktestChart() {
   // 사이트 화면 어디에도 노출 안 되는, 세션에서만 쓰는 백엔드 기록)
   const [closedTradesCount, setClosedTradesCount] = useState(0)
   const [savingResults, setSavingResults] = useState(false)
+  // 라벨링(학습용 마킹) - { id, type, idx, time, price } 목록. 매매(positions)와는 완전히 별개.
+  const [annotations, setAnnotations] = useState([])
+  const [savingAnnotations, setSavingAnnotations] = useState(false)
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -719,6 +740,7 @@ export default function BacktestChart() {
   const doubleBSignalPointsRef = useRef([]) // 더블비 신호(표시용) 전체 [{idx, time, side}]
   const bollInnerSignalPointsRef = useRef([]) // 볼린저 눌림 신호(표시용) 전체 [{idx, time, side}]
   const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
+  const annotationsRef = useRef([]) // annotations state의 최신값 거울(재생 루프/applyAllMarkers가 클로저 stale 없이 읽기 위함)
   const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
   const closedTradesRef = useRef([]) // 청산된 거래 전체(수동/반자동/시뮬레이션 다 포함, source로 구분) - "결과 저장" 누르면 DB로 보냄
 
@@ -764,6 +786,8 @@ export default function BacktestChart() {
     doubleBSignalPointsRef.current = []
     bollInnerSignalPointsRef.current = []
     sessionPointsRef.current = []
+    annotationsRef.current = []
+    setAnnotations([])
     markersPrimitiveRef.current?.setMarkers([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
@@ -1091,7 +1115,56 @@ export default function BacktestChart() {
       .filter(p => p.idx < idx)
       .map(p => ({ time: p.time, position: 'aboveBar', color: p.color, shape: 'circle', size: 1, text: p.label }))
 
-    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers].sort((a, b) => a.time - b.time))
+    // 라벨링(수동 마킹) - 다른 신호와 같은 방식으로 재생 위치(idx)까지 드러난 것만 표시
+    const annotationMarkers = annotationsRef.current
+      .filter(p => p.idx < idx)
+      .map(p => ({ time: p.time, position: ANNOTATION_STYLES[p.type].position, color: ANNOTATION_STYLES[p.type].color, shape: ANNOTATION_STYLES[p.type].shape, size: 2, text: ANNOTATION_STYLES[p.type].text }))
+
+    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers, ...annotationMarkers].sort((a, b) => a.time - b.time))
+  }
+
+  // 라벨링 버튼 클릭 - 지금까지 재생되어 드러난 마지막 캔들에 마커를 찍는다(currentPrice와 같은 기준)
+  const addAnnotation = (type) => {
+    if (playIndex === 0) return
+    const row = rowsRef.current[playIndex - 1]
+    if (!row) return
+    annotationsRef.current = [...annotationsRef.current, {
+      id: `${Date.now()}_${Math.random()}`, type, idx: playIndex - 1, time: row.time, price: row.close,
+    }]
+    setAnnotations(annotationsRef.current)
+    applyAllMarkers(indexRef.current)
+  }
+
+  const removeAnnotation = (id) => {
+    annotationsRef.current = annotationsRef.current.filter(a => a.id !== id)
+    setAnnotations(annotationsRef.current)
+    applyAllMarkers(indexRef.current)
+  }
+
+  // 지금까지 찍은 라벨 + 재생 위치까지 드러난 차트 데이터(buildChartDataPayload와 동일 범위)를
+  // 함께 DB에 저장한다 - 나중에 이 기록을 모아 학습 데이터로 쓸 수 있게.
+  const saveAnnotations = async () => {
+    if (annotations.length === 0) {
+      alert('저장할 라벨이 없습니다. 재생하면서 진입롱/진입숏/횡보/추세/청산 버튼으로 마킹해보세요.')
+      return
+    }
+    setSavingAnnotations(true)
+    try {
+      const res = await fetch('/api/chart-annotations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol, date_from: selectedDate, date_to: selectedDateTo || selectedDate,
+          annotations,
+          chart_data: buildChartDataPayload(),
+        }),
+      })
+      if (!res.ok) throw new Error()
+      alert(`라벨 ${annotations.length}건을 저장했습니다.`)
+    } catch {
+      alert('저장에 실패했습니다.')
+    }
+    setSavingAnnotations(false)
   }
 
   const applyIndex = (idx) => {
@@ -1201,6 +1274,8 @@ export default function BacktestChart() {
     doubleBSignalPointsRef.current = []
     bollInnerSignalPointsRef.current = []
     sessionPointsRef.current = []
+    annotationsRef.current = []
+    setAnnotations([])
     markersPrimitiveRef.current?.setMarkers([])
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
@@ -1428,6 +1503,8 @@ export default function BacktestChart() {
     doubleBSignalPointsRef.current = []
     bollInnerSignalPointsRef.current = []
     sessionPointsRef.current = []
+    annotationsRef.current = []
+    setAnnotations([])
     markersPrimitiveRef.current?.setMarkers([])
     setPositions([])
   }
@@ -3149,198 +3226,47 @@ export default function BacktestChart() {
               </div>
 
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa0ab' }}>
-                    시작 자금
-                    <input
-                      type="number" min={0} value={startingBalance}
-                      onChange={e => applyStartingBalance(e.target.value)}
-                      style={{ width: 100, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '5px 8px', fontSize: 13 }}
-                    />
-                    USD
-                  </label>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>
-                    잔고: ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                  <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
-                    {[['dollar', '달러'], ['point', '포인트']].map(([mode, label]) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setPnlDisplay(mode)}
-                        style={{
-                          fontSize: 12, padding: '5px 10px', borderRadius: 7,
-                          border: `1px solid ${pnlDisplay === mode ? '#4CAF50' : '#2a2e38'}`,
-                          background: pnlDisplay === mode ? 'rgba(76,175,80,0.15)' : 'none',
-                          color: pnlDisplay === mode ? '#4CAF50' : '#9aa0ab', cursor: 'pointer',
-                        }}
-                      >{label}</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>📍 라벨링</span>
+                  <span style={{ fontSize: 11.5, color: '#9aa0ab' }}>재생 중 지금 캔들에 마킹합니다(학습용 데이터)</span>
+                  <button
+                    type="button" onClick={saveAnnotations} disabled={savingAnnotations}
+                    style={{
+                      marginLeft: 'auto', fontSize: 12, padding: '5px 12px', borderRadius: 6, cursor: savingAnnotations ? 'default' : 'pointer',
+                      border: '1px solid #4CAF50', background: '#4CAF5022', color: '#4CAF50', fontWeight: 700,
+                      opacity: savingAnnotations ? 0.6 : 1,
+                    }}
+                  >{savingAnnotations ? '저장 중...' : `저장 (${annotations.length}건)`}</button>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {ANNOTATION_BUTTONS.map(([type, label]) => (
+                    <button
+                      key={type}
+                      type="button" onClick={() => addAnnotation(type)} disabled={!total}
+                      style={{
+                        background: 'none', color: ANNOTATION_STYLES[type].color, border: `1px solid ${ANNOTATION_STYLES[type].color}`,
+                        borderRadius: 9, padding: '8px 14px', fontSize: 13, fontWeight: 700,
+                        cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
+                      }}
+                    >{label}</button>
+                  ))}
+                </div>
+
+                {annotations.length > 0 && (
+                  <div style={{ marginTop: 12, borderTop: '1px solid #2a2e38', paddingTop: 8 }}>
+                    {annotations.map(a => (
+                      <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5 }}>
+                        <span style={{ color: ANNOTATION_STYLES[a.type].color, fontWeight: 700, width: 70 }}>{ANNOTATION_STYLES[a.type].text}</span>
+                        <span style={{ color: '#9aa0ab' }}>{a.price.toFixed(2)}</span>
+                        <button
+                          type="button" onClick={() => removeAnnotation(a.id)}
+                          style={{ marginLeft: 'auto', fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
+                        >삭제</button>
+                      </div>
                     ))}
                   </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ fontSize: 12, color: '#9aa0ab' }}>랏수</span>
-                    <button type="button" onClick={() => nudgeLot(-0.01)} style={{ width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1, background: 'none', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', fontSize: 16, cursor: 'pointer' }}>−</button>
-                    <input
-                      type="number" step={0.01} min={0.01} value={lotSize}
-                      onChange={e => setLotSize(Math.max(0.01, Number(e.target.value) || 0.01))}
-                      style={{ width: 64, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '5px 6px', fontSize: 13, textAlign: 'center' }}
-                    />
-                    <button type="button" onClick={() => nudgeLot(0.01)} style={{ width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1, background: 'none', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', fontSize: 16, cursor: 'pointer' }}>+</button>
-                  </div>
-
-                  <button
-                    type="button" onClick={() => openPosition('buy')} disabled={currentPrice == null}
-                    style={{
-                      background: '#26a69a', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
-                      padding: '9px 22px', fontSize: 14, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
-                    }}
-                  >BUY</button>
-                  <button
-                    type="button" onClick={() => openPosition('sell')} disabled={currentPrice == null}
-                    style={{
-                      background: '#ef5350', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
-                      padding: '9px 22px', fontSize: 14, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
-                    }}
-                  >SELL</button>
-
-                  <span style={{ fontSize: 11, color: '#5a5f6a' }}>
-                    {symbol === 'GOLD' ? '골드 1랏 = 1.00pt당 $100' : '나스닥 1랏 = 1.00pt당 $1'} (수수료 미반영)
-                  </span>
-                </div>
-
-                {positions.length > 0 && (
-                  <div style={{ marginTop: 12, borderTop: '1px solid #2a2e38', paddingTop: 8 }}>
-                    {positions.map(pos => {
-                      const { points, dollars } = currentPrice != null ? calcPnl(pos, currentPrice) : { points: 0, dollars: 0 }
-                      const profit = dollars >= 0
-                      return (
-                        <div key={pos.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5 }}>
-                          <span style={{ color: pos.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36 }}>
-                            {pos.side === 'buy' ? 'BUY' : 'SELL'}
-                          </span>
-                          <span style={{ color: '#9aa0ab' }}>{pos.lot.toFixed(2)}랏</span>
-                          <span style={{ color: '#9aa0ab' }}>진입 {pos.entryPrice.toFixed(2)}</span>
-                          <span style={{ color: profit ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
-                            {currentPrice == null ? '—' : pnlDisplay === 'dollar'
-                              ? `${profit ? '+' : ''}$${dollars.toFixed(2)}`
-                              : `${points >= 0 ? '+' : ''}${points.toFixed(2)}pt`}
-                          </span>
-                          <button
-                            type="button" onClick={() => closePosition(pos.id)}
-                            style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
-                          >청산</button>
-                        </div>
-                      )
-                    })}
-                  </div>
                 )}
-              </div>
-
-              <div style={{ marginTop: 16 }}>
-                <CollapsibleCard title="⚙ 반자동" maxWidth="none" defaultOpen={false}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
-                    <input
-                      type="checkbox" checked={semiAutoEnabled}
-                      onChange={e => setSemiAutoEnabled(e.target.checked)}
-                      style={{ width: 15, height: 15, accentColor: '#4CAF50' }}
-                    />
-                    반자동 사용하기
-                  </label>
-
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (왼쪽 "크로스" 표시와는 슬롯이 따로지만, 같은 조합을 골라두면 마커가 뜨는 캔들에 그대로 진입됩니다)
-                    </div>
-                    {renderPairSlots(autoCrossPairs, setAutoCrossPair, MOVING_AVERAGES, '크로스')}
-                  </div>
-
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 더블비 — 슬롯에서 고른 라인 2개가 겹친 구간을 캔들이 동시에 터치 (겹친 구간이 상단쪽이면 매도, 하단쪽이면 매수 / 왼쪽 "더블비 신호" 표시와는 슬롯이 따로지만, 같은 조합을 골라두면 마커가 뜨는 캔들에 그대로 진입됩니다)
-                    </div>
-                    {renderPairSlots(autoDoubleBPairs, setAutoDoubleBPair, DOUBLE_B_LINE_OPTIONS, '더블비')}
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 볼린저 눌림(5분↔15분 고정) — 5분 상단선이 15분 상단선 안(아래)이면 매도, 5분 하단선이 15분 하단선 안(위)이면 매수. 유지되는 동안 매 캔들 계속 신호
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: autoBollInnerSellEnabled ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={autoBollInnerSellEnabled} onChange={toggleAutoBollInnerSell} style={{ width: 13, height: 13, margin: 0, accentColor: '#ef5350' }} />
-                        5분 상단 눌림 → 매도
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: autoBollInnerBuyEnabled ? '#26a69a' : '#9aa0ab', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={autoBollInnerBuyEnabled} onChange={toggleAutoBollInnerBuy} style={{ width: 13, height: 13, margin: 0, accentColor: '#26a69a' }} />
-                        5분 하단 눌림 → 매수
-                      </label>
-                    </div>
-                  </div>
-                </CollapsibleCard>
-              </div>
-
-              {/* 시뮬레이션 - 반자동과 조건 구성/계산 로직은 동일하고, 켜고 끄는 체크와 진입 타임라인만 별도라
-                  반자동과 동시에 켜두고 서로 다른 조건 조합을 비교해볼 수 있다. 날짜 선택/재생은 위 차트 컨트롤 그대로 공용으로 쓴다. */}
-              <div style={{ marginTop: 16 }}>
-                <CollapsibleCard title="🧪 시뮬레이션" maxWidth="none" defaultOpen={false}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
-                    <input
-                      type="checkbox" checked={simulationEnabled}
-                      onChange={e => setSimulationEnabled(e.target.checked)}
-                      style={{ width: 15, height: 15, accentColor: '#4CAF50' }}
-                    />
-                    시뮬레이션 사용하기
-                  </label>
-
-                  {/* 화면에 노출되는 "분석" 기능은 아니고, 청산된 시뮬레이션 거래를 DB에 쌓아뒀다가
-                      나중에 대화 중 요청하면 그 기록을 조회해서 분석해주는 용도의 저장 버튼 */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '8px 10px', background: '#0f1115', borderRadius: 8 }}>
-                    <span style={{ fontSize: 12, color: '#9aa0ab' }}>청산된 시뮬레이션 거래 {closedTradesCount}건</span>
-                    <button
-                      type="button"
-                      onClick={saveSimulationResults}
-                      disabled={savingResults}
-                      style={{
-                        fontSize: 12, padding: '5px 12px', borderRadius: 6, cursor: savingResults ? 'default' : 'pointer',
-                        border: '1px solid #4CAF50', background: '#4CAF5022', color: '#4CAF50', fontWeight: 700,
-                        opacity: savingResults ? 0.6 : 1,
-                      }}
-                    >{savingResults ? '저장 중...' : '결과 저장'}</button>
-                  </div>
-
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (반자동과 별개로 켜고 끌 수 있는 시뮬레이션 전용 슬롯입니다)
-                    </div>
-                    {renderPairSlots(simCrossPairs, setSimCrossPair, MOVING_AVERAGES, '크로스')}
-                  </div>
-
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 더블비 — 슬롯에서 고른 라인 2개가 겹친 구간을 캔들이 동시에 터치 (겹친 구간이 상단쪽이면 매도, 하단쪽이면 매수 / 반자동과 별개인 시뮬레이션 전용 슬롯입니다)
-                    </div>
-                    {renderPairSlots(simDoubleBPairs, setSimDoubleBPair, DOUBLE_B_LINE_OPTIONS, '더블비')}
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 볼린저 눌림(5분↔15분 고정) — 5분 상단선이 15분 상단선 안(아래)이면 매도, 5분 하단선이 15분 하단선 안(위)이면 매수. 유지되는 동안 매 캔들 계속 신호
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: simBollInnerSellEnabled ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={simBollInnerSellEnabled} onChange={toggleSimBollInnerSell} style={{ width: 13, height: 13, margin: 0, accentColor: '#ef5350' }} />
-                        5분 상단 눌림 → 매도
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: simBollInnerBuyEnabled ? '#26a69a' : '#9aa0ab', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={simBollInnerBuyEnabled} onChange={toggleSimBollInnerBuy} style={{ width: 13, height: 13, margin: 0, accentColor: '#26a69a' }} />
-                        5분 하단 눌림 → 매수
-                      </label>
-                    </div>
-                  </div>
-                </CollapsibleCard>
               </div>
             </div>
           </div>
