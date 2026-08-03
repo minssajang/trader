@@ -374,7 +374,7 @@ const BUCKET = 'backtest-data'
 
 const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 // x1 = 실제 1분봉 그대로(캔들 1개 = 60초). 다른 배속은 전부 이 기준의 배수.
-const SPEEDS = [0.25, 0.5, 1, 2, 3, 5, 20, 60, 100, 200, 300]
+const SPEEDS = [1, 2, 3, 5, 20, 60, 100, 200, 300, 500, 600, 1000]
 const REALTIME_MS = 60000
 const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
 const MA_WIDTHS = [1, 2, 3, 4]
@@ -1158,8 +1158,8 @@ export default function BacktestChart() {
     setPlayIndex(to)
   }
 
-  // fromStr === toStr이면 하루, fromStr < toStr이면 그 사이 여러 날을 이어서 하나의 재생 구간으로 불러온다
-  // (여러 날 선택 모드에서 두 번째 클릭 시 씀). 단일 날짜 클릭(loadDate)도 내부적으로 이 함수를 그대로 쓴다.
+  // fromStr === toStr이면 하루, fromStr < toStr이면 그 사이 여러 날을 이어서 하나의 재생 구간으로 불러온다.
+  // '⚙ 셋팅' 버튼(applySelection)이 선택된 날짜/범위로 이 함수를 부른다.
   // datasetsOverride: 세션 복원 직후처럼 setDatasets(rows)를 호출한 바로 그 틱 안에서 곧바로
   // loadRange를 부르면, 이 함수가 클로저로 캡처한 `datasets` state는 아직 리렌더 전이라 예전 값(빈 배열)
   // 그대로다 - "이 심볼엔 데이터셋이 없다"고 오판해서 조용히 실패하는 버그가 있었음. 그 경우엔 방금 받은
@@ -1364,15 +1364,17 @@ export default function BacktestChart() {
     setLoadingCsv(false)
   }
 
-  const loadDate = (dateStr) => loadRange(dateStr, dateStr)
-
-  // 달력 클릭 처리 - 여러 날 선택 모드가 꺼져있으면 예전처럼 클릭한 날 하루만 바로 불러온다.
-  // 켜져있으면 첫 클릭은 범위 시작점만 표시해두고, 두 번째 클릭에서 시작~끝을 이어서 불러온다
+  // 달력 클릭 처리 - 날짜를 고르기만 하고(선택 상태만 바뀜) 바로 로드하지 않는다.
+  // 실제 로드는 아래 '⚙ 셋팅' 버튼을 눌러야 일어난다(사용자 요청 - 선택과 로드를 분리).
+  // 여러 날 선택 모드가 꺼져있으면 클릭한 날 하루만 선택하고, 켜져있으면 첫 클릭은 범위
+  // 시작점만 표시해두고 두 번째 클릭에서 시작~끝을 범위로 선택한다(로드는 아직 안 함).
   // (Shift+클릭도 같은 방식으로 동작 - MonthCalendar가 이미 shiftKey를 넘겨주고 있었음).
   const handleCalendarSelect = (dateStr, shiftKey) => {
     if (!multiSelectMode && !shiftKey) {
       rangeAnchorRef.current = ''
-      loadDate(dateStr)
+      setSelectedDate(dateStr)
+      setSelectedDateTo('')
+      setError('')
       return
     }
     if (!rangeAnchorRef.current) {
@@ -1386,7 +1388,15 @@ export default function BacktestChart() {
     rangeAnchorRef.current = ''
     const from = anchor <= dateStr ? anchor : dateStr
     const to = anchor <= dateStr ? dateStr : anchor
-    loadRange(from, to)
+    setSelectedDate(from)
+    setSelectedDateTo(to)
+    setError('')
+  }
+
+  // '⚙ 셋팅' 버튼 - 지금 선택된(아직 안 불러온) 날짜/범위를 실제로 불러와 차트를 구성한다.
+  const applySelection = () => {
+    if (!selectedDate) return
+    loadRange(selectedDate, selectedDateTo || selectedDate)
   }
 
   // 선택 전부 지우고 빈 화면으로 - '전체선택' 체크 해제할 때 씀. symbol 전환 리셋과 같은 항목을 지운다.
@@ -1422,9 +1432,8 @@ export default function BacktestChart() {
     setPositions([])
   }
 
-  // '전체선택' - 지금 보고 있는 달에 데이터 있는 날짜를 전부 이어서 하나의 재생 구간으로 불러온다.
-  // (loadRange가 '같은 데이터 파일 안'이어야 한다는 제약을 그대로 검사하므로, 파일 경계에 걸친 달은
-  // 기존과 동일하게 에러 메시지가 뜬다.) 체크 해제하면 clearSelection으로 빈 화면으로 되돌린다.
+  // '전체선택' - 지금 보고 있는 달에 데이터 있는 날짜를 전부 하나의 범위로 선택만 해둔다(로드는
+  // 다른 날짜 선택과 마찬가지로 '⚙ 셋팅' 버튼을 눌러야 일어난다). 체크 해제하면 clearSelection.
   const selectAllMonth = () => {
     if (allMonthSelected) {
       clearSelection()
@@ -1433,7 +1442,9 @@ export default function BacktestChart() {
     if (monthAvailableDates.length === 0) return
     rangeAnchorRef.current = ''
     setMultiSelectMode(true)
-    loadRange(monthAvailableDates[0], monthAvailableDates[monthAvailableDates.length - 1])
+    setSelectedDate(monthAvailableDates[0])
+    setSelectedDateTo(monthAvailableDates[monthAvailableDates.length - 1])
+    setError('')
   }
 
   const allMonthSelected = monthAvailableDates.length > 0
@@ -1444,7 +1455,7 @@ export default function BacktestChart() {
 
   // 서머타임 상태가 바뀌면 캐시된 rows엔 예전 오프셋이 이미 반영돼 있어서 그대로 두면 안 바뀐다.
   // 캐시를 통째로 비우고, 지금 보고 있던 날짜가 있으면 새 오프셋으로 다시 불러온다.
-  // (setSummerTime 콜백 안에서 바로 loadDate를 부르면 summerTime이 아직 안 바뀐 값이라 한 번 밀리므로 effect로 분리)
+  // (setSummerTime 콜백 안에서 바로 loadRange를 부르면 summerTime이 아직 안 바뀐 값이라 한 번 밀리므로 effect로 분리)
   useEffect(() => {
     datasetCacheRef.current = {}
     if (selectedDate) loadRange(selectedDate, selectedDateTo || selectedDate)
@@ -2505,7 +2516,7 @@ export default function BacktestChart() {
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 28px', borderBottom: '1px solid #2a2e38' }}>
           <BrandLogo label="백테스팅" />
           <nav style={{ display: 'flex', gap: 6 }}>
-            <span style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: 'rgba(76,175,80,0.15)', color: '#4CAF50', border: '1px solid #4CAF50' }}>캔들 재생</span>
+            <span style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: 'rgba(76,175,80,0.15)', color: '#4CAF50', border: '1px solid #4CAF50' }}>학습</span>
             <Link href="/backtest-intraday" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>📈 일중 패턴</Link>
             <Link href="/replay" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>🔁 리플레이</Link>
           </nav>
@@ -3102,6 +3113,11 @@ export default function BacktestChart() {
               />
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+                <button onClick={applySelection} disabled={!selectedDate} title="선택한 날짜(범위)의 차트를 불러와 준비합니다" style={{
+                  background: '#2196F3', color: '#fff', border: 'none', borderRadius: 9,
+                  padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: selectedDate ? 'pointer' : 'not-allowed', opacity: selectedDate ? 1 : 0.5,
+                }}>⚙ 셋팅</button>
+
                 <button onClick={playing ? stopPlayback : play} disabled={!total} style={{
                   background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 9,
                   padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
