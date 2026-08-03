@@ -1430,7 +1430,13 @@ export default function BacktestChart() {
         refreshSessionMarkers()
       }
 
-      if (dayRows.length === 0) setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
+      if (dayRows.length === 0) {
+        setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
+      } else {
+        // '⚙ 셋팅' = 그 기간 차트를 바로 다 그려서 보여준다(재생은 여기서 처음부터 다시 훑고 싶을 때
+        // '⏮ 처음부터'를 눌러 0으로 되돌린 뒤 쓰면 됨 - 로드 직후 화면이 비어 보이는 문제 방지).
+        applyIndex(dayRows.length)
+      }
     } catch (e) {
       setError(e.message)
       rowsRef.current = []
