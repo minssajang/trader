@@ -641,7 +641,7 @@ export default function ReplayChart() {
   const [bandColors, setBandColors] = useState(rs.bandColors ?? {}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
   // 기본 셋팅 - 3분/5분/15분 H, 1분/5분 W17, 1시간 W4 이평선 체크
   const [enabledMA, setEnabledMA] = useState(rs.enabledMA ?? {
-    hma60: true, hma100: true, hma300: true, wma17_1m: true, wma17_5m: true, wma4_1h: true,
+    hma20: true, hma60: true, hma100: true, hma300: true, wma17_1m: true, wma17_5m: true, wma4_1h: true,
     ...Object.fromEntries(MADRID_RIBBON.map(m => [m.id, true])), // 리본 기본 체크(사용자 요청)
   })
   const [maColors, setMaColors] = useState(rs.maColors ?? {}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
@@ -3365,7 +3365,7 @@ export default function ReplayChart() {
                 </div>
               </CollapsibleCard>
 
-              <CollapsibleCard title="볼린저" maxWidth={170}>
+              <CollapsibleCard title="볼린저" maxWidth={170} defaultOpen={false}>
                 {BOLLINGER_BANDS.map(band => {
                   const on = !!enabledBands[band.id]
                   const color = getBandColor(band)
