@@ -3383,7 +3383,9 @@ export default function BacktestChart() {
             </div>
 
             {/* 오른쪽 컬럼: 상태줄 / 차트 / 컨트롤 */}
-            <div style={{ flex: 1, minWidth: 280 }}>
+            {/* 왼쪽 사이드바(카드 여러개 펼치면 훨씬 길어짐)를 스크롤해서 내려도 이 컬럼이 화면 밖으로
+                사라지지 않게 뷰포트 높이에 sticky로 고정하고, 자체 높이가 화면보다 크면 내부에서만 스크롤되게 함 */}
+            <div style={{ flex: 1, minWidth: 280, position: 'sticky', top: 20, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto', overflowX: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', minHeight: 38 }}>
                 {!selectedDate && <div style={{ color: '#9aa0ab', fontSize: 13 }}>왼쪽 달력에서 초록색으로 표시된 날짜를 눌러보세요.</div>}
                 {selectedDate && (
