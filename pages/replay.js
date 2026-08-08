@@ -1079,9 +1079,14 @@ export default function ReplayChart() {
       const entryMs = new Date(`${entryDate}T${entryTime}`).getTime()
       const exitMs = new Date(`${exitDate}T${exitTime}`).getTime()
       if (Number.isNaN(entryMs) || Number.isNaN(exitMs)) continue
+      // CSV는 서버(API)가 UTC 환경에서 계산한 시각을 한국시간 문자열로 적어 넘긴 것.
+      // 이 페이지의 캔들 시간(rowsRef)은 브라우저(KST)에서 직접 계산돼서 서버와 정확히
+      // 9시간(32400초) 차이가 난다 - 같은 캔들을 원본 CSV로 직접 대조해서 확인한 값.
+      // 그 오차를 여기서 보정해야 실제 로드된 캔들 시간과 정확히 맞아떨어진다.
+      const SERVER_BROWSER_TZ_OFFSET_SEC = 9 * 3600
       trades.push({
-        entryTime: Math.floor(entryMs / 1000),
-        exitTime: Math.floor(exitMs / 1000),
+        entryTime: Math.floor(entryMs / 1000) - SERVER_BROWSER_TZ_OFFSET_SEC,
+        exitTime: Math.floor(exitMs / 1000) - SERVER_BROWSER_TZ_OFFSET_SEC,
         dir: dir.trim() === '롱' ? 'long' : 'short',
         entryPrice: parseFloat(entryPrice),
         exitPrice: parseFloat(exitPrice),
