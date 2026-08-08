@@ -688,6 +688,7 @@ export default function ReplayChart() {
   const [uploadedTradeCount, setUploadedTradeCount] = useState(0)
   const [showUploadedTrades, setShowUploadedTrades] = useState(true)
   const [uploadedTradeError, setUploadedTradeError] = useState('')
+  const [tradeDragOver, setTradeDragOver] = useState(false)
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -1458,11 +1459,11 @@ export default function ReplayChart() {
 
   const loadDate = (dateStr) => loadRange(dateStr, dateStr)
 
-  // 매매내역 CSV 업로드 - 파일 하나를 고르면 그걸로 통째로 교체(여러 개 겹쳐 올리는 기능 아님)
-  const handleTradeCsvUpload = async (e) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
+  // 매매내역 CSV 업로드 - 파일 하나를 고르면 그걸로 통째로 교체(여러 개 겹쳐 올리는 기능 아님).
+  // 클릭 선택(input onChange)과 드래그앤드롭이 공유하는 실제 처리 로직
+  const processTradeCsvFile = async (file) => {
     if (!file) return
+    if (!/\.csv$/i.test(file.name)) { setUploadedTradeError('CSV 파일만 업로드할 수 있습니다'); return }
     setUploadedTradeError('')
     try {
       const text = await file.text()
@@ -1477,6 +1478,19 @@ export default function ReplayChart() {
     } catch (err) {
       setUploadedTradeError(err.message || '파일을 읽지 못했습니다')
     }
+  }
+
+  const handleTradeCsvUpload = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    await processTradeCsvFile(file)
+  }
+
+  const handleTradeCsvDrop = async (e) => {
+    e.preventDefault()
+    setTradeDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    await processTradeCsvFile(file)
   }
 
   const clearUploadedTrades = () => {
@@ -3188,12 +3202,19 @@ export default function ReplayChart() {
 
               <CollapsibleCard title="📤 매매내역 업로드" maxWidth={170} defaultOpen={true}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    fontSize: 11, padding: '8px 6px', borderRadius: 8, cursor: 'pointer',
-                    border: '1px dashed #2a2e38', color: '#9aa0ab', textAlign: 'center',
-                  }}>
-                    📥 CSV 선택
+                  <label
+                    onDragOver={e => { e.preventDefault(); setTradeDragOver(true) }}
+                    onDragLeave={() => setTradeDragOver(false)}
+                    onDrop={handleTradeCsvDrop}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      fontSize: 11, padding: '8px 6px', borderRadius: 8, cursor: 'pointer',
+                      border: `1px dashed ${tradeDragOver ? '#4CAF50' : '#2a2e38'}`,
+                      background: tradeDragOver ? 'rgba(76,175,80,0.08)' : 'transparent',
+                      color: '#9aa0ab', textAlign: 'center', transition: 'all 0.15s',
+                    }}
+                  >
+                    📥 CSV 선택 또는 드래그
                     <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleTradeCsvUpload} />
                   </label>
                   {uploadedTradeFile && (
