@@ -1251,6 +1251,8 @@ export default function ReplayChart() {
     const iBreakoutDir = idxOf('이탈방향', 12)
     const iComboLabel = headerCols.indexOf('조합분류') // 없으면 -1 (옛 파일엔 없는 컬럼)
     const iCombo = headerCols.indexOf('조합')
+    const iNum = headerCols.indexOf('전체관리번호') // 파일 전체 기준 고유번호 - 날짜마다 리셋되는 화면의 "#캔들번호"와 다름(사용자 지적)
+    const iDateNum = headerCols.indexOf('날짜관리번호') // "YYMMDD#그날캔들순번" 형식(예: 260422#104)
     const minCols = Math.max(iEntryDate, iEntryTime, iDir, iEntryPrice, iExitDate, iExitTime, iExitPrice, iExitReason, iPnl) + 1
 
     const trades = []
@@ -1287,6 +1289,8 @@ export default function ReplayChart() {
         breakoutDir: (cols[iBreakoutDir] || '').trim() || null,
         comboLabel: iComboLabel >= 0 ? (cols[iComboLabel] || '').trim() || null : null,
         combo: iCombo >= 0 ? (cols[iCombo] || '').trim() || null : null,
+        num: iNum >= 0 ? (cols[iNum] || '').trim() || null : null,
+        dateNum: iDateNum >= 0 ? (cols[iDateNum] || '').trim() || null : null,
       })
     }
     return trades
@@ -1355,7 +1359,7 @@ export default function ReplayChart() {
         entryIdx: entryIn ? entryIdx : null, entryTime: t.entryTime, entryPrice: t.entryPrice,
         exitIdx: exitIn ? exitIdx : null, exitTime: t.exitTime, exitPrice: t.exitPrice,
         breakoutIdx: breakoutIdx ?? null, breakoutTime: t.breakoutTime, breakoutDir: t.breakoutDir,
-        comboLabel: t.comboLabel, combo: t.combo,
+        comboLabel: t.comboLabel, combo: t.combo, num: t.num, dateNum: t.dateNum,
       })
     }
     uploadedTradeMarkersRef.current = markers.sort((a, b) => a.time - b.time)
@@ -3255,13 +3259,7 @@ export default function ReplayChart() {
                                 <span style={{ color: r.dir === 'long' ? '#C6FF00' : '#AB47BC', fontWeight: 700 }}>
                                   {r.dir === 'long' ? '▲롱' : '▼숏'}
                                 </span>
-                                {' '}
-                                {r.entryIdx != null ? `#${r.entryIdx + 1}(${fmtHm(r.entryTime)})` : '이전구간'}
-                                {' → '}
-                                <span style={{ color: uploadedExitColor(r.exitReason) }}>
-                                  {r.exitIdx != null ? `#${r.exitIdx + 1}(${fmtHm(r.exitTime)})` : '다음구간'}
-                                </span>
-                                {' '}
+                                {' / '}
                                 <span style={{ color: '#6b7280' }}>{r.pnl > 0 ? '+' : ''}{r.pnl.toFixed(1)}pt</span>
                               </div>
                               {r.comboLabel && (
@@ -3269,13 +3267,32 @@ export default function ReplayChart() {
                                   {r.comboLabel === '나쁜' ? '⚠ 나쁜조합' : '좋은조합'}{r.combo ? ` (${r.combo})` : ''}
                                 </div>
                               )}
-                              <div style={{ color: '#6b7280', marginTop: 1 }}>
-                                진입가 {r.entryPrice != null ? r.entryPrice.toFixed(2) : '-'} → 청산가 {r.exitPrice != null ? r.exitPrice.toFixed(2) : '-'}
+                              {/* 화면 캔들순번(#104)은 불러온 날짜마다 리셋돼서 매매 식별용으론 안 맞음(사용자 지적) -
+                                  전체거래번호(파일 전체 기준 고유번호)와 날짜관리번호(YYMMDD#그날캔들순번)를 캡션으로 같이 표시 */}
+                              {(r.num != null || r.dateNum != null) && (
+                                <div style={{ color: '#5a5f6a', marginTop: 1, fontSize: 9.5 }}>
+                                  전체거래번호 / 날짜관리번호
+                                </div>
+                              )}
+                              {(r.num != null || r.dateNum != null) && (
+                                <div style={{ color: '#9aa0ab', marginTop: 1 }}>
+                                  {r.num != null ? `#${r.num}` : '-'}{' / '}{r.dateNum || '-'}
+                                </div>
+                              )}
+                              <div style={{ marginTop: 1 }}>
+                                {r.entryIdx != null ? `#${r.entryIdx + 1}(${fmtHm(r.entryTime)})` : '이전구간'}
+                                {' → '}
+                                <span style={{ color: uploadedExitColor(r.exitReason) }}>
+                                  {r.exitIdx != null ? `#${r.exitIdx + 1}(${fmtHm(r.exitTime)})` : '다음구간'}
+                                </span>
                               </div>
                               <div style={{ color: r.breakoutTime != null ? '#FFC107' : '#6b7280', marginTop: 1 }}>
                                 {r.breakoutTime != null
                                   ? `이탈: ${r.breakoutIdx != null ? `#${r.breakoutIdx + 1}(${fmtHm(r.breakoutTime)})` : fmtHm(r.breakoutTime)} ${r.breakoutDir || ''}`
                                   : '이탈: 크로스전환(새 돌파 없음)'}
+                              </div>
+                              <div style={{ color: '#6b7280', marginTop: 1 }}>
+                                진입가 {r.entryPrice != null ? r.entryPrice.toFixed(2) : '-'} → 청산가 {r.exitPrice != null ? r.exitPrice.toFixed(2) : '-'}
                               </div>
                             </div>
                           ))}
