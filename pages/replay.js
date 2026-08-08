@@ -1237,7 +1237,7 @@ export default function ReplayChart() {
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(',')
       if (cols.length < 10) continue
-      const [entryDate, entryTime, dir, entryPrice, exitDate, exitTime, exitPrice, , exitReason, pnl] = cols
+      const [entryDate, entryTime, dir, entryPrice, exitDate, exitTime, exitPrice, , exitReason, pnl, breakoutDate, breakoutTimeStr, breakoutDir] = cols
       const entryMs = new Date(`${entryDate}T${entryTime}`).getTime()
       const exitMs = new Date(`${exitDate}T${exitTime}`).getTime()
       if (Number.isNaN(entryMs) || Number.isNaN(exitMs)) continue
@@ -1246,6 +1246,12 @@ export default function ReplayChart() {
       // 9시간(32400초) 차이가 난다 - 같은 캔들을 원본 CSV로 직접 대조해서 확인한 값.
       // 그 오차를 여기서 보정해야 실제 로드된 캔들 시간과 정확히 맞아떨어진다.
       const SERVER_BROWSER_TZ_OFFSET_SEC = 9 * 3600
+      // 11~13번째 컬럼(이탈날짜/이탈시각/이탈방향)은 선택 항목 - 크로스전환 진입은 원래 비어있다.
+      let breakoutTime = null
+      if (breakoutDate && breakoutTimeStr) {
+        const breakoutMs = new Date(`${breakoutDate}T${breakoutTimeStr}`).getTime()
+        if (!Number.isNaN(breakoutMs)) breakoutTime = Math.floor(breakoutMs / 1000) - SERVER_BROWSER_TZ_OFFSET_SEC
+      }
       trades.push({
         entryTime: Math.floor(entryMs / 1000) - SERVER_BROWSER_TZ_OFFSET_SEC,
         exitTime: Math.floor(exitMs / 1000) - SERVER_BROWSER_TZ_OFFSET_SEC,
@@ -1254,6 +1260,8 @@ export default function ReplayChart() {
         exitPrice: parseFloat(exitPrice),
         exitReason: (exitReason || '').trim(),
         pnl: parseFloat(pnl),
+        breakoutTime,
+        breakoutDir: (breakoutDir || '').trim() || null,
       })
     }
     return trades
@@ -1281,9 +1289,21 @@ export default function ReplayChart() {
     for (const t of uploadedTradesRef.current) {
       const entryIdx = idxByTime.get(t.entryTime)
       const exitIdx = idxByTime.get(t.exitTime)
+      const breakoutIdx = t.breakoutTime != null ? idxByTime.get(t.breakoutTime) : null
       const entryIn = t.entryTime >= rangeFrom && t.entryTime <= rangeTo && entryIdx != null
       const exitIn = t.exitTime >= rangeFrom && t.exitTime <= rangeTo && exitIdx != null
-      if (!entryIn && !exitIn) continue
+      const breakoutIn = t.breakoutTime != null && t.breakoutTime >= rangeFrom && t.breakoutTime <= rangeTo && breakoutIdx != null
+      if (!entryIn && !exitIn && !breakoutIn) continue
+      if (breakoutIn) {
+        markers.push({
+          time: t.breakoutTime,
+          position: t.breakoutDir === '상단' ? 'aboveBar' : 'belowBar',
+          color: '#FFC107',
+          shape: 'circle',
+          size: 1,
+          text: '이탈',
+        })
+      }
       if (entryIn) {
         markers.push({
           time: t.entryTime,
@@ -1308,6 +1328,7 @@ export default function ReplayChart() {
         dir: t.dir, exitReason: t.exitReason, pnl: t.pnl,
         entryIdx: entryIn ? entryIdx : null, entryTime: t.entryTime, entryPrice: t.entryPrice,
         exitIdx: exitIn ? exitIdx : null, exitTime: t.exitTime, exitPrice: t.exitPrice,
+        breakoutIdx: breakoutIdx ?? null, breakoutTime: t.breakoutTime, breakoutDir: t.breakoutDir,
       })
     }
     uploadedTradeMarkersRef.current = markers.sort((a, b) => a.time - b.time)
@@ -3172,7 +3193,8 @@ export default function ReplayChart() {
                         <span style={{ color: '#AB47BC' }}>▼</span>숏진입<br />
                         <span style={{ color: '#FFFFFF' }}>●</span>손절&nbsp;
                         <span style={{ color: '#26A69A' }}>●</span>익절&nbsp;
-                        <span style={{ color: '#FF9800' }}>●</span>전환<br />
+                        <span style={{ color: '#FF9800' }}>●</span>전환&nbsp;
+                        <span style={{ color: '#FFC107' }}>●</span>볼린저 이탈<br />
                         <span style={{ color: '#FFC107' }}>■</span>달력에 매매 있는 날
                       </div>
                       {uploadedTradeRows.length > 0 ? (
@@ -3202,6 +3224,11 @@ export default function ReplayChart() {
                               </div>
                               <div style={{ color: '#6b7280', marginTop: 1 }}>
                                 진입가 {r.entryPrice != null ? r.entryPrice.toFixed(2) : '-'} → 청산가 {r.exitPrice != null ? r.exitPrice.toFixed(2) : '-'}
+                              </div>
+                              <div style={{ color: r.breakoutTime != null ? '#FFC107' : '#6b7280', marginTop: 1 }}>
+                                {r.breakoutTime != null
+                                  ? `이탈: ${r.breakoutIdx != null ? `#${r.breakoutIdx + 1}(${fmtHm(r.breakoutTime)})` : fmtHm(r.breakoutTime)} ${r.breakoutDir || ''}`
+                                  : '이탈: 크로스전환(새 돌파 없음)'}
                               </div>
                             </div>
                           ))}
