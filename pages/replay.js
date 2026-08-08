@@ -1233,11 +1233,33 @@ export default function ReplayChart() {
   const parseTradeCsv = (text) => {
     const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim().length > 0)
     if (lines.length < 2) return []
+    // 헤더 이름으로 컬럼 위치를 찾는다 - "조합분류,조합,1차분류,2차분류,3차분류" 같은 컬럼이
+    // 앞에 추가로 붙어도 그대로 지원하기 위함. 헤더에 이름이 없으면(옛 포맷) 기존 고정 위치를 그대로 씀.
+    const headerCols = lines[0].split(',').map(h => h.trim())
+    const idxOf = (name, fallback) => { const i = headerCols.indexOf(name); return i >= 0 ? i : fallback }
+    const iEntryDate = idxOf('진입날짜', 0)
+    const iEntryTime = idxOf('진입시간', 1)
+    const iDir = idxOf('방향', 2)
+    const iEntryPrice = idxOf('진입가', 3)
+    const iExitDate = idxOf('청산날짜', 4)
+    const iExitTime = idxOf('청산시간', 5)
+    const iExitPrice = idxOf('청산가', 6)
+    const iExitReason = idxOf('청산사유', 8)
+    const iPnl = idxOf('손익(pt)', 9)
+    const iBreakoutDate = idxOf('이탈날짜', 10)
+    const iBreakoutTime = idxOf('이탈시각', 11)
+    const iBreakoutDir = idxOf('이탈방향', 12)
+    const iComboLabel = headerCols.indexOf('조합분류') // 없으면 -1 (옛 파일엔 없는 컬럼)
+    const iCombo = headerCols.indexOf('조합')
+    const minCols = Math.max(iEntryDate, iEntryTime, iDir, iEntryPrice, iExitDate, iExitTime, iExitPrice, iExitReason, iPnl) + 1
+
     const trades = []
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(',')
-      if (cols.length < 10) continue
-      const [entryDate, entryTime, dir, entryPrice, exitDate, exitTime, exitPrice, , exitReason, pnl, breakoutDate, breakoutTimeStr, breakoutDir] = cols
+      if (cols.length < minCols) continue
+      const entryDate = cols[iEntryDate], entryTime = cols[iEntryTime], dir = cols[iDir], entryPrice = cols[iEntryPrice]
+      const exitDate = cols[iExitDate], exitTime = cols[iExitTime], exitPrice = cols[iExitPrice]
+      const exitReason = cols[iExitReason], pnl = cols[iPnl]
       const entryMs = new Date(`${entryDate}T${entryTime}`).getTime()
       const exitMs = new Date(`${exitDate}T${exitTime}`).getTime()
       if (Number.isNaN(entryMs) || Number.isNaN(exitMs)) continue
@@ -1246,8 +1268,9 @@ export default function ReplayChart() {
       // 9시간(32400초) 차이가 난다 - 같은 캔들을 원본 CSV로 직접 대조해서 확인한 값.
       // 그 오차를 여기서 보정해야 실제 로드된 캔들 시간과 정확히 맞아떨어진다.
       const SERVER_BROWSER_TZ_OFFSET_SEC = 9 * 3600
-      // 11~13번째 컬럼(이탈날짜/이탈시각/이탈방향)은 선택 항목 - 크로스전환 진입은 원래 비어있다.
+      // 이탈날짜/이탈시각/이탈방향은 선택 항목 - 크로스전환 진입은 원래 비어있다.
       let breakoutTime = null
+      const breakoutDate = cols[iBreakoutDate], breakoutTimeStr = cols[iBreakoutTime]
       if (breakoutDate && breakoutTimeStr) {
         const breakoutMs = new Date(`${breakoutDate}T${breakoutTimeStr}`).getTime()
         if (!Number.isNaN(breakoutMs)) breakoutTime = Math.floor(breakoutMs / 1000) - SERVER_BROWSER_TZ_OFFSET_SEC
@@ -1261,7 +1284,9 @@ export default function ReplayChart() {
         exitReason: (exitReason || '').trim(),
         pnl: parseFloat(pnl),
         breakoutTime,
-        breakoutDir: (breakoutDir || '').trim() || null,
+        breakoutDir: (cols[iBreakoutDir] || '').trim() || null,
+        comboLabel: iComboLabel >= 0 ? (cols[iComboLabel] || '').trim() || null : null,
+        combo: iCombo >= 0 ? (cols[iCombo] || '').trim() || null : null,
       })
     }
     return trades
@@ -1311,7 +1336,8 @@ export default function ReplayChart() {
           color: t.dir === 'long' ? '#C6FF00' : '#AB47BC',
           shape: t.dir === 'long' ? 'arrowUp' : 'arrowDown',
           size: 2,
-          text: t.entryPrice.toFixed(2),
+          // 나쁜 조합(건당평균 마이너스로 분류된 1차/2차/3차 조합) 진입은 가격 앞에 ⚠로 표시
+          text: (t.comboLabel === '나쁜' ? '⚠ ' : '') + t.entryPrice.toFixed(2),
         })
       }
       if (exitIn) {
@@ -1329,6 +1355,7 @@ export default function ReplayChart() {
         entryIdx: entryIn ? entryIdx : null, entryTime: t.entryTime, entryPrice: t.entryPrice,
         exitIdx: exitIn ? exitIdx : null, exitTime: t.exitTime, exitPrice: t.exitPrice,
         breakoutIdx: breakoutIdx ?? null, breakoutTime: t.breakoutTime, breakoutDir: t.breakoutDir,
+        comboLabel: t.comboLabel, combo: t.combo,
       })
     }
     uploadedTradeMarkersRef.current = markers.sort((a, b) => a.time - b.time)
@@ -3195,7 +3222,8 @@ export default function ReplayChart() {
                         <span style={{ color: '#26A69A' }}>●</span>익절&nbsp;
                         <span style={{ color: '#FF9800' }}>●</span>전환&nbsp;
                         <span style={{ color: '#FFC107' }}>●</span>볼린저 이탈<br />
-                        <span style={{ color: '#FFC107' }}>■</span>달력에 매매 있는 날
+                        <span style={{ color: '#FFC107' }}>■</span>달력에 매매 있는 날<br />
+                        ⚠ 나쁜 조합(1차/2차/3차 분류상 건당평균 마이너스)
                       </div>
                       {uploadedTradeRows.length > 0 ? (
                         <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
@@ -3206,7 +3234,9 @@ export default function ReplayChart() {
                               title="클릭하면 화면만 이 캔들로 이동(재생 위치는 그대로 유지)"
                               style={{
                                 fontSize: 10.5, padding: '5px 6px', borderRadius: 6, cursor: 'pointer',
-                                background: '#0f1115', border: '1px solid #2a2e38', lineHeight: 1.6,
+                                background: r.comboLabel === '나쁜' ? 'rgba(244,67,54,0.10)' : '#0f1115',
+                                border: r.comboLabel === '나쁜' ? '1px solid #F44336' : '1px solid #2a2e38',
+                                lineHeight: 1.6,
                               }}
                             >
                               <div>
@@ -3222,6 +3252,11 @@ export default function ReplayChart() {
                                 {' '}
                                 <span style={{ color: '#6b7280' }}>{r.pnl > 0 ? '+' : ''}{r.pnl.toFixed(1)}pt</span>
                               </div>
+                              {r.comboLabel && (
+                                <div style={{ color: r.comboLabel === '나쁜' ? '#F44336' : '#4CAF50', marginTop: 1, fontWeight: r.comboLabel === '나쁜' ? 700 : 400 }}>
+                                  {r.comboLabel === '나쁜' ? '⚠ 나쁜조합' : '좋은조합'}{r.combo ? ` (${r.combo})` : ''}
+                                </div>
+                              )}
                               <div style={{ color: '#6b7280', marginTop: 1 }}>
                                 진입가 {r.entryPrice != null ? r.entryPrice.toFixed(2) : '-'} → 청산가 {r.exitPrice != null ? r.exitPrice.toFixed(2) : '-'}
                               </div>
