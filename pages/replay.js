@@ -732,6 +732,14 @@ export default function ReplayChart() {
   const uploadedTradeMarkersRef = useRef([]) // 현재 불러온 구간(rowsRef)에 맞춰 계산된 마커 - 재생 위치와 무관하게 항상 전부 표시
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
+  // 업로드한 매매내역이 있는 날짜를 달력에서 바로 알아볼 수 있게 강조 표시 (진입 시각 기준 하루씩)
+  const uploadedTradeDateColors = useMemo(() => {
+    if (!uploadedTradeCount) return undefined
+    const colors = {}
+    for (const t of uploadedTradesRef.current) colors[toLocalDateStr(t.entryTime)] = '#FFC107'
+    return colors
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedTradeCount, uploadedTradeFile])
   // '전체선택' 체크박스용 - 지금 보고 있는 달(viewDate) 안에서 데이터 있는 날짜만 정렬해서 뽑아둠
   const monthAvailableDates = useMemo(() => {
     const prefix = `${viewDate.getFullYear()}-${String(viewDate.getMonth() + 1).padStart(2, '0')}`
@@ -2740,6 +2748,7 @@ export default function ReplayChart() {
                   selectedDateTo={selectedDateTo}
                   onSelect={handleCalendarSelect}
                   maxWidth={170}
+                  dateColors={uploadedTradeDateColors}
                   bare
                 />
               </CollapsibleCard>
@@ -2783,7 +2792,8 @@ export default function ReplayChart() {
                         <span style={{ color: '#AB47BC' }}>▼</span>숏진입<br />
                         <span style={{ color: '#F44336' }}>●</span>손절&nbsp;
                         <span style={{ color: '#26A69A' }}>●</span>익절&nbsp;
-                        <span style={{ color: '#FF9800' }}>●</span>전환
+                        <span style={{ color: '#FF9800' }}>●</span>전환<br />
+                        <span style={{ color: '#FFC107' }}>■</span>달력에 매매 있는 날
                       </div>
                     </>
                   )}
