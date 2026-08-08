@@ -2840,8 +2840,8 @@ export default function ReplayChart() {
                           {uploadedTradeRows.map((r, i) => (
                             <div
                               key={i}
-                              onClick={() => scrub((r.exitIdx ?? r.entryIdx) + 1)}
-                              title="클릭하면 이 캔들 위치로 바로 이동"
+                              onClick={() => scrubView(r.exitIdx ?? r.entryIdx)}
+                              title="클릭하면 화면만 이 캔들로 이동(재생 위치는 그대로 유지)"
                               style={{
                                 fontSize: 10.5, padding: '5px 6px', borderRadius: 6, cursor: 'pointer',
                                 background: '#0f1115', border: '1px solid #2a2e38', lineHeight: 1.6,
