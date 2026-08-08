@@ -1253,6 +1253,7 @@ export default function ReplayChart() {
     const iCombo = headerCols.indexOf('조합')
     const iNum = headerCols.indexOf('전체관리번호') // 파일 전체 기준 고유번호 - 날짜마다 리셋되는 화면의 "#캔들번호"와 다름(사용자 지적)
     const iDateNum = headerCols.indexOf('날짜관리번호') // "YYMMDD#그날캔들순번" 형식(예: 260422#104)
+    const iPattern = headerCols.indexOf('4차분류(진입패턴)') // 상단돌파/상단회귀/하단돌파/하단회귀 - "조합"엔 B/S/R(볼린저/스토/리본)만 들어있고 패턴은 따로 분리됨
     const minCols = Math.max(iEntryDate, iEntryTime, iDir, iEntryPrice, iExitDate, iExitTime, iExitPrice, iExitReason, iPnl) + 1
 
     const trades = []
@@ -1291,6 +1292,7 @@ export default function ReplayChart() {
         combo: iCombo >= 0 ? (cols[iCombo] || '').trim() || null : null,
         num: iNum >= 0 ? (cols[iNum] || '').trim() || null : null,
         dateNum: iDateNum >= 0 ? (cols[iDateNum] || '').trim() || null : null,
+        pattern: iPattern >= 0 ? (cols[iPattern] || '').trim() || null : null,
       })
     }
     return trades
@@ -1359,7 +1361,7 @@ export default function ReplayChart() {
         entryIdx: entryIn ? entryIdx : null, entryTime: t.entryTime, entryPrice: t.entryPrice,
         exitIdx: exitIn ? exitIdx : null, exitTime: t.exitTime, exitPrice: t.exitPrice,
         breakoutIdx: breakoutIdx ?? null, breakoutTime: t.breakoutTime, breakoutDir: t.breakoutDir,
-        comboLabel: t.comboLabel, combo: t.combo, num: t.num, dateNum: t.dateNum,
+        comboLabel: t.comboLabel, combo: t.combo, num: t.num, dateNum: t.dateNum, pattern: t.pattern,
       })
     }
     uploadedTradeMarkersRef.current = markers.sort((a, b) => a.time - b.time)
@@ -3270,6 +3272,11 @@ export default function ReplayChart() {
                               {r.combo && (
                                 <div style={{ color: r.comboLabel === '나쁜' ? '#F44336' : '#4CAF50', marginTop: 1 }}>
                                   ({r.combo})
+                                </div>
+                              )}
+                              {r.pattern && (
+                                <div style={{ color: '#e8eaed', marginTop: 1, fontWeight: 700 }}>
+                                  {r.pattern}
                                 </div>
                               )}
                               <div style={{ marginTop: 1 }}>
