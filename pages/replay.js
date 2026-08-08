@@ -683,6 +683,12 @@ export default function ReplayChart() {
   const [closedTradesCount, setClosedTradesCount] = useState(0)
   const [savingResults, setSavingResults] = useState(false)
 
+  // 업로드한 매매내역 CSV(Claude가 만든 백테스트 거래 원장)를 차트에 마커로 겹쳐 보기 위한 상태
+  const [uploadedTradeFile, setUploadedTradeFile] = useState('')
+  const [uploadedTradeCount, setUploadedTradeCount] = useState(0)
+  const [showUploadedTrades, setShowUploadedTrades] = useState(true)
+  const [uploadedTradeError, setUploadedTradeError] = useState('')
+
   const containerRef = useRef(null)
   const chartRef = useRef(null)
   const seriesRef = useRef(null)
@@ -721,6 +727,8 @@ export default function ReplayChart() {
   const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
   const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
   const closedTradesRef = useRef([]) // 청산된 거래 전체(수동/반자동/시뮬레이션 다 포함, source로 구분) - "결과 저장" 누르면 DB로 보냄
+  const uploadedTradesRef = useRef([]) // 업로드한 CSV 원본 거래 전체 [{entryTime, exitTime, dir, entryPrice, exitPrice, exitReason, pnl}]
+  const uploadedTradeMarkersRef = useRef([]) // 현재 불러온 구간(rowsRef)에 맞춰 계산된 마커 - 재생 위치와 무관하게 항상 전부 표시
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
   // '전체선택' 체크박스용 - 지금 보고 있는 달(viewDate) 안에서 데이터 있는 날짜만 정렬해서 뽑아둠
@@ -1040,6 +1048,79 @@ export default function ReplayChart() {
   }
   const syncMACD5 = (idx) => applyMACD5Index(idx)
 
+  // 업로드한 매매내역 CSV 청산사유별 마커 색상 (손절=빨강, 익절=초록, 크로스전환=주황)
+  const uploadedExitColor = (reason) => {
+    if (reason.startsWith('SL')) return '#F44336'
+    if (reason.startsWith('TP')) return '#26A69A'
+    if (reason.startsWith('flip')) return '#FF9800'
+    return '#9E9E9E'
+  }
+
+  // Claude가 만들어주는 백테스트 거래 CSV 형식 그대로 파싱한다:
+  // 진입날짜,진입시간,방향,진입가,청산날짜,청산시간,청산가,보유시간(분),청산사유,손익(pt)
+  // 날짜+시간은 브라우저 로컬(한국시간)로 해석 - 이 차트의 캔들 시간도 이미 한국시간 기준이라 그대로 맞아떨어진다.
+  const parseTradeCsv = (text) => {
+    const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim().length > 0)
+    if (lines.length < 2) return []
+    const trades = []
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',')
+      if (cols.length < 10) continue
+      const [entryDate, entryTime, dir, entryPrice, exitDate, exitTime, exitPrice, , exitReason, pnl] = cols
+      const entryMs = new Date(`${entryDate}T${entryTime}`).getTime()
+      const exitMs = new Date(`${exitDate}T${exitTime}`).getTime()
+      if (Number.isNaN(entryMs) || Number.isNaN(exitMs)) continue
+      trades.push({
+        entryTime: Math.floor(entryMs / 1000),
+        exitTime: Math.floor(exitMs / 1000),
+        dir: dir.trim() === '롱' ? 'long' : 'short',
+        entryPrice: parseFloat(entryPrice),
+        exitPrice: parseFloat(exitPrice),
+        exitReason: (exitReason || '').trim(),
+        pnl: parseFloat(pnl),
+      })
+    }
+    return trades
+  }
+
+  // 지금 불러온 구간(rowsRef.current)에 맞춰 업로드한 거래를 진입/청산 마커로 변환.
+  // 재생 위치(idx)와 무관하게 구간 안에 들어오는 건 전부 계산해두고, applyAllMarkers에서 통째로 얹는다.
+  const recomputeUploadedTradeMarkers = () => {
+    const rows = rowsRef.current
+    if (!rows.length || uploadedTradesRef.current.length === 0) {
+      uploadedTradeMarkersRef.current = []
+      return
+    }
+    const timeSet = new Set(rows.map(r => r.time))
+    const rangeFrom = rows[0].time, rangeTo = rows[rows.length - 1].time
+    const markers = []
+    for (const t of uploadedTradesRef.current) {
+      const entryIn = t.entryTime >= rangeFrom && t.entryTime <= rangeTo && timeSet.has(t.entryTime)
+      const exitIn = t.exitTime >= rangeFrom && t.exitTime <= rangeTo && timeSet.has(t.exitTime)
+      if (entryIn) {
+        markers.push({
+          time: t.entryTime,
+          position: t.dir === 'long' ? 'belowBar' : 'aboveBar',
+          color: t.dir === 'long' ? '#2196F3' : '#AB47BC',
+          shape: t.dir === 'long' ? 'arrowUp' : 'arrowDown',
+          size: 1,
+          text: t.dir === 'long' ? '롱' : '숏',
+        })
+      }
+      if (exitIn) {
+        markers.push({
+          time: t.exitTime,
+          position: t.dir === 'long' ? 'aboveBar' : 'belowBar',
+          color: uploadedExitColor(t.exitReason),
+          shape: 'circle',
+          size: 1,
+          text: `${t.pnl > 0 ? '+' : ''}${t.pnl.toFixed(1)}`,
+        })
+      }
+    }
+    uploadedTradeMarkersRef.current = markers.sort((a, b) => a.time - b.time)
+  }
+
   // 크로스/더블비 신호 마커 둘 다 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 지점 중
   // 아직 재생 안 지난 구간은 걸러서 캔들 시리즈 마커 하나로 합쳐서 얹는다
   // (setMarkers는 호출할 때마다 통째로 교체되므로 두 종류를 항상 같이 계산해서 넘겨야 함).
@@ -1065,6 +1146,7 @@ export default function ReplayChart() {
     const iShapeShort = overrides.bollInnerShapeShort ?? bollInnerShapeShort
     const iColorShort = overrides.bollInnerColorShort ?? bollInnerColorShort
     const iSizeShort = overrides.bollInnerSizeShort ?? bollInnerSizeShort
+    const showUp = overrides.showUploadedTrades ?? showUploadedTrades
 
     const crossMarkers = crossPointsRef.current
       .filter(p => p.idx < idx)
@@ -1091,7 +1173,10 @@ export default function ReplayChart() {
       .filter(p => p.idx < idx)
       .map(p => ({ time: p.time, position: 'aboveBar', color: p.color, shape: 'circle', size: 1, text: p.label }))
 
-    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers].sort((a, b) => a.time - b.time))
+    // 업로드한 매매내역 마커는 재생 위치(idx)와 무관하게 항상 전부 표시 (사용자 요청)
+    const uploadedMarkers = showUp ? uploadedTradeMarkersRef.current : []
+
+    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers, ...uploadedMarkers].sort((a, b) => a.time - b.time))
   }
 
   const applyIndex = (idx) => {
@@ -1355,6 +1440,13 @@ export default function ReplayChart() {
         refreshSessionMarkers()
       }
 
+      // 업로드해둔 매매내역이 있으면 새로 불러온 구간 기준으로 마커를 다시 계산하고,
+      // 재생 없이 바로 전체를 펼쳐서 보여준다 (재생 연습용이 아니라 결과 검토용이라 사용자 요청대로 처리)
+      if (uploadedTradesRef.current.length > 0) {
+        recomputeUploadedTradeMarkers()
+        if (dayRows.length > 0) applyIndex(dayRows.length)
+      }
+
       if (dayRows.length === 0) setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
     } catch (e) {
       setError(e.message)
@@ -1365,6 +1457,41 @@ export default function ReplayChart() {
   }
 
   const loadDate = (dateStr) => loadRange(dateStr, dateStr)
+
+  // 매매내역 CSV 업로드 - 파일 하나를 고르면 그걸로 통째로 교체(여러 개 겹쳐 올리는 기능 아님)
+  const handleTradeCsvUpload = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setUploadedTradeError('')
+    try {
+      const text = await file.text()
+      const trades = parseTradeCsv(text)
+      if (trades.length === 0) throw new Error('거래 데이터를 찾을 수 없습니다 (진입날짜,진입시간,방향,진입가,청산날짜,청산시간,청산가,보유시간(분),청산사유,손익(pt) 형식이어야 해요)')
+      uploadedTradesRef.current = trades
+      setUploadedTradeFile(file.name)
+      setUploadedTradeCount(trades.length)
+      setShowUploadedTrades(true)
+      recomputeUploadedTradeMarkers()
+      if (rowsRef.current.length > 0) applyIndex(rowsRef.current.length)
+    } catch (err) {
+      setUploadedTradeError(err.message || '파일을 읽지 못했습니다')
+    }
+  }
+
+  const clearUploadedTrades = () => {
+    uploadedTradesRef.current = []
+    uploadedTradeMarkersRef.current = []
+    setUploadedTradeFile('')
+    setUploadedTradeCount(0)
+    setUploadedTradeError('')
+    applyAllMarkers(indexRef.current, { showUploadedTrades: true })
+  }
+
+  const toggleShowUploadedTrades = (checked) => {
+    setShowUploadedTrades(checked)
+    applyAllMarkers(indexRef.current, { showUploadedTrades: checked })
+  }
 
   // 달력 클릭 처리 - 여러 날 선택 모드가 꺼져있으면 예전처럼 클릭한 날 하루만 바로 불러온다.
   // 켜져있으면 첫 클릭은 범위 시작점만 표시해두고, 두 번째 클릭에서 시작~끝을 이어서 불러온다
@@ -3056,6 +3183,46 @@ export default function ReplayChart() {
                     />
                     5분 하단 눌림 (매수)
                   </label>
+                </div>
+              </CollapsibleCard>
+
+              <CollapsibleCard title="📤 매매내역 업로드" maxWidth={170} defaultOpen={true}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    fontSize: 11, padding: '8px 6px', borderRadius: 8, cursor: 'pointer',
+                    border: '1px dashed #2a2e38', color: '#9aa0ab', textAlign: 'center',
+                  }}>
+                    📥 CSV 선택
+                    <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleTradeCsvUpload} />
+                  </label>
+                  {uploadedTradeFile && (
+                    <>
+                      <div style={{ fontSize: 11, color: '#9aa0ab', wordBreak: 'break-all' }}>{uploadedTradeFile} ({uploadedTradeCount}건)</div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa0ab', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={showUploadedTrades}
+                          onChange={e => toggleShowUploadedTrades(e.target.checked)}
+                          style={{ width: 12, height: 12, margin: 0, flexShrink: 0 }}
+                        />
+                        차트에 표시
+                      </label>
+                      <button
+                        type="button"
+                        onClick={clearUploadedTrades}
+                        style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#F44336', cursor: 'pointer' }}
+                      >지우기</button>
+                      <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.6 }}>
+                        <span style={{ color: '#2196F3' }}>▲</span>롱진입&nbsp;
+                        <span style={{ color: '#AB47BC' }}>▼</span>숏진입<br />
+                        <span style={{ color: '#F44336' }}>●</span>손절&nbsp;
+                        <span style={{ color: '#26A69A' }}>●</span>익절&nbsp;
+                        <span style={{ color: '#FF9800' }}>●</span>전환
+                      </div>
+                    </>
+                  )}
+                  {uploadedTradeError && <div style={{ fontSize: 11, color: '#F44336' }}>{uploadedTradeError}</div>}
                 </div>
               </CollapsibleCard>
             </div>
