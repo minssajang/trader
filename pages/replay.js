@@ -5,7 +5,7 @@ import { createChart, CrosshairMode, CandlestickSeries, LineSeries, HistogramSer
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
-import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, MADRID_RIBBON, computeMA, rollingRSI, rollingMACD } from '../lib/indicators'
+import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, MADRID_RIBBON, computeMA, rollingRSI, rollingMACD, rollingStochastic } from '../lib/indicators'
 
 // 이평선 데이터 계산/토글 파이프라인(maDataRef/maSeriesRef/enabledMA 등)은 id로만 구분하므로
 // 리본도 같은 파이프라인을 공유한다 - 화면에서만 "리본" 카드로 따로 묶어서 보여준다(사용자 요청).
@@ -62,6 +62,58 @@ class VerticalLinePrimitive {
 }
 const MAX_SPREAD_LINE_COLOR = '#FFEB3B' // 가장 크게 벌어진 지점(노랑)
 const MIN_SPREAD_LINE_COLOR = '#00E5FF' // 가장 좁게 뭉친 지점(하늘)
+
+// VerticalLinePrimitive과 같은 방식이지만 시각 하나가 아니라 여러 시각에 동시에 세로선을 그린다.
+// 70/15/15 스토캐스틱이 "볼린저 외부 상태에서 %K/%D 크로스" 조건을 만족한 캔들들을 전부 표시할 때 씀.
+class MultiVerticalLinesPrimitive {
+  constructor(color) {
+    this._times = []
+    this._chart = null
+    this._requestUpdate = null
+    this._color = color
+  }
+  attached({ chart, requestUpdate }) {
+    this._chart = chart
+    this._requestUpdate = requestUpdate
+  }
+  detached() {
+    this._chart = null
+  }
+  updateAllViews() {}
+  paneViews() {
+    return [{
+      renderer: () => ({
+        draw: (target) => {
+          if (!this._times.length || !this._chart) return
+          const ts = this._chart.timeScale()
+          target.useBitmapCoordinateSpace((scope) => {
+            const ctx = scope.context
+            const ratio = scope.horizontalPixelRatio
+            ctx.save()
+            ctx.strokeStyle = this._color
+            ctx.lineWidth = 1
+            ctx.setLineDash([4, 3])
+            for (const time of this._times) {
+              const x = ts.timeToCoordinate(time)
+              if (x == null) continue
+              const px = Math.round(x * ratio) + 0.5
+              ctx.beginPath()
+              ctx.moveTo(px, 0)
+              ctx.lineTo(px, scope.bitmapSize.height)
+              ctx.stroke()
+            }
+            ctx.restore()
+          })
+        },
+      }),
+    }]
+  }
+  setTimes(times) {
+    this._times = times
+    this._requestUpdate?.()
+  }
+}
+const STOCH3_CROSS_LINE_COLOR = '#FF9800' // 70/15/15 스토캐스틱 크로스 세로줄(주황, 스토3 K선과 같은 계열)
 
 // 횡보 구간 배경 표시(사용자 요청) - VerticalLinePrimitive와 같은 방식이지만 선 1개가 아니라
 // 여러 개의 [from,to] 시간 구간을 옅은 색 사각형으로 캔들 뒤에 채운다(zOrder: 'bottom').
@@ -386,6 +438,10 @@ const MACD_SIGNAL = 9
 const MACD5_FAST = 60
 const MACD5_SLOW = 130
 const MACD5_SIGNAL = 45
+// 스토캐스틱 3세트(사용자 요청 그대로): [kPeriod, kSmooth(Slow%K), dPeriod(%D)]
+const STOCH1_PARAMS = [14, 3, 3]
+const STOCH2_PARAMS = [7, 2, 2]
+const STOCH3_PARAMS = [70, 15, 15]
 const DEFAULT_RSI_COLOR = '#FFB74D'
 const DEFAULT_MACD_LINE_COLOR = '#42A5F5'
 const DEFAULT_MACD_SIGNAL_COLOR = '#FF7043'
@@ -393,6 +449,13 @@ const DEFAULT_MACD_HIST_UP = '#26A69A'
 const DEFAULT_MACD_HIST_DOWN = '#EF5350'
 const DEFAULT_MACD5_LINE_COLOR = '#AB47BC'
 const DEFAULT_MACD5_SIGNAL_COLOR = '#FFCA28'
+// 스토캐스틱 3세트 기본 색상 (사용자 요청: 1번 블루/레드, 2번 옐로우/화이트, 3번 오렌지/화이트)
+const DEFAULT_STOCH1_K_COLOR = '#2196F3'
+const DEFAULT_STOCH1_D_COLOR = '#F44336'
+const DEFAULT_STOCH2_K_COLOR = '#FFEB3B'
+const DEFAULT_STOCH2_D_COLOR = '#FFFFFF'
+const DEFAULT_STOCH3_K_COLOR = '#FF9800'
+const DEFAULT_STOCH3_D_COLOR = '#FFFFFF'
 // RSI(0~100)/MACD(진동값)는 캔들 가격축과 스케일이 전혀 달라 같은 축에 못 그림 -
 // lightweight-charts v5의 진짜 pane API(addSeries의 세 번째 인자 paneIndex)로 별도 창에 그린다.
 const DEFAULT_UP_COLOR = '#38BDF8'   // 상승 기본색 - 스카이블루
@@ -614,6 +677,17 @@ export default function ReplayChart() {
   const [enabledMACD5, setEnabledMACD5] = useState(rs.enabledMACD5 ?? false)
   const [macd5LineColor, setMacd5LineColorState] = useState(rs.macd5LineColor ?? DEFAULT_MACD5_LINE_COLOR)
   const [macd5SignalColor, setMacd5SignalColorState] = useState(rs.macd5SignalColor ?? DEFAULT_MACD5_SIGNAL_COLOR)
+  // 스토캐스틱 3세트 - 14/3/3, 7/2/2, 70/15/15(사용자 요청). 70/15/15는 "5분B 볼린저 외부 상태에서
+  // K/D 크로스" 조건을 만족하면 세로줄도 같이 표시한다(아래 stoch3CrossTimesRef/토글 함수 참고).
+  const [enabledStoch1, setEnabledStoch1] = useState(rs.enabledStoch1 ?? false)
+  const [stoch1KColor, setStoch1KColorState] = useState(rs.stoch1KColor ?? DEFAULT_STOCH1_K_COLOR)
+  const [stoch1DColor, setStoch1DColorState] = useState(rs.stoch1DColor ?? DEFAULT_STOCH1_D_COLOR)
+  const [enabledStoch2, setEnabledStoch2] = useState(rs.enabledStoch2 ?? false)
+  const [stoch2KColor, setStoch2KColorState] = useState(rs.stoch2KColor ?? DEFAULT_STOCH2_K_COLOR)
+  const [stoch2DColor, setStoch2DColorState] = useState(rs.stoch2DColor ?? DEFAULT_STOCH2_D_COLOR)
+  const [enabledStoch3, setEnabledStoch3] = useState(rs.enabledStoch3 ?? false)
+  const [stoch3KColor, setStoch3KColorState] = useState(rs.stoch3KColor ?? DEFAULT_STOCH3_K_COLOR)
+  const [stoch3DColor, setStoch3DColorState] = useState(rs.stoch3DColor ?? DEFAULT_STOCH3_D_COLOR)
   const [upColor, setUpColorState] = useState(rs.upColor ?? DEFAULT_UP_COLOR)
   const [downColor, setDownColorState] = useState(rs.downColor ?? DEFAULT_DOWN_COLOR)
   const [candleVisible, setCandleVisible] = useState(() => rs.candleVisible ?? restoreRef.current?.candleVisible ?? true) // 체크 해제하면 캔들을 숨김(지표만 보고 판단 연습할 때 씀) - 기본 체크됨
@@ -722,6 +796,14 @@ export default function ReplayChart() {
   const macdSeriesRef = useRef(null) // { macd, signal, hist } lightweight-charts 시리즈 3개
   const macd5DataRef = useRef({ macd: [], signal: [], hist: [] })
   const macd5SeriesRef = useRef(null)
+  const stoch1DataRef = useRef({ k: [], d: [] }) // 각각 [{time,value}|null]
+  const stoch1SeriesRef = useRef(null) // { k, d } lightweight-charts 라인 시리즈 2개
+  const stoch2DataRef = useRef({ k: [], d: [] })
+  const stoch2SeriesRef = useRef(null)
+  const stoch3DataRef = useRef({ k: [], d: [] })
+  const stoch3SeriesRef = useRef(null)
+  const stoch3CrossTimesRef = useRef([]) // [{idx, time}] - 5분B 외부 상태에서 K/D 크로스가 난 지점 전체
+  const stoch3CrossLineRef = useRef(null) // MultiVerticalLinesPrimitive 인스턴스
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
   const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
@@ -777,6 +859,13 @@ export default function ReplayChart() {
     syncMACD(0)
     macd5DataRef.current = { macd: [], signal: [], hist: [] }
     syncMACD5(0)
+    stoch1DataRef.current = { k: [], d: [] }
+    syncStoch1(0)
+    stoch2DataRef.current = { k: [], d: [] }
+    syncStoch2(0)
+    stoch3DataRef.current = { k: [], d: [] }
+    stoch3CrossTimesRef.current = []
+    syncStoch3(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -844,6 +933,9 @@ export default function ReplayChart() {
     minSpreadLineRef.current = new VerticalLinePrimitive(MIN_SPREAD_LINE_COLOR)
     series.attachPrimitive(maxSpreadLineRef.current)
     series.attachPrimitive(minSpreadLineRef.current)
+
+    stoch3CrossLineRef.current = new MultiVerticalLinesPrimitive(STOCH3_CROSS_LINE_COLOR)
+    series.attachPrimitive(stoch3CrossLineRef.current)
 
     sidewaysBandRef.current = new BackgroundBandsPrimitive(hexToRgba(sidewaysColor, 0.15))
     series.attachPrimitive(sidewaysBandRef.current)
@@ -1057,6 +1149,38 @@ export default function ReplayChart() {
     s.signal.setData(d.signal.slice(0, idx).filter(Boolean))
     s.hist.setData(d.hist.slice(0, idx).filter(Boolean))
   }
+
+  // 스토캐스틱 3세트 - RSI/MACD와 같은 방식으로 재생 위치(idx)까지만 그린다
+  const applyStoch1Index = (idx) => {
+    const s = stoch1SeriesRef.current
+    const d = stoch1DataRef.current
+    if (!s) return
+    s.k.setData(d.k.slice(0, idx).filter(Boolean))
+    s.d.setData(d.d.slice(0, idx).filter(Boolean))
+  }
+  const syncStoch1 = (idx) => applyStoch1Index(idx)
+
+  const applyStoch2Index = (idx) => {
+    const s = stoch2SeriesRef.current
+    const d = stoch2DataRef.current
+    if (!s) return
+    s.k.setData(d.k.slice(0, idx).filter(Boolean))
+    s.d.setData(d.d.slice(0, idx).filter(Boolean))
+  }
+  const syncStoch2 = (idx) => applyStoch2Index(idx)
+
+  // 70/15/15 스토캐스틱 - K/D 라인뿐 아니라 "5분B 외부 상태에서 크로스" 세로줄도 재생 위치까지만 표시
+  const applyStoch3Index = (idx) => {
+    const s = stoch3SeriesRef.current
+    const d = stoch3DataRef.current
+    if (s) {
+      s.k.setData(d.k.slice(0, idx).filter(Boolean))
+      s.d.setData(d.d.slice(0, idx).filter(Boolean))
+    }
+    const times = stoch3CrossTimesRef.current.filter(p => p.idx < idx).map(p => p.time)
+    stoch3CrossLineRef.current?.setTimes(times)
+  }
+  const syncStoch3 = (idx) => applyStoch3Index(idx)
   const syncMACD5 = (idx) => applyMACD5Index(idx)
 
   // 업로드한 매매내역 CSV 청산사유별 마커 색상 (손절=흰색, 익절=초록, 크로스전환=주황)
@@ -1225,6 +1349,9 @@ export default function ReplayChart() {
     syncRSI(idx)
     syncMACD(idx)
     syncMACD5(idx)
+    syncStoch1(idx)
+    syncStoch2(idx)
+    syncStoch3(idx)
     applyAllMarkers(idx)
     if (ribbonEnabled) recomputeSpreadExtremes(idx) // 슬라이더로 임의 위치 이동 - 되감기일 수 있어 처음부터 재스캔
     if (sidewaysEnabled) applySidewaysBands(idx)
@@ -1248,6 +1375,9 @@ export default function ReplayChart() {
     syncRSI(to)
     syncMACD(to)
     syncMACD5(to)
+    syncStoch1(to)
+    syncStoch2(to)
+    syncStoch3(to)
     applyAllMarkers(to)
     // 반자동진입 - 재생(자동 진행)으로 새로 드러난 구간에서만 조건을 확인한다.
     // 슬라이더로 수동 스크럽할 때는 안 걸리게(applyIndex가 아니라 여기서만 체크)
@@ -1317,6 +1447,13 @@ export default function ReplayChart() {
     syncMACD(0)
     macd5DataRef.current = { macd: [], signal: [], hist: [] }
     syncMACD5(0)
+    stoch1DataRef.current = { k: [], d: [] }
+    syncStoch1(0)
+    stoch2DataRef.current = { k: [], d: [] }
+    syncStoch2(0)
+    stoch3DataRef.current = { k: [], d: [] }
+    stoch3CrossTimesRef.current = []
+    syncStoch3(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -1469,6 +1606,46 @@ export default function ReplayChart() {
         }
         macd5DataRef.current = { macd: macd5Points, signal: signal5Points, hist: hist5Points }
 
+        // 스토캐스틱 3세트 - RSI/MACD처럼 파일 전체(fullRows)로 계산해서 워밍업을 채운 뒤 표시 구간만 자른다
+        function sliceStoch(kArr, dArr) {
+          const kPoints = [], dPoints = []
+          for (let i = startIdx; i < endIdx; i++) {
+            const t = fullRows[i].time
+            kPoints.push(kArr[i] != null ? { time: t, value: kArr[i] } : null)
+            dPoints.push(dArr[i] != null ? { time: t, value: dArr[i] } : null)
+          }
+          return { k: kPoints, d: dPoints }
+        }
+        const stoch1 = rollingStochastic(fullRows, ...STOCH1_PARAMS)
+        stoch1DataRef.current = sliceStoch(stoch1.k, stoch1.d)
+        const stoch2 = rollingStochastic(fullRows, ...STOCH2_PARAMS)
+        stoch2DataRef.current = sliceStoch(stoch2.k, stoch2.d)
+        const stoch3 = rollingStochastic(fullRows, ...STOCH3_PARAMS)
+        stoch3DataRef.current = sliceStoch(stoch3.k, stoch3.d)
+
+        // 70/15/15 스토캐스틱 크로스 세로줄 - "5분B(SMA100) 외부로 나간 뒤 아직 안 돌아온 상태"에서
+        // K/D가 교차하는 캔들만 기록한다(볼린저 안으로 돌아온 뒤에 나는 크로스는 표시 안 함, 사용자 요청).
+        {
+          const up100Map = new Map((newBandData.sma100?.upper || []).filter(Boolean).map(p => [p.time, p.value]))
+          const low100Map = new Map((newBandData.sma100?.lower || []).filter(Boolean).map(p => [p.time, p.value]))
+          const crossTimes = []
+          let isOutsideBand = false
+          for (let i = startIdx; i < endIdx; i++) {
+            const t = fullRows[i].time
+            const up = up100Map.get(t), low = low100Map.get(t)
+            if (up != null && low != null) {
+              if (fullRows[i].high > up || fullRows[i].low < low) isOutsideBand = true
+              else if (fullRows[i].high <= up && fullRows[i].low >= low) isOutsideBand = false
+            }
+            const k = stoch3.k[i], d = stoch3.d[i], pk = stoch3.k[i - 1], pd = stoch3.d[i - 1]
+            if (isOutsideBand && k != null && d != null && pk != null && pd != null) {
+              const crossed = (pk <= pd && k > d) || (pk >= pd && k < d)
+              if (crossed) crossTimes.push({ idx: i - startIdx, time: t })
+            }
+          }
+          stoch3CrossTimesRef.current = crossTimes
+        }
+
         refreshCross()
         refreshDoubleBSignal()
         refreshBollInnerSignal()
@@ -1589,6 +1766,13 @@ export default function ReplayChart() {
     syncMACD(0)
     macd5DataRef.current = { macd: [], signal: [], hist: [] }
     syncMACD5(0)
+    stoch1DataRef.current = { k: [], d: [] }
+    syncStoch1(0)
+    stoch2DataRef.current = { k: [], d: [] }
+    syncStoch2(0)
+    stoch3DataRef.current = { k: [], d: [] }
+    stoch3CrossTimesRef.current = []
+    syncStoch3(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -1650,6 +1834,9 @@ export default function ReplayChart() {
         enabledRSI, rsiColor,
         enabledMACD, macdLineColor, macdSignalColor,
         enabledMACD5, macd5LineColor, macd5SignalColor,
+        enabledStoch1, stoch1KColor, stoch1DColor,
+        enabledStoch2, stoch2KColor, stoch2DColor,
+        enabledStoch3, stoch3KColor, stoch3DColor,
         upColor, downColor, candleVisible,
         crossPairs, goldenShape, goldenColor, goldenSize, deadShape, deadColor, deadSize,
         doubleBPairs, doubleBShapeLong, doubleBColorLong, doubleBSizeLong, doubleBShapeShort, doubleBColorShort, doubleBSizeShort,
@@ -2114,6 +2301,90 @@ export default function ReplayChart() {
     setMacd5SignalColorState(color)
     macd5SeriesRef.current?.signal.applyOptions({ color })
   }
+
+  // 스토캐스틱 3세트 - 각자 자기만의 pane(RSI와 같은 방식, MACD1/MACD5처럼 공유 안 함)
+  const toggleStoch1 = () => {
+    const turningOn = !enabledStoch1
+    setEnabledStoch1(turningOn)
+    if (turningOn) {
+      if (!stoch1SeriesRef.current && chartRef.current) {
+        const paneIndex = chartRef.current.panes().length
+        stoch1SeriesRef.current = {
+          k: chartRef.current.addSeries(LineSeries, { color: stoch1KColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true }, paneIndex),
+          d: chartRef.current.addSeries(LineSeries, { color: stoch1DColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false }, paneIndex),
+        }
+        bumpMarkerLayer()
+      }
+      applyStoch1Index(indexRef.current)
+    } else {
+      const s = stoch1SeriesRef.current
+      if (s && chartRef.current) {
+        const pane = s.k.getPane()
+        chartRef.current.removeSeries(s.k)
+        chartRef.current.removeSeries(s.d)
+        try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+      }
+      stoch1SeriesRef.current = null
+    }
+  }
+  const setStoch1KColor = (color) => { setStoch1KColorState(color); stoch1SeriesRef.current?.k.applyOptions({ color }) }
+  const setStoch1DColor = (color) => { setStoch1DColorState(color); stoch1SeriesRef.current?.d.applyOptions({ color }) }
+
+  const toggleStoch2 = () => {
+    const turningOn = !enabledStoch2
+    setEnabledStoch2(turningOn)
+    if (turningOn) {
+      if (!stoch2SeriesRef.current && chartRef.current) {
+        const paneIndex = chartRef.current.panes().length
+        stoch2SeriesRef.current = {
+          k: chartRef.current.addSeries(LineSeries, { color: stoch2KColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true }, paneIndex),
+          d: chartRef.current.addSeries(LineSeries, { color: stoch2DColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false }, paneIndex),
+        }
+        bumpMarkerLayer()
+      }
+      applyStoch2Index(indexRef.current)
+    } else {
+      const s = stoch2SeriesRef.current
+      if (s && chartRef.current) {
+        const pane = s.k.getPane()
+        chartRef.current.removeSeries(s.k)
+        chartRef.current.removeSeries(s.d)
+        try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+      }
+      stoch2SeriesRef.current = null
+    }
+  }
+  const setStoch2KColor = (color) => { setStoch2KColorState(color); stoch2SeriesRef.current?.k.applyOptions({ color }) }
+  const setStoch2DColor = (color) => { setStoch2DColorState(color); stoch2SeriesRef.current?.d.applyOptions({ color }) }
+
+  // 70/15/15 - K/D 라인은 자기 pane에, "볼린저 외부 크로스" 세로줄은 메인 캔들 시리즈(stoch3CrossLineRef)에 얹는다
+  const toggleStoch3 = () => {
+    const turningOn = !enabledStoch3
+    setEnabledStoch3(turningOn)
+    if (turningOn) {
+      if (!stoch3SeriesRef.current && chartRef.current) {
+        const paneIndex = chartRef.current.panes().length
+        stoch3SeriesRef.current = {
+          k: chartRef.current.addSeries(LineSeries, { color: stoch3KColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true }, paneIndex),
+          d: chartRef.current.addSeries(LineSeries, { color: stoch3DColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false }, paneIndex),
+        }
+        bumpMarkerLayer()
+      }
+      applyStoch3Index(indexRef.current)
+    } else {
+      const s = stoch3SeriesRef.current
+      if (s && chartRef.current) {
+        const pane = s.k.getPane()
+        chartRef.current.removeSeries(s.k)
+        chartRef.current.removeSeries(s.d)
+        try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+      }
+      stoch3SeriesRef.current = null
+      stoch3CrossLineRef.current?.setTimes([])
+    }
+  }
+  const setStoch3KColor = (color) => { setStoch3KColorState(color); stoch3SeriesRef.current?.k.applyOptions({ color }) }
+  const setStoch3DColor = (color) => { setStoch3DColorState(color); stoch3SeriesRef.current?.d.applyOptions({ color }) }
 
   // 체크한 이평선들 중 기간이 짧은 쪽을 단기선, 긴 쪽을 장기선으로 보고
   // 단기선이 장기선을 아래→위로 뚫으면 골든크로스, 위→아래면 데드크로스로 분류해
@@ -3290,6 +3561,86 @@ export default function ReplayChart() {
                         style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
                       />
                     </div>
+                  )}
+                </div>
+                <div style={{ padding: '3px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={enabledStoch1}
+                      onChange={toggleStoch1}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: stoch1KColor, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>스토(14,3,3)</span>
+                  </label>
+                  {enabledStoch1 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                      <span>%K</span>
+                      <input
+                        type="color" value={stoch1KColor} onChange={e => setStoch1KColor(e.target.value)}
+                        title="%K선 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                      <span>%D</span>
+                      <input
+                        type="color" value={stoch1DColor} onChange={e => setStoch1DColor(e.target.value)}
+                        title="%D선 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div style={{ padding: '3px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={enabledStoch2}
+                      onChange={toggleStoch2}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: stoch2KColor, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>스토(7,2,2)</span>
+                  </label>
+                  {enabledStoch2 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                      <span>%K</span>
+                      <input
+                        type="color" value={stoch2KColor} onChange={e => setStoch2KColor(e.target.value)}
+                        title="%K선 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                      <span>%D</span>
+                      <input
+                        type="color" value={stoch2DColor} onChange={e => setStoch2DColor(e.target.value)}
+                        title="%D선 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div style={{ padding: '3px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={enabledStoch3}
+                      onChange={toggleStoch3}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: stoch3KColor, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>스토(70,15,15)</span>
+                  </label>
+                  {enabledStoch3 && (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                        <span>%K</span>
+                        <input
+                          type="color" value={stoch3KColor} onChange={e => setStoch3KColor(e.target.value)}
+                          title="%K선 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                        />
+                        <span>%D</span>
+                        <input
+                          type="color" value={stoch3DColor} onChange={e => setStoch3DColor(e.target.value)}
+                          title="%D선 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                        />
+                      </div>
+                      <div style={{ marginLeft: 19, marginTop: 3, fontSize: 9.5, color: '#5a5f6a', lineHeight: 1.4 }}>
+                        5분B 밖으로 나간 뒤 아직 안 돌아온 상태에서 K/D가 교차하면 세로줄(주황) 표시. 밴드 안으로 돌아온 뒤의 교차는 표시 안 함.
+                      </div>
+                    </>
                   )}
                 </div>
               </CollapsibleCard>
