@@ -1059,9 +1059,9 @@ export default function ReplayChart() {
   }
   const syncMACD5 = (idx) => applyMACD5Index(idx)
 
-  // 업로드한 매매내역 CSV 청산사유별 마커 색상 (손절=빨강, 익절=초록, 크로스전환=주황)
+  // 업로드한 매매내역 CSV 청산사유별 마커 색상 (손절=흰색, 익절=초록, 크로스전환=주황)
   const uploadedExitColor = (reason) => {
-    if (reason.startsWith('SL')) return '#F44336'
+    if (reason.startsWith('SL')) return '#FFFFFF'
     if (reason.startsWith('TP')) return '#26A69A'
     if (reason.startsWith('flip')) return '#FF9800'
     return '#9E9E9E'
@@ -1128,10 +1128,10 @@ export default function ReplayChart() {
         markers.push({
           time: t.entryTime,
           position: t.dir === 'long' ? 'belowBar' : 'aboveBar',
-          color: t.dir === 'long' ? '#2196F3' : '#AB47BC',
+          color: t.dir === 'long' ? '#C6FF00' : '#AB47BC',
           shape: t.dir === 'long' ? 'arrowUp' : 'arrowDown',
           size: 2,
-          text: t.dir === 'long' ? '롱' : '숏',
+          text: t.entryPrice.toFixed(2),
         })
       }
       if (exitIn) {
@@ -1141,7 +1141,7 @@ export default function ReplayChart() {
           color: uploadedExitColor(t.exitReason),
           shape: 'circle',
           size: 2,
-          text: `${t.pnl > 0 ? '+' : ''}${t.pnl.toFixed(1)}`,
+          text: t.exitPrice.toFixed(2),
         })
       }
       listRows.push({
@@ -2828,9 +2828,9 @@ export default function ReplayChart() {
                         style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#F44336', cursor: 'pointer' }}
                       >지우기</button>
                       <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.6 }}>
-                        <span style={{ color: '#2196F3' }}>▲</span>롱진입&nbsp;
+                        <span style={{ color: '#C6FF00' }}>▲</span>롱진입&nbsp;
                         <span style={{ color: '#AB47BC' }}>▼</span>숏진입<br />
-                        <span style={{ color: '#F44336' }}>●</span>손절&nbsp;
+                        <span style={{ color: '#FFFFFF' }}>●</span>손절&nbsp;
                         <span style={{ color: '#26A69A' }}>●</span>익절&nbsp;
                         <span style={{ color: '#FF9800' }}>●</span>전환<br />
                         <span style={{ color: '#FFC107' }}>■</span>달력에 매매 있는 날
@@ -2848,7 +2848,7 @@ export default function ReplayChart() {
                               }}
                             >
                               <div>
-                                <span style={{ color: r.dir === 'long' ? '#2196F3' : '#AB47BC', fontWeight: 700 }}>
+                                <span style={{ color: r.dir === 'long' ? '#C6FF00' : '#AB47BC', fontWeight: 700 }}>
                                   {r.dir === 'long' ? '▲롱' : '▼숏'}
                                 </span>
                                 {' '}
