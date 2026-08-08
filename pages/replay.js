@@ -689,6 +689,7 @@ export default function ReplayChart() {
   const [showUploadedTrades, setShowUploadedTrades] = useState(true)
   const [uploadedTradeError, setUploadedTradeError] = useState('')
   const [tradeDragOver, setTradeDragOver] = useState(false)
+  const [uploadedTradeRows, setUploadedTradeRows] = useState([]) // 현재 불러온 구간 안에 있는 거래 목록(캔들번호 포함) - 마커 찾기 힘들다는 지적으로 추가
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -1097,27 +1098,38 @@ export default function ReplayChart() {
     return trades
   }
 
-  // 지금 불러온 구간(rowsRef.current)에 맞춰 업로드한 거래를 진입/청산 마커로 변환.
-  // 재생 위치(idx)와 무관하게 구간 안에 들어오는 건 전부 계산해두고, applyAllMarkers에서 통째로 얹는다.
+  const fmtHm = (t) => {
+    const d = new Date(t * 1000)
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+  }
+
+  // 지금 불러온 구간(rowsRef.current)에 맞춰 업로드한 거래를 진입/청산 마커 + 목록(캔들번호 포함)으로 변환.
+  // 재생 위치(idx)와 무관하게 구간 안에 들어오는 건 전부 계산해두고, applyAllMarkers에서 마커를 통째로 얹는다.
+  // 목록(uploadedTradeRows)은 "마커가 안 보인다"는 지적 때문에 추가 — 몇 번째 캔들인지 숫자로 보여주고 클릭하면 그 위치로 바로 이동한다.
   const recomputeUploadedTradeMarkers = () => {
     const rows = rowsRef.current
     if (!rows.length || uploadedTradesRef.current.length === 0) {
       uploadedTradeMarkersRef.current = []
+      setUploadedTradeRows([])
       return
     }
-    const timeSet = new Set(rows.map(r => r.time))
+    const idxByTime = new Map(rows.map((r, i) => [r.time, i]))
     const rangeFrom = rows[0].time, rangeTo = rows[rows.length - 1].time
     const markers = []
+    const listRows = []
     for (const t of uploadedTradesRef.current) {
-      const entryIn = t.entryTime >= rangeFrom && t.entryTime <= rangeTo && timeSet.has(t.entryTime)
-      const exitIn = t.exitTime >= rangeFrom && t.exitTime <= rangeTo && timeSet.has(t.exitTime)
+      const entryIdx = idxByTime.get(t.entryTime)
+      const exitIdx = idxByTime.get(t.exitTime)
+      const entryIn = t.entryTime >= rangeFrom && t.entryTime <= rangeTo && entryIdx != null
+      const exitIn = t.exitTime >= rangeFrom && t.exitTime <= rangeTo && exitIdx != null
+      if (!entryIn && !exitIn) continue
       if (entryIn) {
         markers.push({
           time: t.entryTime,
           position: t.dir === 'long' ? 'belowBar' : 'aboveBar',
           color: t.dir === 'long' ? '#2196F3' : '#AB47BC',
           shape: t.dir === 'long' ? 'arrowUp' : 'arrowDown',
-          size: 1,
+          size: 2,
           text: t.dir === 'long' ? '롱' : '숏',
         })
       }
@@ -1127,12 +1139,18 @@ export default function ReplayChart() {
           position: t.dir === 'long' ? 'aboveBar' : 'belowBar',
           color: uploadedExitColor(t.exitReason),
           shape: 'circle',
-          size: 1,
+          size: 2,
           text: `${t.pnl > 0 ? '+' : ''}${t.pnl.toFixed(1)}`,
         })
       }
+      listRows.push({
+        dir: t.dir, exitReason: t.exitReason, pnl: t.pnl,
+        entryIdx: entryIn ? entryIdx : null, entryTime: t.entryTime,
+        exitIdx: exitIn ? exitIdx : null, exitTime: t.exitTime,
+      })
     }
     uploadedTradeMarkersRef.current = markers.sort((a, b) => a.time - b.time)
+    setUploadedTradeRows(listRows.sort((a, b) => (a.entryTime ?? a.exitTime) - (b.entryTime ?? b.exitTime)))
   }
 
   // 크로스/더블비 신호 마커 둘 다 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 지점 중
@@ -2800,6 +2818,35 @@ export default function ReplayChart() {
                         <span style={{ color: '#FF9800' }}>●</span>전환<br />
                         <span style={{ color: '#FFC107' }}>■</span>달력에 매매 있는 날
                       </div>
+                      {uploadedTradeRows.length > 0 ? (
+                        <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                          {uploadedTradeRows.map((r, i) => (
+                            <div
+                              key={i}
+                              onClick={() => scrub((r.exitIdx ?? r.entryIdx) + 1)}
+                              title="클릭하면 이 캔들 위치로 바로 이동"
+                              style={{
+                                fontSize: 10.5, padding: '5px 6px', borderRadius: 6, cursor: 'pointer',
+                                background: '#0f1115', border: '1px solid #2a2e38', lineHeight: 1.6,
+                              }}
+                            >
+                              <span style={{ color: r.dir === 'long' ? '#2196F3' : '#AB47BC', fontWeight: 700 }}>
+                                {r.dir === 'long' ? '▲롱' : '▼숏'}
+                              </span>
+                              {' '}
+                              {r.entryIdx != null ? `#${r.entryIdx + 1}(${fmtHm(r.entryTime)})` : '이전구간'}
+                              {' → '}
+                              <span style={{ color: uploadedExitColor(r.exitReason) }}>
+                                {r.exitIdx != null ? `#${r.exitIdx + 1}(${fmtHm(r.exitTime)})` : '다음구간'}
+                              </span>
+                              {' '}
+                              <span style={{ color: '#6b7280' }}>{r.pnl > 0 ? '+' : ''}{r.pnl.toFixed(1)}pt</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 10.5, color: '#6b7280', marginTop: 4 }}>이 구간엔 해당 파일의 매매가 없어요 — 노란 날짜를 먼저 불러오세요.</div>
+                      )}
                     </>
                   )}
                   {uploadedTradeError && <div style={{ fontSize: 11, color: '#F44336' }}>{uploadedTradeError}</div>}
@@ -3562,7 +3609,7 @@ export default function ReplayChart() {
             >📥 샘플 CSV 다운로드</a>
             <p style={{ color: '#6b7280', fontSize: 12, marginTop: 10 }}>
               실제 백테스트 결과 6건(롱 익절·롱 손절·숏 익절·숏 손절·크로스전환 2건)이 담긴 샘플이에요. 다운로드한 파일을 그대로 왼쪽 업로드 카드에 올려서
-              동작을 먼저 확인해본 뒤, 자신의 결과 CSV로 바꿔 올리면 됩니다. (샘플은 2026-04-18/21/23 나스닥 데이터 기준 — 달력에서 그 날짜를 먼저 불러온 뒤 업로드하면 바로 확인 가능해요.)
+              동작을 먼저 확인해본 뒤, 자신의 결과 CSV로 바꿔 올리면 됩니다. 업로드하면 달력에서 매매가 있는 날짜가 노란색으로 표시되니, 그 날짜를 눌러 불러오면 왼쪽 카드에 캔들 번호와 함께 목록이 뜨고 클릭하면 그 위치로 바로 이동해요.
             </p>
           </div>
         </main>
