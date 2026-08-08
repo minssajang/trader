@@ -65,12 +65,12 @@ const MIN_SPREAD_LINE_COLOR = '#00E5FF' // 가장 좁게 뭉친 지점(하늘)
 
 // VerticalLinePrimitive과 같은 방식이지만 시각 하나가 아니라 여러 시각에 동시에 세로선을 그린다.
 // 70/15/15 스토캐스틱이 "볼린저 외부 상태에서 %K/%D 크로스" 조건을 만족한 캔들들을 전부 표시할 때 씀.
+// 골든/데드크로스마다 색을 다르게 줄 수 있게 setLines({time,color}[])로 받는다(사용자 요청).
 class MultiVerticalLinesPrimitive {
-  constructor(color) {
-    this._times = []
+  constructor() {
+    this._lines = [] // [{time, color}]
     this._chart = null
     this._requestUpdate = null
-    this._color = color
   }
   attached({ chart, requestUpdate }) {
     this._chart = chart
@@ -84,19 +84,19 @@ class MultiVerticalLinesPrimitive {
     return [{
       renderer: () => ({
         draw: (target) => {
-          if (!this._times.length || !this._chart) return
+          if (!this._lines.length || !this._chart) return
           const ts = this._chart.timeScale()
           target.useBitmapCoordinateSpace((scope) => {
             const ctx = scope.context
             const ratio = scope.horizontalPixelRatio
             ctx.save()
-            ctx.strokeStyle = this._color
-            ctx.lineWidth = 1
+            ctx.lineWidth = 2 // 너무 얇아서 색이 안 보인다는 지적 - 1 -> 2로 두껍게
             ctx.setLineDash([]) // 실선(사용자 요청) - 다른 세로선(리본 발산/수축 표시 등)은 점선이라 명시적으로 초기화
-            for (const time of this._times) {
-              const x = ts.timeToCoordinate(time)
+            for (const line of this._lines) {
+              const x = ts.timeToCoordinate(line.time)
               if (x == null) continue
               const px = Math.round(x * ratio) + 0.5
+              ctx.strokeStyle = line.color
               ctx.beginPath()
               ctx.moveTo(px, 0)
               ctx.lineTo(px, scope.bitmapSize.height)
@@ -108,12 +108,13 @@ class MultiVerticalLinesPrimitive {
       }),
     }]
   }
-  setTimes(times) {
-    this._times = times
+  setLines(lines) {
+    this._lines = lines
     this._requestUpdate?.()
   }
 }
-const STOCH3_CROSS_LINE_COLOR = '#FF9800' // 70/15/15 스토캐스틱 크로스 세로줄(주황, 스토3 K선과 같은 계열)
+const STOCH3_CROSS_GOLDEN_COLOR = '#C6FF00' // 70/15/15 스토캐스틱 골든크로스 세로줄(라임, 사용자 요청)
+const STOCH3_CROSS_DEAD_COLOR = '#F44336' // 70/15/15 스토캐스틱 데드크로스 세로줄(레드, 사용자 요청)
 
 // 횡보 구간 배경 표시(사용자 요청) - VerticalLinePrimitive와 같은 방식이지만 선 1개가 아니라
 // 여러 개의 [from,to] 시간 구간을 옅은 색 사각형으로 캔들 뒤에 채운다(zOrder: 'bottom').
@@ -936,7 +937,7 @@ export default function ReplayChart() {
     series.attachPrimitive(maxSpreadLineRef.current)
     series.attachPrimitive(minSpreadLineRef.current)
 
-    stoch3CrossLineRef.current = new MultiVerticalLinesPrimitive(STOCH3_CROSS_LINE_COLOR)
+    stoch3CrossLineRef.current = new MultiVerticalLinesPrimitive()
     series.attachPrimitive(stoch3CrossLineRef.current)
 
     sidewaysBandRef.current = new BackgroundBandsPrimitive(hexToRgba(sidewaysColor, 0.15))
@@ -1179,9 +1180,9 @@ export default function ReplayChart() {
       s.k.setData(d.k.slice(0, idx).filter(Boolean))
       s.d.setData(d.d.slice(0, idx).filter(Boolean))
     }
-    const times = stoch3CrossTimesRef.current.filter(p => p.idx < idx).map(p => p.time)
-    stoch3CrossLineRef.current?.setTimes(times)
-    stoch3CrossLineStochPaneRef.current?.setTimes(times)
+    const lines = stoch3CrossTimesRef.current.filter(p => p.idx < idx).map(p => ({ time: p.time, color: p.color }))
+    stoch3CrossLineRef.current?.setLines(lines)
+    stoch3CrossLineStochPaneRef.current?.setLines(lines)
   }
   const syncStoch3 = (idx) => applyStoch3Index(idx)
   const syncMACD5 = (idx) => applyMACD5Index(idx)
@@ -1642,8 +1643,9 @@ export default function ReplayChart() {
             }
             const k = stoch3.k[i], d = stoch3.d[i], pk = stoch3.k[i - 1], pd = stoch3.d[i - 1]
             if (isOutsideBand && k != null && d != null && pk != null && pd != null) {
-              const crossed = (pk <= pd && k > d) || (pk >= pd && k < d)
-              if (crossed) crossTimes.push({ idx: i - startIdx, time: t })
+              const golden = pk <= pd && k > d
+              const dead = pk >= pd && k < d
+              if (golden || dead) crossTimes.push({ idx: i - startIdx, time: t, color: golden ? STOCH3_CROSS_GOLDEN_COLOR : STOCH3_CROSS_DEAD_COLOR })
             }
           }
           stoch3CrossTimesRef.current = crossTimes
@@ -2322,7 +2324,7 @@ export default function ReplayChart() {
   // 70/15/15 세로줄을 메인 캔들 pane뿐 아니라 스토캐스틱 pane에도 하나 더 얹는다(사용자 지적 - 스토 부분엔 안 보였음)
   const ensureStochPaneCrossLine = (series) => {
     if (stoch3CrossLineStochPaneRef.current) return
-    stoch3CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive(STOCH3_CROSS_LINE_COLOR)
+    stoch3CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive()
     series.attachPrimitive(stoch3CrossLineStochPaneRef.current)
   }
 
@@ -2415,7 +2417,7 @@ export default function ReplayChart() {
         }
       }
       stoch3SeriesRef.current = null
-      stoch3CrossLineRef.current?.setTimes([])
+      stoch3CrossLineRef.current?.setLines([])
     }
   }
   const setStoch3KColor = (color) => { setStoch3KColorState(color); stoch3SeriesRef.current?.k.applyOptions({ color }) }
@@ -3673,7 +3675,7 @@ export default function ReplayChart() {
                         />
                       </div>
                       <div style={{ marginLeft: 19, marginTop: 3, fontSize: 9.5, color: '#5a5f6a', lineHeight: 1.4 }}>
-                        5분B 밖으로 나간 뒤 아직 안 돌아온 상태에서 K/D가 교차하면 세로줄(주황) 표시. 밴드 안으로 돌아온 뒤의 교차는 표시 안 함.
+                        5분B 밖으로 나간 뒤 아직 안 돌아온 상태에서 K/D가 교차하면 세로줄 표시(골든=라임, 데드=레드). 밴드 안으로 돌아온 뒤의 교차는 표시 안 함.
                       </div>
                     </>
                   )}
@@ -3750,8 +3752,13 @@ export default function ReplayChart() {
                 <div ref={containerRef} style={{ width: '100%', height: 860 }} />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', marginTop: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
                 <span style={{ color: '#9aa0ab', fontSize: 13 }}>{playIndex.toLocaleString()} / {total.toLocaleString()}봉</span>
+                {selectedDate && (
+                  <span style={{ color: '#e8eaed', fontSize: 13, fontWeight: 700 }}>
+                    {selectedDateTo ? `${selectedDate} ~ ${selectedDateTo}` : selectedDate}
+                  </span>
+                )}
               </div>
               {uploadedTradeFile && (
                 <input
@@ -4005,16 +4012,18 @@ export default function ReplayChart() {
               날짜 범위를 불러오면 재생하지 않아도 그 안의 매매가 바로 전부 표시됩니다.
             </p>
             <p style={{ color: '#9aa0ab', fontSize: 13.5, lineHeight: 1.7, marginBottom: 12 }}>
-              CSV는 아래 10개 컬럼을 헤더 그대로 가진 형식이어야 해요:
+              CSV는 아래 10개 컬럼을 헤더 그대로 가진 형식이어야 해요(뒤에 컬럼이 더 있어도 무시하고 앞 10개만 읽어요):
             </p>
             <div style={{ background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#e8eaed', overflowX: 'auto', marginBottom: 14, fontFamily: 'monospace' }}>
               진입날짜,진입시간,방향,진입가,청산날짜,청산시간,청산가,보유시간(분),청산사유,손익(pt)
+              <span style={{ color: '#6b7280' }}>[,이탈날짜,이탈시각,이탈방향]</span>
             </div>
             <ul style={{ color: '#9aa0ab', fontSize: 13, lineHeight: 1.8, marginBottom: 16, paddingLeft: 20 }}>
               <li><b style={{ color: '#e8eaed' }}>진입날짜/청산날짜</b>: YYYY-MM-DD</li>
               <li><b style={{ color: '#e8eaed' }}>진입시간/청산시간</b>: HH:MM:SS (한국시간 기준)</li>
               <li><b style={{ color: '#e8eaed' }}>방향</b>: 롱 또는 숏</li>
               <li><b style={{ color: '#e8eaed' }}>청산사유</b>: <code>SL</code>로 시작하면 손절(빨강), <code>TP</code>로 시작하면 익절(초록), <code>flip</code>으로 시작하면 크로스전환(주황)으로 표시돼요</li>
+              <li><b style={{ color: '#e8eaed' }}>이탈날짜/이탈시각/이탈방향</b>(선택): 이 진입을 만든 5분B 볼린저 이탈 시점 — 새 돌파 없이 크로스만으로 전환된 진입은 비어있어요. 화면 표시엔 안 쓰고 CSV 안에서 참고용으로만 남겨둬요.</li>
             </ul>
             <a
               href="/sample-trades.csv"
