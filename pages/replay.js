@@ -92,7 +92,7 @@ class MultiVerticalLinesPrimitive {
             ctx.save()
             ctx.strokeStyle = this._color
             ctx.lineWidth = 1
-            ctx.setLineDash([4, 3])
+            ctx.setLineDash([]) // 실선(사용자 요청) - 다른 세로선(리본 발산/수축 표시 등)은 점선이라 명시적으로 초기화
             for (const time of this._times) {
               const x = ts.timeToCoordinate(time)
               if (x == null) continue
@@ -803,7 +803,9 @@ export default function ReplayChart() {
   const stoch3DataRef = useRef({ k: [], d: [] })
   const stoch3SeriesRef = useRef(null)
   const stoch3CrossTimesRef = useRef([]) // [{idx, time}] - 5분B 외부 상태에서 K/D 크로스가 난 지점 전체
-  const stoch3CrossLineRef = useRef(null) // MultiVerticalLinesPrimitive 인스턴스
+  const stoch3CrossLineRef = useRef(null) // MultiVerticalLinesPrimitive 인스턴스(메인 캔들 pane용)
+  const stoch3CrossLineStochPaneRef = useRef(null) // 같은 세로줄을 스토캐스틱 pane 쪽에도 하나 더 얹은 인스턴스 - pane은
+  // 셋 중 아무거나 처음 켜질 때 생겼다 전부 꺼지면 사라지므로, 이 primitive도 그때그때 새로 만들고 null로 되돌린다.
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
   const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
@@ -1179,6 +1181,7 @@ export default function ReplayChart() {
     }
     const times = stoch3CrossTimesRef.current.filter(p => p.idx < idx).map(p => p.time)
     stoch3CrossLineRef.current?.setTimes(times)
+    stoch3CrossLineStochPaneRef.current?.setTimes(times)
   }
   const syncStoch3 = (idx) => applyStoch3Index(idx)
   const syncMACD5 = (idx) => applyMACD5Index(idx)
@@ -2316,6 +2319,12 @@ export default function ReplayChart() {
     (exclude !== 2 && stoch2SeriesRef.current) ||
     (exclude !== 3 && stoch3SeriesRef.current)
   )
+  // 70/15/15 세로줄을 메인 캔들 pane뿐 아니라 스토캐스틱 pane에도 하나 더 얹는다(사용자 지적 - 스토 부분엔 안 보였음)
+  const ensureStochPaneCrossLine = (series) => {
+    if (stoch3CrossLineStochPaneRef.current) return
+    stoch3CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive(STOCH3_CROSS_LINE_COLOR)
+    series.attachPrimitive(stoch3CrossLineStochPaneRef.current)
+  }
 
   const toggleStoch1 = () => {
     const turningOn = !enabledStoch1
@@ -2324,9 +2333,10 @@ export default function ReplayChart() {
       if (!stoch1SeriesRef.current && chartRef.current) {
         const paneIndex = findStochPaneIndex()
         stoch1SeriesRef.current = {
-          k: chartRef.current.addSeries(LineSeries, { color: stoch1KColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true }, paneIndex),
-          d: chartRef.current.addSeries(LineSeries, { color: stoch1DColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false }, paneIndex),
+          k: chartRef.current.addSeries(LineSeries, { color: stoch1KColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }, paneIndex),
+          d: chartRef.current.addSeries(LineSeries, { color: stoch1DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, paneIndex),
         }
+        ensureStochPaneCrossLine(stoch1SeriesRef.current.k)
         bumpMarkerLayer()
       }
       applyStoch1Index(indexRef.current)
@@ -2338,6 +2348,7 @@ export default function ReplayChart() {
         chartRef.current.removeSeries(s.d)
         if (!anyOtherStochOn(1)) {
           try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+          stoch3CrossLineStochPaneRef.current = null
         }
       }
       stoch1SeriesRef.current = null
@@ -2353,9 +2364,10 @@ export default function ReplayChart() {
       if (!stoch2SeriesRef.current && chartRef.current) {
         const paneIndex = findStochPaneIndex()
         stoch2SeriesRef.current = {
-          k: chartRef.current.addSeries(LineSeries, { color: stoch2KColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true }, paneIndex),
-          d: chartRef.current.addSeries(LineSeries, { color: stoch2DColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false }, paneIndex),
+          k: chartRef.current.addSeries(LineSeries, { color: stoch2KColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }, paneIndex),
+          d: chartRef.current.addSeries(LineSeries, { color: stoch2DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, paneIndex),
         }
+        ensureStochPaneCrossLine(stoch2SeriesRef.current.k)
         bumpMarkerLayer()
       }
       applyStoch2Index(indexRef.current)
@@ -2367,6 +2379,7 @@ export default function ReplayChart() {
         chartRef.current.removeSeries(s.d)
         if (!anyOtherStochOn(2)) {
           try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+          stoch3CrossLineStochPaneRef.current = null
         }
       }
       stoch2SeriesRef.current = null
@@ -2383,9 +2396,10 @@ export default function ReplayChart() {
       if (!stoch3SeriesRef.current && chartRef.current) {
         const paneIndex = findStochPaneIndex()
         stoch3SeriesRef.current = {
-          k: chartRef.current.addSeries(LineSeries, { color: stoch3KColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true }, paneIndex),
-          d: chartRef.current.addSeries(LineSeries, { color: stoch3DColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false }, paneIndex),
+          k: chartRef.current.addSeries(LineSeries, { color: stoch3KColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }, paneIndex),
+          d: chartRef.current.addSeries(LineSeries, { color: stoch3DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, paneIndex),
         }
+        ensureStochPaneCrossLine(stoch3SeriesRef.current.k)
         bumpMarkerLayer()
       }
       applyStoch3Index(indexRef.current)
@@ -2397,6 +2411,7 @@ export default function ReplayChart() {
         chartRef.current.removeSeries(s.d)
         if (!anyOtherStochOn(3)) {
           try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+          stoch3CrossLineStochPaneRef.current = null
         }
       }
       stoch3SeriesRef.current = null
