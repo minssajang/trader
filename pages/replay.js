@@ -3264,19 +3264,12 @@ export default function ReplayChart() {
                               </div>
                               {r.comboLabel && (
                                 <div style={{ color: r.comboLabel === '나쁜' ? '#F44336' : '#4CAF50', marginTop: 1, fontWeight: r.comboLabel === '나쁜' ? 700 : 400 }}>
-                                  {r.comboLabel === '나쁜' ? '⚠ 나쁜조합' : '좋은조합'}{r.combo ? ` (${r.combo})` : ''}
+                                  {r.comboLabel === '나쁜' ? '⚠ 나쁜조합' : '좋은조합'}
                                 </div>
                               )}
-                              {/* 화면 캔들순번(#104)은 불러온 날짜마다 리셋돼서 매매 식별용으론 안 맞음(사용자 지적) -
-                                  전체거래번호(파일 전체 기준 고유번호)와 날짜관리번호(YYMMDD#그날캔들순번)를 캡션으로 같이 표시 */}
-                              {(r.num != null || r.dateNum != null) && (
-                                <div style={{ color: '#5a5f6a', marginTop: 1, fontSize: 9.5 }}>
-                                  전체거래번호 / 날짜관리번호
-                                </div>
-                              )}
-                              {(r.num != null || r.dateNum != null) && (
-                                <div style={{ color: '#9aa0ab', marginTop: 1 }}>
-                                  {r.num != null ? `#${r.num}` : '-'}{' / '}{r.dateNum || '-'}
+                              {r.combo && (
+                                <div style={{ color: r.comboLabel === '나쁜' ? '#F44336' : '#4CAF50', marginTop: 1 }}>
+                                  ({r.combo})
                                 </div>
                               )}
                               <div style={{ marginTop: 1 }}>
@@ -3288,11 +3281,14 @@ export default function ReplayChart() {
                               </div>
                               <div style={{ color: r.breakoutTime != null ? '#FFC107' : '#6b7280', marginTop: 1 }}>
                                 {r.breakoutTime != null
-                                  ? `이탈: ${r.breakoutIdx != null ? `#${r.breakoutIdx + 1}(${fmtHm(r.breakoutTime)})` : fmtHm(r.breakoutTime)} ${r.breakoutDir || ''}`
+                                  ? `${r.breakoutDir || ''}이탈: ${r.breakoutIdx != null ? `#${r.breakoutIdx + 1}(${fmtHm(r.breakoutTime)})` : fmtHm(r.breakoutTime)}`
                                   : '이탈: 크로스전환(새 돌파 없음)'}
                               </div>
                               <div style={{ color: '#6b7280', marginTop: 1 }}>
-                                진입가 {r.entryPrice != null ? r.entryPrice.toFixed(2) : '-'} → 청산가 {r.exitPrice != null ? r.exitPrice.toFixed(2) : '-'}
+                                진입가 {r.entryPrice != null ? r.entryPrice.toFixed(2) : '-'}
+                              </div>
+                              <div style={{ color: '#6b7280', marginTop: 1 }}>
+                                청산가 {r.exitPrice != null ? r.exitPrice.toFixed(2) : '-'}
                               </div>
                             </div>
                           ))}
