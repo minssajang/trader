@@ -690,6 +690,7 @@ export default function ReplayChart() {
   const [uploadedTradeError, setUploadedTradeError] = useState('')
   const [tradeDragOver, setTradeDragOver] = useState(false)
   const [uploadedTradeRows, setUploadedTradeRows] = useState([]) // 현재 불러온 구간 안에 있는 거래 목록(캔들번호 포함) - 마커 찾기 힘들다는 지적으로 추가
+  const [viewScrubPos, setViewScrubPos] = useState(0) // 빨간 바 위치 - 재생 위치(파란 바)와 독립적으로 화면만 이동시킬 때 씀
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -1145,8 +1146,8 @@ export default function ReplayChart() {
       }
       listRows.push({
         dir: t.dir, exitReason: t.exitReason, pnl: t.pnl,
-        entryIdx: entryIn ? entryIdx : null, entryTime: t.entryTime,
-        exitIdx: exitIn ? exitIdx : null, exitTime: t.exitTime,
+        entryIdx: entryIn ? entryIdx : null, entryTime: t.entryTime, entryPrice: t.entryPrice,
+        exitIdx: exitIn ? exitIdx : null, exitTime: t.exitTime, exitPrice: t.exitPrice,
       })
     }
     uploadedTradeMarkersRef.current = markers.sort((a, b) => a.time - b.time)
@@ -1214,7 +1215,11 @@ export default function ReplayChart() {
   const applyIndex = (idx) => {
     const dayRows = rowsRef.current.slice(0, idx)
     seriesRef.current?.setData(dayRows)
-    markerSeriesRef.current?.setData(dayRows.map(r => ({ time: r.time, value: r.close })))
+    // 마커 전용 투명 시리즈는 항상 구간 전체를 앵커로 갖고 있어야 한다 - 재생 위치(idx)까지만 주면
+    // 아직 재생 안 된 시각의 마커(특히 재생 위치와 무관하게 항상 표시하는 업로드 매매내역)가 앵커를
+    // 못 찾아서 화면 오른쪽 끝에 전부 쏠려 붙는 버그가 있었다. 다른 신호 마커들은 어차피
+    // applyAllMarkers에서 idx로 따로 걸러지니 여기서 전체를 줘도 미래 정보가 새는 게 아니다.
+    markerSeriesRef.current?.setData(rowsRef.current.map(r => ({ time: r.time, value: r.close })))
     syncBands(idx)
     syncMA(idx)
     syncRSI(idx)
@@ -2502,6 +2507,18 @@ export default function ReplayChart() {
     applyIndex(idx)
   }
 
+  // 빨간 바 전용 - 재생 위치(indexRef/playIndex, 파란 바)는 절대 건드리지 않고 차트 "화면"만 그 캔들로 이동시킨다.
+  // 지금 보이는 창 너비(logical range)는 유지한 채 중심만 옮긴다.
+  const scrubView = (idx) => {
+    setViewScrubPos(idx)
+    const chart = chartRef.current
+    if (!chart) return
+    const ts = chart.timeScale()
+    const range = ts.getVisibleLogicalRange()
+    const width = range ? (range.to - range.from) : 60
+    ts.setVisibleLogicalRange({ from: idx - width / 2, to: idx + width / 2 })
+  }
+
   const navigateMonth = (delta) => {
     setViewDate(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
   }
@@ -2830,17 +2847,22 @@ export default function ReplayChart() {
                                 background: '#0f1115', border: '1px solid #2a2e38', lineHeight: 1.6,
                               }}
                             >
-                              <span style={{ color: r.dir === 'long' ? '#2196F3' : '#AB47BC', fontWeight: 700 }}>
-                                {r.dir === 'long' ? '▲롱' : '▼숏'}
-                              </span>
-                              {' '}
-                              {r.entryIdx != null ? `#${r.entryIdx + 1}(${fmtHm(r.entryTime)})` : '이전구간'}
-                              {' → '}
-                              <span style={{ color: uploadedExitColor(r.exitReason) }}>
-                                {r.exitIdx != null ? `#${r.exitIdx + 1}(${fmtHm(r.exitTime)})` : '다음구간'}
-                              </span>
-                              {' '}
-                              <span style={{ color: '#6b7280' }}>{r.pnl > 0 ? '+' : ''}{r.pnl.toFixed(1)}pt</span>
+                              <div>
+                                <span style={{ color: r.dir === 'long' ? '#2196F3' : '#AB47BC', fontWeight: 700 }}>
+                                  {r.dir === 'long' ? '▲롱' : '▼숏'}
+                                </span>
+                                {' '}
+                                {r.entryIdx != null ? `#${r.entryIdx + 1}(${fmtHm(r.entryTime)})` : '이전구간'}
+                                {' → '}
+                                <span style={{ color: uploadedExitColor(r.exitReason) }}>
+                                  {r.exitIdx != null ? `#${r.exitIdx + 1}(${fmtHm(r.exitTime)})` : '다음구간'}
+                                </span>
+                                {' '}
+                                <span style={{ color: '#6b7280' }}>{r.pnl > 0 ? '+' : ''}{r.pnl.toFixed(1)}pt</span>
+                              </div>
+                              <div style={{ color: '#6b7280', marginTop: 1 }}>
+                                진입가 {r.entryPrice != null ? r.entryPrice.toFixed(2) : '-'} → 청산가 {r.exitPrice != null ? r.exitPrice.toFixed(2) : '-'}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -3345,6 +3367,15 @@ export default function ReplayChart() {
               <div style={{ display: 'flex', alignItems: 'center', marginTop: 16 }}>
                 <span style={{ color: '#9aa0ab', fontSize: 13 }}>{playIndex.toLocaleString()} / {total.toLocaleString()}봉</span>
               </div>
+              {uploadedTradeFile && (
+                <input
+                  type="range" min={0} max={total || 0} value={viewScrubPos}
+                  onChange={e => scrubView(Number(e.target.value))}
+                  disabled={!total}
+                  title="화면만 그 위치로 이동(재생 위치·아래 파란 바는 그대로 유지됨)"
+                  style={{ width: '100%', marginTop: 6, accentColor: '#F44336' }}
+                />
+              )}
               <input
                 type="range" min={0} max={total || 0} value={playIndex}
                 onChange={e => scrub(Number(e.target.value))}
