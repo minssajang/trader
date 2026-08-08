@@ -2744,6 +2744,53 @@ export default function ReplayChart() {
                 />
               </CollapsibleCard>
 
+              <CollapsibleCard title="📤 매매내역 업로드" maxWidth={170} defaultOpen={true}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label
+                    onDragOver={e => { e.preventDefault(); setTradeDragOver(true) }}
+                    onDragLeave={() => setTradeDragOver(false)}
+                    onDrop={handleTradeCsvDrop}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      fontSize: 11, padding: '8px 6px', borderRadius: 8, cursor: 'pointer',
+                      border: `1px dashed ${tradeDragOver ? '#4CAF50' : '#2a2e38'}`,
+                      background: tradeDragOver ? 'rgba(76,175,80,0.08)' : 'transparent',
+                      color: '#9aa0ab', textAlign: 'center', transition: 'all 0.15s',
+                    }}
+                  >
+                    📥 CSV 선택 또는 드래그
+                    <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleTradeCsvUpload} />
+                  </label>
+                  {uploadedTradeFile && (
+                    <>
+                      <div style={{ fontSize: 11, color: '#9aa0ab', wordBreak: 'break-all' }}>{uploadedTradeFile} ({uploadedTradeCount}건)</div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa0ab', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={showUploadedTrades}
+                          onChange={e => toggleShowUploadedTrades(e.target.checked)}
+                          style={{ width: 12, height: 12, margin: 0, flexShrink: 0 }}
+                        />
+                        차트에 표시
+                      </label>
+                      <button
+                        type="button"
+                        onClick={clearUploadedTrades}
+                        style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#F44336', cursor: 'pointer' }}
+                      >지우기</button>
+                      <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.6 }}>
+                        <span style={{ color: '#2196F3' }}>▲</span>롱진입&nbsp;
+                        <span style={{ color: '#AB47BC' }}>▼</span>숏진입<br />
+                        <span style={{ color: '#F44336' }}>●</span>손절&nbsp;
+                        <span style={{ color: '#26A69A' }}>●</span>익절&nbsp;
+                        <span style={{ color: '#FF9800' }}>●</span>전환
+                      </div>
+                    </>
+                  )}
+                  {uploadedTradeError && <div style={{ fontSize: 11, color: '#F44336' }}>{uploadedTradeError}</div>}
+                </div>
+              </CollapsibleCard>
+
               <CollapsibleCard title="횡보" maxWidth={170} defaultOpen={false}>
                 <div style={{ padding: '1px 0' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
@@ -3200,52 +3247,6 @@ export default function ReplayChart() {
                 </div>
               </CollapsibleCard>
 
-              <CollapsibleCard title="📤 매매내역 업로드" maxWidth={170} defaultOpen={true}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label
-                    onDragOver={e => { e.preventDefault(); setTradeDragOver(true) }}
-                    onDragLeave={() => setTradeDragOver(false)}
-                    onDrop={handleTradeCsvDrop}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                      fontSize: 11, padding: '8px 6px', borderRadius: 8, cursor: 'pointer',
-                      border: `1px dashed ${tradeDragOver ? '#4CAF50' : '#2a2e38'}`,
-                      background: tradeDragOver ? 'rgba(76,175,80,0.08)' : 'transparent',
-                      color: '#9aa0ab', textAlign: 'center', transition: 'all 0.15s',
-                    }}
-                  >
-                    📥 CSV 선택 또는 드래그
-                    <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleTradeCsvUpload} />
-                  </label>
-                  {uploadedTradeFile && (
-                    <>
-                      <div style={{ fontSize: 11, color: '#9aa0ab', wordBreak: 'break-all' }}>{uploadedTradeFile} ({uploadedTradeCount}건)</div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa0ab', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={showUploadedTrades}
-                          onChange={e => toggleShowUploadedTrades(e.target.checked)}
-                          style={{ width: 12, height: 12, margin: 0, flexShrink: 0 }}
-                        />
-                        차트에 표시
-                      </label>
-                      <button
-                        type="button"
-                        onClick={clearUploadedTrades}
-                        style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#F44336', cursor: 'pointer' }}
-                      >지우기</button>
-                      <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.6 }}>
-                        <span style={{ color: '#2196F3' }}>▲</span>롱진입&nbsp;
-                        <span style={{ color: '#AB47BC' }}>▼</span>숏진입<br />
-                        <span style={{ color: '#F44336' }}>●</span>손절&nbsp;
-                        <span style={{ color: '#26A69A' }}>●</span>익절&nbsp;
-                        <span style={{ color: '#FF9800' }}>●</span>전환
-                      </div>
-                    </>
-                  )}
-                  {uploadedTradeError && <div style={{ fontSize: 11, color: '#F44336' }}>{uploadedTradeError}</div>}
-                </div>
-              </CollapsibleCard>
             </div>
 
             {/* 오른쪽 컬럼: 상태줄 / 차트 / 컨트롤 */}
