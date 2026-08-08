@@ -680,13 +680,13 @@ export default function ReplayChart() {
   const [macd5SignalColor, setMacd5SignalColorState] = useState(rs.macd5SignalColor ?? DEFAULT_MACD5_SIGNAL_COLOR)
   // 스토캐스틱 3세트 - 14/3/3, 7/2/2, 70/15/15(사용자 요청). 70/15/15는 "5분B 볼린저 외부 상태에서
   // K/D 크로스" 조건을 만족하면 세로줄도 같이 표시한다(아래 stoch3CrossTimesRef/토글 함수 참고).
-  const [enabledStoch1, setEnabledStoch1] = useState(rs.enabledStoch1 ?? false)
+  const [enabledStoch1, setEnabledStoch1] = useState(rs.enabledStoch1 ?? true)
   const [stoch1KColor, setStoch1KColorState] = useState(rs.stoch1KColor ?? DEFAULT_STOCH1_K_COLOR)
   const [stoch1DColor, setStoch1DColorState] = useState(rs.stoch1DColor ?? DEFAULT_STOCH1_D_COLOR)
-  const [enabledStoch2, setEnabledStoch2] = useState(rs.enabledStoch2 ?? false)
+  const [enabledStoch2, setEnabledStoch2] = useState(rs.enabledStoch2 ?? true)
   const [stoch2KColor, setStoch2KColorState] = useState(rs.stoch2KColor ?? DEFAULT_STOCH2_K_COLOR)
   const [stoch2DColor, setStoch2DColorState] = useState(rs.stoch2DColor ?? DEFAULT_STOCH2_D_COLOR)
-  const [enabledStoch3, setEnabledStoch3] = useState(rs.enabledStoch3 ?? false)
+  const [enabledStoch3, setEnabledStoch3] = useState(rs.enabledStoch3 ?? true)
   const [stoch3KColor, setStoch3KColorState] = useState(rs.stoch3KColor ?? DEFAULT_STOCH3_K_COLOR)
   const [stoch3DColor, setStoch3DColorState] = useState(rs.stoch3DColor ?? DEFAULT_STOCH3_D_COLOR)
   const [upColor, setUpColorState] = useState(rs.upColor ?? DEFAULT_UP_COLOR)
@@ -976,6 +976,38 @@ export default function ReplayChart() {
         maSeriesRef.current[ma.id] = chart.addSeries(LineSeries, {
           color, lineWidth: width, lineStyle: ma.lineStyle, lastValueVisible: false, priceLineVisible: false,
         })
+      }
+    }
+
+    // 스토캐스틱 3세트도 볼린저/이평선처럼 기본 체크(사용자 요청) - 마운트 시점에 켜져 있는 것만 여기서 직접 만든다.
+    // 셋이 같은 pane을 공유하므로 pane index는 한 번만 잡고, 세로줄(stoch3CrossLineStochPaneRef)은 그 pane에 딱 하나만 붙인다.
+    if (enabledStoch1 || enabledStoch2 || enabledStoch3) {
+      const stochPaneIndex = chart.panes().length
+      let firstStochKSeries = null
+      if (enabledStoch1) {
+        stoch1SeriesRef.current = {
+          k: chart.addSeries(LineSeries, { color: stoch1KColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }, stochPaneIndex),
+          d: chart.addSeries(LineSeries, { color: stoch1DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, stochPaneIndex),
+        }
+        firstStochKSeries = firstStochKSeries || stoch1SeriesRef.current.k
+      }
+      if (enabledStoch2) {
+        stoch2SeriesRef.current = {
+          k: chart.addSeries(LineSeries, { color: stoch2KColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }, stochPaneIndex),
+          d: chart.addSeries(LineSeries, { color: stoch2DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, stochPaneIndex),
+        }
+        firstStochKSeries = firstStochKSeries || stoch2SeriesRef.current.k
+      }
+      if (enabledStoch3) {
+        stoch3SeriesRef.current = {
+          k: chart.addSeries(LineSeries, { color: stoch3KColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }, stochPaneIndex),
+          d: chart.addSeries(LineSeries, { color: stoch3DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, stochPaneIndex),
+        }
+        firstStochKSeries = firstStochKSeries || stoch3SeriesRef.current.k
+      }
+      if (firstStochKSeries) {
+        stoch3CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive()
+        firstStochKSeries.attachPrimitive(stoch3CrossLineStochPaneRef.current)
       }
     }
 
