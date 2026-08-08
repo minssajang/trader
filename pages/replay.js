@@ -3532,6 +3532,39 @@ export default function ReplayChart() {
               </div>
             </div>
           </div>
+
+          <div style={{ marginTop: 40, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 24 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>📤 매매내역 업로드 — CSV 형식 안내</h2>
+            <p style={{ color: '#9aa0ab', fontSize: 13.5, lineHeight: 1.7, marginBottom: 12 }}>
+              직접 돌린 백테스트 결과(진입/청산 시각·가격·손익)를 CSV로 만들어 왼쪽 "📤 매매내역 업로드" 카드에 올리면,
+              이 캔들 차트 위에 진입(▲롱 / ▼숏)·청산(●손절 빨강 / ●익절 초록 / ●크로스전환 주황) 마커로 겹쳐서 볼 수 있어요.
+              날짜 범위를 불러오면 재생하지 않아도 그 안의 매매가 바로 전부 표시됩니다.
+            </p>
+            <p style={{ color: '#9aa0ab', fontSize: 13.5, lineHeight: 1.7, marginBottom: 12 }}>
+              CSV는 아래 10개 컬럼을 헤더 그대로 가진 형식이어야 해요:
+            </p>
+            <div style={{ background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#e8eaed', overflowX: 'auto', marginBottom: 14, fontFamily: 'monospace' }}>
+              진입날짜,진입시간,방향,진입가,청산날짜,청산시간,청산가,보유시간(분),청산사유,손익(pt)
+            </div>
+            <ul style={{ color: '#9aa0ab', fontSize: 13, lineHeight: 1.8, marginBottom: 16, paddingLeft: 20 }}>
+              <li><b style={{ color: '#e8eaed' }}>진입날짜/청산날짜</b>: YYYY-MM-DD</li>
+              <li><b style={{ color: '#e8eaed' }}>진입시간/청산시간</b>: HH:MM:SS (한국시간 기준)</li>
+              <li><b style={{ color: '#e8eaed' }}>방향</b>: 롱 또는 숏</li>
+              <li><b style={{ color: '#e8eaed' }}>청산사유</b>: <code>SL</code>로 시작하면 손절(빨강), <code>TP</code>로 시작하면 익절(초록), <code>flip</code>으로 시작하면 크로스전환(주황)으로 표시돼요</li>
+            </ul>
+            <a
+              href="/sample-trades.csv"
+              download="sample-trades.csv"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 9,
+                background: '#4CAF50', color: '#fff', fontWeight: 700, fontSize: 13.5, textDecoration: 'none',
+              }}
+            >📥 샘플 CSV 다운로드</a>
+            <p style={{ color: '#6b7280', fontSize: 12, marginTop: 10 }}>
+              실제 백테스트 결과 6건(롱 익절·롱 손절·숏 익절·숏 손절·크로스전환 2건)이 담긴 샘플이에요. 다운로드한 파일을 그대로 왼쪽 업로드 카드에 올려서
+              동작을 먼저 확인해본 뒤, 자신의 결과 CSV로 바꿔 올리면 됩니다. (샘플은 2026-04-18/21/23 나스닥 데이터 기준 — 달력에서 그 날짜를 먼저 불러온 뒤 업로드하면 바로 확인 가능해요.)
+            </p>
+          </div>
         </main>
       </div>
     </>
