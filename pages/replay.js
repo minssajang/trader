@@ -2907,6 +2907,18 @@ export default function ReplayChart() {
     ts.setVisibleLogicalRange({ from: idx - width / 2, to: idx + width / 2 })
   }
 
+  // 매매목록 클릭 시 진입 시점으로 이동 - 진입이 다른 날짜(전날 등)라 지금 불러온 구간 밖이면
+  // 그 날짜를 새로 불러온 뒤 이동한다. 예전엔 청산 위치로만 이동해서, 진입 당시 상황(스퀴즈/스토
+  // 등)은 못 보고 청산 시점 상황만 보고 "왜 이 상황에서 진입했냐"고 오해하는 문제가 있었음(사용자 지적).
+  const goToTradeEntry = async (r) => {
+    if (r.entryIdx != null) { scrubView(r.entryIdx); return }
+    if (r.entryTime == null) { if (r.exitIdx != null) scrubView(r.exitIdx); return }
+    const dateStr = toLocalDateStr(r.entryTime)
+    await loadRange(dateStr, dateStr)
+    const idx = rowsRef.current.findIndex(row => row.time === r.entryTime)
+    if (idx >= 0) scrubView(idx)
+  }
+
   const navigateMonth = (delta) => {
     setViewDate(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
   }
@@ -3230,8 +3242,8 @@ export default function ReplayChart() {
                           {uploadedTradeRows.map((r, i) => (
                             <div
                               key={i}
-                              onClick={() => scrubView(r.exitIdx ?? r.entryIdx)}
-                              title="클릭하면 화면만 이 캔들로 이동(재생 위치는 그대로 유지)"
+                              onClick={() => goToTradeEntry(r)}
+                              title="클릭하면 진입 시점으로 이동 (다른 날짜면 그 날짜를 새로 불러옴, 재생 위치는 그대로 유지)"
                               style={{
                                 fontSize: 10.5, padding: '5px 6px', borderRadius: 6, cursor: 'pointer',
                                 background: r.comboLabel === '나쁜' ? 'rgba(244,67,54,0.10)' : '#0f1115',
