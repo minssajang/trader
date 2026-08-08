@@ -2303,12 +2303,26 @@ export default function ReplayChart() {
   }
 
   // 스토캐스틱 3세트 - 각자 자기만의 pane(RSI와 같은 방식, MACD1/MACD5처럼 공유 안 함)
+  // 스토캐스틱 3세트는 서로 같은 pane을 공유한다(MACD1/MACD5와 같은 방식, 사용자 요청 - "겹쳐서 나와야 함")
+  // - 셋 중 이미 켜진 게 있으면 그 pane index를 그대로 쓰고, 끌 때는 나머지 둘 다 꺼져 있을 때만 pane 자체를 지운다.
+  const findStochPaneIndex = () => {
+    if (stoch1SeriesRef.current) return stoch1SeriesRef.current.k.getPane().paneIndex()
+    if (stoch2SeriesRef.current) return stoch2SeriesRef.current.k.getPane().paneIndex()
+    if (stoch3SeriesRef.current) return stoch3SeriesRef.current.k.getPane().paneIndex()
+    return chartRef.current.panes().length
+  }
+  const anyOtherStochOn = (exclude) => (
+    (exclude !== 1 && stoch1SeriesRef.current) ||
+    (exclude !== 2 && stoch2SeriesRef.current) ||
+    (exclude !== 3 && stoch3SeriesRef.current)
+  )
+
   const toggleStoch1 = () => {
     const turningOn = !enabledStoch1
     setEnabledStoch1(turningOn)
     if (turningOn) {
       if (!stoch1SeriesRef.current && chartRef.current) {
-        const paneIndex = chartRef.current.panes().length
+        const paneIndex = findStochPaneIndex()
         stoch1SeriesRef.current = {
           k: chartRef.current.addSeries(LineSeries, { color: stoch1KColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true }, paneIndex),
           d: chartRef.current.addSeries(LineSeries, { color: stoch1DColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false }, paneIndex),
@@ -2322,7 +2336,9 @@ export default function ReplayChart() {
         const pane = s.k.getPane()
         chartRef.current.removeSeries(s.k)
         chartRef.current.removeSeries(s.d)
-        try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+        if (!anyOtherStochOn(1)) {
+          try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+        }
       }
       stoch1SeriesRef.current = null
     }
@@ -2335,7 +2351,7 @@ export default function ReplayChart() {
     setEnabledStoch2(turningOn)
     if (turningOn) {
       if (!stoch2SeriesRef.current && chartRef.current) {
-        const paneIndex = chartRef.current.panes().length
+        const paneIndex = findStochPaneIndex()
         stoch2SeriesRef.current = {
           k: chartRef.current.addSeries(LineSeries, { color: stoch2KColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true }, paneIndex),
           d: chartRef.current.addSeries(LineSeries, { color: stoch2DColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false }, paneIndex),
@@ -2349,7 +2365,9 @@ export default function ReplayChart() {
         const pane = s.k.getPane()
         chartRef.current.removeSeries(s.k)
         chartRef.current.removeSeries(s.d)
-        try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+        if (!anyOtherStochOn(2)) {
+          try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+        }
       }
       stoch2SeriesRef.current = null
     }
@@ -2357,13 +2375,13 @@ export default function ReplayChart() {
   const setStoch2KColor = (color) => { setStoch2KColorState(color); stoch2SeriesRef.current?.k.applyOptions({ color }) }
   const setStoch2DColor = (color) => { setStoch2DColorState(color); stoch2SeriesRef.current?.d.applyOptions({ color }) }
 
-  // 70/15/15 - K/D 라인은 자기 pane에, "볼린저 외부 크로스" 세로줄은 메인 캔들 시리즈(stoch3CrossLineRef)에 얹는다
+  // 70/15/15 - K/D 라인은 나머지 둘과 같은 pane에, "볼린저 외부 크로스" 세로줄은 메인 캔들 시리즈(stoch3CrossLineRef)에 얹는다
   const toggleStoch3 = () => {
     const turningOn = !enabledStoch3
     setEnabledStoch3(turningOn)
     if (turningOn) {
       if (!stoch3SeriesRef.current && chartRef.current) {
-        const paneIndex = chartRef.current.panes().length
+        const paneIndex = findStochPaneIndex()
         stoch3SeriesRef.current = {
           k: chartRef.current.addSeries(LineSeries, { color: stoch3KColor, lineWidth: 2, lastValueVisible: true, priceLineVisible: true }, paneIndex),
           d: chartRef.current.addSeries(LineSeries, { color: stoch3DColor, lineWidth: 1, lastValueVisible: true, priceLineVisible: false }, paneIndex),
@@ -2377,7 +2395,9 @@ export default function ReplayChart() {
         const pane = s.k.getPane()
         chartRef.current.removeSeries(s.k)
         chartRef.current.removeSeries(s.d)
-        try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+        if (!anyOtherStochOn(3)) {
+          try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+        }
       }
       stoch3SeriesRef.current = null
       stoch3CrossLineRef.current?.setTimes([])
