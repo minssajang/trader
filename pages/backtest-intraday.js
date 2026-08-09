@@ -62,12 +62,29 @@ function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
 }
 
+// 새로고침하면 골라둔 심볼/달/날짜/표시설정이 전부 날아간다는 지적(사용자) - replay.js/backtest-chart.js와
+// 같은 방식으로 localStorage에 저장했다가 마운트 시 복원한다.
+const INTRADAY_SETTINGS_KEY = 'intradayPatternSettings'
+
 // backtest-chart.js의 서머타임 토글과 같은 개념이지만, 이 페이지는 달 단위로 통으로 보기 때문에
 // 별도 상태 없이 항상 서머타임 오프셋을 쓴다(데이터 자체가 전부 2026년 여름 구간).
 export default function BacktestIntraday() {
-  const [symbol, setSymbol] = useState('NASDAQ')
+  // 마운트 시 딱 한 번만 localStorage를 읽어서 ref에 담아둔다(렌더 중 계산이라 useEffect보다 먼저 값이 준비됨).
+  const settingsRestoreRef = useRef(undefined)
+  if (settingsRestoreRef.current === undefined) {
+    settingsRestoreRef.current = null
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(INTRADAY_SETTINGS_KEY)
+        if (raw) settingsRestoreRef.current = JSON.parse(raw)
+      } catch { /* 저장된 값이 깨져있으면 그냥 무시하고 기본값으로 시작 */ }
+    }
+  }
+  const rs = settingsRestoreRef.current || {}
+
+  const [symbol, setSymbol] = useState(rs.symbol ?? 'NASDAQ')
   const [datasets, setDatasets] = useState([])
-  const [viewMonth, setViewMonth] = useState(new Date())
+  const [viewMonth, setViewMonth] = useState(() => rs.viewMonth ? new Date(rs.viewMonth.y, rs.viewMonth.m, 1) : new Date())
   const [days, setDays] = useState([]) // [{date, points:[[minute, deviation]]}]
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -75,17 +92,17 @@ export default function BacktestIntraday() {
   // 달력에서 클릭해서 고른 날짜들만 겹쳐 그린다 - 처음엔 아무것도 안 골랐으니 차트가 비어있다
   // (예전엔 그 달 전체를 자동으로 다 그렸는데, "왜 선이 미리 그려져 있냐"는 피드백으로 사용자가
   // 직접 고른 날짜만 그리는 방식으로 바꿈)
-  const [selectedDates, setSelectedDates] = useState([])
+  const [selectedDates, setSelectedDates] = useState(rs.selectedDates ?? [])
   // 평균선은 기본으로 자동으로 안 그리고, 이 버튼을 켜야만 그린다(사용자 요청 - 시키지 않은 걸
   // 자동으로 하지 말고 옵션 버튼으로 빼둘 것)
-  const [showAverage, setShowAverage] = useState(false)
+  const [showAverage, setShowAverage] = useState(rs.showAverage ?? false)
   // 오버레이 차트에 뭘 그릴지 - 'price'(기본, 시가 대비 편차) 또는 볼린저/도치안 밴드 id(그 밴드의 폭)
-  const [seriesMode, setSeriesMode] = useState('price')
+  const [seriesMode, setSeriesMode] = useState(rs.seriesMode ?? 'price')
   // price 모드일 때, 각 날짜의 가격선 위에 그 날의 볼린저/도치안 밴드(상단·하단)도 "시가(0선) 기준"
   // 같은 스케일로 겹쳐 그린다(사용자 요청 - "중심선을 기준으로 밴드를 보여줘야 할 거 아니냐"). 왼쪽
   // 체크박스로 여러 개를 동시에 켤 수 있어야 서로 겹쳐볼 수 있다(사용자 요청) - bandId -> boolean.
   // 위 seriesMode(밴드 폭 자체 보기)와는 별개 기능 - 둘 다 유지.
-  const [enabledOverlay, setEnabledOverlay] = useState({})
+  const [enabledOverlay, setEnabledOverlay] = useState(rs.enabledOverlay ?? {})
   const toggleOverlay = (bandId) => setEnabledOverlay(prev => ({ ...prev, [bandId]: !prev[bandId] }))
   // 지금 보고 있는 구간 - 드래그(팬)로 시작 위치를, 휠(줌)로 폭을 바꾼다
   const [windowStart, setWindowStart] = useState(0)
@@ -102,12 +119,27 @@ export default function BacktestIntraday() {
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
-  const lastMonthKeyRef = useRef(null) // `${symbol}:${y}-${m}` - seriesMode만 바뀌어 재계산될 땐 날짜 선택을 유지하기 위한 비교용
+  // `${symbol}:${y}-${m}` - seriesMode만 바뀌어 재계산될 땐 날짜 선택을 유지하기 위한 비교용.
+  // localStorage에서 selectedDates를 복원했을 때, 데이터 로딩 effect가 "새 달로 바뀜"으로 오판해서
+  // 복원된 날짜 선택을 곧바로 지워버리지 않도록 복원된 심볼/달로 미리 채워둔다.
+  const lastMonthKeyRef = useRef(rs.selectedDates?.length ? `${rs.symbol ?? 'NASDAQ'}:${viewMonth.getFullYear()}-${viewMonth.getMonth()}` : null)
   const dragRef = useRef(null) // {startClientX, startWindowStart} - 드래그 중일 때만 값이 있음
   const datasetCacheRef = useRef({}) // dataset.id -> parsed rows(전체) 캐시
   const dayRowsRef = useRef({}) // date -> 그 날의 원본 캔들 행(open/high/low/close/time) - "시간대별 변동성 분석"에서 씀
   const pdfContainerRef = useRef(null) // PDF로 캡처할 숨겨진(화면 밖) 리포트 DOM
   const pdfCanvasRef = useRef(null) // PDF 전용 - 하루 전체(00:00~24:00, 확대축소 없이)를 그리는 정적 캔버스
+
+  // 심볼/달/고른 날짜/표시설정이 바뀔 때마다 localStorage에 저장 - 새로고침해도 그대로 유지된다(사용자 지적).
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(INTRADAY_SETTINGS_KEY, JSON.stringify({
+        symbol,
+        viewMonth: { y: viewMonth.getFullYear(), m: viewMonth.getMonth() },
+        selectedDates, showAverage, seriesMode, enabledOverlay,
+      }))
+    } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 */ }
+  }, [symbol, viewMonth, selectedDates, showAverage, seriesMode, enabledOverlay])
 
   useEffect(() => {
     let ignore = false
@@ -285,15 +317,16 @@ export default function BacktestIntraday() {
     [selectedDates]
   )
 
-  // y축 범위는 지금 보이는 구간 안의 값만 기준으로 자동으로 잡되, y축 위에서 세로로 드래그하면
-  // yZoom 배율만큼 그 자동 범위를 더 늘리거나 줄인다(사용자 요청 - y축 잡고 드래그하면 위아래 확대/축소).
+  // y축 범위는 고른 날짜(+오버레이 밴드) 전체 기준으로 한 번만 잡고, 시간대를 좌우로 이동(팬)해도
+  // 다시 계산하지 않는다 - 예전엔 "지금 보이는 구간 안의 값만" 기준으로 팬할 때마다 다시 잡아서 스크롤할
+  // 때마다 세로 크기가 제멋대로 커졌다 줄었다 했다(사용자 지적) - 날짜/밴드 선택이 바뀔 때만 다시 계산.
+  // y축 위에서 세로로 드래그하면 yZoom 배율만큼 이 범위를 늘리거나 줄인다(기존 기능 유지).
   const windowEnd = windowStart + windowSize - 1
   const [yZoom, setYZoom] = useState(1)
   const { yLo: baseYLo, yHi: baseYHi } = useMemo(() => {
     let lo = Infinity, hi = -Infinity
     for (const d of selectedSeries) {
-      for (const [mnt, v] of d.points) {
-        if (mnt < windowStart || mnt > windowEnd) continue
+      for (const [, v] of d.points) {
         if (v < lo) lo = v
         if (v > hi) hi = v
       }
@@ -302,8 +335,7 @@ export default function BacktestIntraday() {
       if (d.overlays) {
         for (const ov of Object.values(d.overlays)) {
           for (const line of [ov.upper, ov.lower]) {
-            for (const [mnt, v] of line) {
-              if (mnt < windowStart || mnt > windowEnd) continue
+            for (const [, v] of line) {
               if (v < lo) lo = v
               if (v > hi) hi = v
             }
@@ -314,7 +346,7 @@ export default function BacktestIntraday() {
     if (!Number.isFinite(lo)) return { yLo: -1, yHi: 1 }
     const pad = (hi - lo) * 0.08 || 1
     return { yLo: lo - pad, yHi: hi + pad }
-  }, [selectedSeries, windowStart, windowEnd])
+  }, [selectedSeries])
   const { yLo, yHi } = useMemo(() => {
     const center = (baseYLo + baseYHi) / 2
     const halfRange = (baseYHi - baseYLo) / 2 / yZoom
@@ -1262,7 +1294,11 @@ export default function BacktestIntraday() {
                     onMouseMove={onMouseMove}
                     onMouseLeave={() => { setHoverInfo(null); if (!dragRef.current) setCursorStyle('grab') }}
                     onWheel={onWheel}
-                    style={{ display: 'block', width: '100%', height: 600, cursor: cursorStyle, touchAction: 'none' }}
+                    // touchAction: 'none'이면 터치 드래그가 전부 차트 좌우 팬(가로) 전용으로 잡혀서, 세로로
+                    // 끌어 페이지를 스크롤하려는 시도(터치기기)가 브라우저 기본 동작에서부터 막혀버렸다
+                    // (사용자 지적 - "캔버스 안쪽을 잡고 내려도 안 움직인다"). 'pan-y'로 바꿔서 세로 방향은
+                    // 브라우저가 페이지 스크롤로 처리하게 두고, 가로 방향만 계속 커스텀 팬으로 남긴다.
+                    style={{ display: 'block', width: '100%', height: 600, cursor: cursorStyle, touchAction: 'pan-y' }}
                   />
                   {hoverInfo && (
                     <div style={{
