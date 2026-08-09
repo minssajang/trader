@@ -489,6 +489,82 @@ class ExactPriceMarkersPrimitive {
   }
 }
 
+// 업로드 매매내역의 "이탈"/롱·숏 진입 화살표가 캔들 옆(aboveBar/belowBar)에 붙으면 다른 캔들·신호에
+// 묻혀 잘 안 보인다는 지적(사용자 요청) - 캔들 가격과 무관하게 pane 맨 위/맨 아래 가장자리에 고정으로
+// 그린다. 청산(exit) 마커는 기존 markers API(aboveBar/belowBar) 그대로 유지, 이탈/진입만 여기로 옮김.
+class EdgeMarkersPrimitive {
+  constructor() {
+    this._points = [] // [{time, edge:'top'|'bottom', color, shape:'arrowUp'|'arrowDown'|'circle', text}]
+    this._chart = null
+    this._requestUpdate = null
+  }
+  attached({ chart, requestUpdate }) {
+    this._chart = chart
+    this._requestUpdate = requestUpdate
+  }
+  detached() {
+    this._chart = null
+  }
+  updateAllViews() {}
+  paneViews() {
+    return [{
+      renderer: () => ({
+        draw: (target) => {
+          if (!this._chart || !this._points.length) return
+          const ts = this._chart.timeScale()
+          target.useBitmapCoordinateSpace((scope) => {
+            const ctx = scope.context
+            const hRatio = scope.horizontalPixelRatio
+            const vRatio = scope.verticalPixelRatio
+            const margin = 16 * vRatio
+            const topY = margin
+            const bottomY = scope.bitmapSize.height - margin
+            ctx.save()
+            ctx.textAlign = 'center'
+            ctx.font = `${Math.round(10 * vRatio)}px sans-serif`
+            ctx.strokeStyle = '#0f1115'
+            ctx.lineWidth = 1 * hRatio
+            for (const p of this._points) {
+              const x = ts.timeToCoordinate(p.time)
+              if (x == null) continue
+              const px = x * hRatio
+              const py = p.edge === 'top' ? topY : bottomY
+              ctx.fillStyle = p.color
+              ctx.beginPath()
+              if (p.shape === 'circle') {
+                ctx.arc(px, py, 4 * vRatio, 0, Math.PI * 2)
+              } else {
+                const w = 5 * hRatio, h = 8 * vRatio
+                if (p.shape === 'arrowUp') {
+                  ctx.moveTo(px, py - h / 2)
+                  ctx.lineTo(px - w, py + h / 2)
+                  ctx.lineTo(px + w, py + h / 2)
+                } else {
+                  ctx.moveTo(px, py + h / 2)
+                  ctx.lineTo(px - w, py - h / 2)
+                  ctx.lineTo(px + w, py - h / 2)
+                }
+                ctx.closePath()
+              }
+              ctx.fill()
+              ctx.stroke()
+              if (p.text) {
+                const ty = p.edge === 'top' ? py + 14 * vRatio : py - 12 * vRatio
+                ctx.fillText(p.text, px, ty)
+              }
+            }
+            ctx.restore()
+          })
+        },
+      }),
+    }]
+  }
+  setPoints(points) {
+    this._points = points
+    this._requestUpdate?.()
+  }
+}
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
 
@@ -846,7 +922,8 @@ export default function ReplayChart() {
   const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
   const closedTradesRef = useRef([]) // 청산된 거래 전체(수동/반자동/시뮬레이션 다 포함, source로 구분) - "결과 저장" 누르면 DB로 보냄
   const uploadedTradesRef = useRef([]) // 업로드한 CSV 원본 거래 전체 [{entryTime, exitTime, dir, entryPrice, exitPrice, exitReason, pnl}]
-  const uploadedTradeMarkersRef = useRef([]) // 현재 불러온 구간(rowsRef)에 맞춰 계산된 마커 - 재생 위치와 무관하게 항상 전부 표시
+  const uploadedEdgeMarkersRef = useRef([]) // 이탈/진입/청산 마커 - 현재 구간(rowsRef) 기준 계산, pane 위/아래 가장자리 고정(EdgeMarkersPrimitive)
+  const uploadedEdgePrimitiveRef = useRef(null) // EdgeMarkersPrimitive 인스턴스
 
   const availableDates = useMemo(() => buildAvailableDates(datasets), [datasets])
   // 업로드한 매매내역이 있는 날짜를 달력에서 바로 알아볼 수 있게 강조 표시 (진입 시각 기준 하루씩)
@@ -898,6 +975,7 @@ export default function ReplayChart() {
     simEventsRef.current = []
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
+    uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
       .then(r => r.json())
@@ -972,6 +1050,9 @@ export default function ReplayChart() {
 
     shooting5MinPrimitiveRef.current = new ExactPriceMarkersPrimitive(SHOOTING_5MIN_COLOR)
     series.attachPrimitive(shooting5MinPrimitiveRef.current)
+
+    uploadedEdgePrimitiveRef.current = new EdgeMarkersPrimitive()
+    series.attachPrimitive(uploadedEdgePrimitiveRef.current)
 
     sidewaysBandRef.current = new BackgroundBandsPrimitive(hexToRgba(sidewaysColor, 0.15))
     series.attachPrimitive(sidewaysBandRef.current)
@@ -1261,6 +1342,13 @@ export default function ReplayChart() {
     if (reason.startsWith('flip')) return '#FF9800'
     return '#9E9E9E'
   }
+  // 청산 마커에 "몇 번 거래의 익절/손절인지" 같이 적어달라는 요청 - 색상만으론 구분이 안 보일 때 대비
+  const uploadedExitLabel = (reason) => {
+    if (reason.startsWith('SL')) return '손절'
+    if (reason.startsWith('TP')) return '익절'
+    if (reason.startsWith('flip')) return '전환'
+    return reason
+  }
 
   // Claude가 만들어주는 백테스트 거래 CSV 형식 그대로 파싱한다:
   // 진입날짜,진입시간,방향,진입가,청산날짜,청산시간,청산가,보유시간(분),청산사유,손익(pt)
@@ -1344,13 +1432,13 @@ export default function ReplayChart() {
   const recomputeUploadedTradeMarkers = () => {
     const rows = rowsRef.current
     if (!rows.length || uploadedTradesRef.current.length === 0) {
-      uploadedTradeMarkersRef.current = []
+      uploadedEdgeMarkersRef.current = []
       setUploadedTradeRows([])
       return
     }
     const idxByTime = new Map(rows.map((r, i) => [r.time, i]))
     const rangeFrom = rows[0].time, rangeTo = rows[rows.length - 1].time
-    const markers = []
+    const edgeMarkers = [] // 이탈/진입/청산 전부 - pane 위/아래 가장자리 고정(캔들 위/아래 대신, 사용자 요청 - "잘 안보여")
     const listRows = []
     for (const t of uploadedTradesRef.current) {
       const entryIdx = idxByTime.get(t.entryTime)
@@ -1361,34 +1449,33 @@ export default function ReplayChart() {
       const breakoutIn = t.breakoutTime != null && t.breakoutTime >= rangeFrom && t.breakoutTime <= rangeTo && breakoutIdx != null
       if (!entryIn && !exitIn && !breakoutIn) continue
       if (breakoutIn) {
-        markers.push({
+        edgeMarkers.push({
           time: t.breakoutTime,
-          position: t.breakoutDir === '상단' ? 'aboveBar' : 'belowBar',
+          edge: t.breakoutDir === '상단' ? 'top' : 'bottom',
           color: '#FFC107',
           shape: 'circle',
-          size: 1,
           text: '이탈',
         })
       }
       if (entryIn) {
-        markers.push({
+        edgeMarkers.push({
           time: t.entryTime,
-          position: t.dir === 'long' ? 'belowBar' : 'aboveBar',
+          edge: t.dir === 'long' ? 'bottom' : 'top',
           color: t.dir === 'long' ? '#C6FF00' : '#AB47BC',
           shape: t.dir === 'long' ? 'arrowUp' : 'arrowDown',
-          size: 2,
           // 나쁜 조합(건당평균 마이너스로 분류된 1차/2차/3차 조합) 진입은 가격 앞에 ⚠로 표시
           text: (t.comboLabel === '나쁜' ? '⚠ ' : '') + t.entryPrice.toFixed(2),
         })
       }
       if (exitIn) {
-        markers.push({
+        // "몇 번 거래의 익절/손절인지" 요청 - 전체관리번호(#num) + 익절/손절 라벨을 가격 앞에 같이 적는다
+        const numLabel = t.num != null ? `#${t.num} ` : ''
+        edgeMarkers.push({
           time: t.exitTime,
-          position: t.dir === 'long' ? 'aboveBar' : 'belowBar',
+          edge: t.dir === 'long' ? 'top' : 'bottom',
           color: uploadedExitColor(t.exitReason),
           shape: 'circle',
-          size: 2,
-          text: t.exitPrice.toFixed(2),
+          text: `${numLabel}${uploadedExitLabel(t.exitReason)} ${t.exitPrice.toFixed(2)}`,
         })
       }
       listRows.push({
@@ -1399,7 +1486,7 @@ export default function ReplayChart() {
         comboLabel: t.comboLabel, combo: t.combo, num: t.num, dateNum: t.dateNum, pattern: t.pattern,
       })
     }
-    uploadedTradeMarkersRef.current = markers.sort((a, b) => a.time - b.time)
+    uploadedEdgeMarkersRef.current = edgeMarkers.sort((a, b) => a.time - b.time)
     setUploadedTradeRows(listRows.sort((a, b) => (a.entryTime ?? a.exitTime) - (b.entryTime ?? b.exitTime)))
   }
 
@@ -1429,10 +1516,9 @@ export default function ReplayChart() {
       .filter(p => p.idx < idx)
       .map(p => ({ time: p.time, position: 'aboveBar', color: p.color, shape: 'circle', size: 1, text: p.label }))
 
-    // 업로드한 매매내역 마커는 재생 위치(idx)와 무관하게 항상 전부 표시 (사용자 요청)
-    const uploadedMarkers = showUp ? uploadedTradeMarkersRef.current : []
-
-    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...sessionMarkers, ...uploadedMarkers].sort((a, b) => a.time - b.time))
+    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...sessionMarkers].sort((a, b) => a.time - b.time))
+    // 업로드한 매매내역 마커(이탈/진입/청산)는 재생 위치(idx)와 무관하게 항상 전부 표시 (사용자 요청)
+    uploadedEdgePrimitiveRef.current?.setPoints(showUp ? uploadedEdgeMarkersRef.current : [])
   }
 
   const applyIndex = (idx) => {
@@ -1760,6 +1846,7 @@ export default function ReplayChart() {
     simEventsRef.current = []
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
+    uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
     setPlayIndex(0)
@@ -1839,7 +1926,7 @@ export default function ReplayChart() {
 
   const clearUploadedTrades = () => {
     uploadedTradesRef.current = []
-    uploadedTradeMarkersRef.current = []
+    uploadedEdgeMarkersRef.current = []
     setUploadedTradeFile('')
     setUploadedTradeCount(0)
     setUploadedTradeError('')
@@ -1914,6 +2001,7 @@ export default function ReplayChart() {
     simEventsRef.current = []
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
+    uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([])
   }
 
