@@ -530,7 +530,12 @@ class EdgeMarkersPrimitive {
               const x = ts.timeToCoordinate(p.time)
               if (x == null) continue
               const px = x * hRatio
-              const lines = p.text ? p.text.split('\n') : []
+              // textLines: 줄마다 다른 색을 섞어 쓸 때 씀 - 한 줄 = [{text,color}, ...] 세그먼트 배열
+              // (예: 나쁜조합 경고는 "⚠" 아이콘 세그먼트만 빨강, 같은 줄의 가격 세그먼트는 방향색
+              // 그대로). {text,color} 객체를 바로 줄로 줘도 세그먼트 1개짜리로 취급한다. 없으면
+              // text를 줄바꿈으로 나눠 전부 p.color 세그먼트 1개짜리 줄로 그린다.
+              const lines = (p.textLines || (p.text ? p.text.split('\n').map(t => ({ text: t, color: p.color })) : []))
+                .map(l => Array.isArray(l) ? l : [l])
               // 텍스트가 가장자리에 가장 가깝고, 화살표/원은 그 텍스트 블록 너머(가장자리 반대쪽, pane
               // 안쪽)에 그린다 - 아래쪽 가장자리에서 화면을 위→아래로 읽으면 화살표가 맨 처음, 위쪽
               // 가장자리에서는 반대로 화살표가 맨 마지막에 오게 됨(사용자 요청).
@@ -557,9 +562,17 @@ class EdgeMarkersPrimitive {
               }
               ctx.fill()
               ctx.stroke()
-              lines.forEach((line, i) => {
+              lines.forEach((segments, i) => {
                 const ty = toY(edgeAnchor + i * lineHeight)
-                ctx.fillText(line, px, ty)
+                ctx.textAlign = 'left'
+                const widths = segments.map(s => ctx.measureText(s.text).width)
+                let sx = px - widths.reduce((a, b) => a + b, 0) / 2
+                segments.forEach((s, si) => {
+                  ctx.fillStyle = s.color
+                  ctx.fillText(s.text, sx, ty)
+                  sx += widths[si]
+                })
+                ctx.textAlign = 'center'
               })
             }
             ctx.restore()
@@ -1344,10 +1357,10 @@ export default function ReplayChart() {
   const syncStoch3 = (idx) => applyStoch3Index(idx)
   const syncMACD5 = (idx) => applyMACD5Index(idx)
 
-  // 업로드한 매매내역 CSV 청산사유별 마커 색상 (손절=흰색, 익절=초록, 크로스전환=주황)
+  // 업로드한 매매내역 CSV 청산사유별 마커 색상 (익절=흰색, 손절=빨강, 크로스전환=주황, 사용자 지정)
   const uploadedExitColor = (reason) => {
-    if (reason.startsWith('SL')) return '#FFFFFF'
-    if (reason.startsWith('TP')) return '#26A69A'
+    if (reason.startsWith('TP')) return '#FFFFFF'
+    if (reason.startsWith('SL')) return '#F44336'
     if (reason.startsWith('flip')) return '#FF9800'
     return '#9E9E9E'
   }
@@ -1477,16 +1490,23 @@ export default function ReplayChart() {
       }
       if (entryIn) {
         // 한 줄에 몰아넣지 말고 번호/가격을 줄바꿈으로 분리(사용자 요청) - 도형에 가까운 줄부터
-        // 번호 → 가격 순. 나쁜 조합(건당평균 마이너스로 분류된 1차/2차/3차 조합) 진입은 가격 앞에 ⚠
-        // 표시하고, 방향색(롱/숏) 대신 경고색(빨강)으로 화살표+글자 전부 덮어써서 눈에 띄게 한다(사용자 요청).
+        // 번호 → 가격 순. 화살표/번호/가격은 전부 항상 방향색(롱=라임/숏=보라) 그대로 두고, 나쁜
+        // 조합(건당평균 마이너스로 분류된 1차/2차/3차 조합)일 때는 "⚠" 아이콘 그 글자만 빨강으로
+        // 표시한다 - 줄 전체나 마커 전체를 빨강으로 덮지 말라는 지적(사용자, "나쁜조합 표시만 빨간색").
         const isBad = t.comboLabel === '나쁜'
+        const dirColor = t.dir === 'long' ? '#C6FF00' : '#AB47BC'
         edgeMarkers.push({
           time: t.entryTime,
           edge: t.dir === 'long' ? 'bottom' : 'top',
           row: 1,
-          color: isBad ? '#F44336' : (t.dir === 'long' ? '#C6FF00' : '#AB47BC'),
+          color: dirColor,
           shape: t.dir === 'long' ? 'arrowUp' : 'arrowDown',
-          text: `${tradeNumLabel(t.num, entryIdx)}\n${isBad ? '⚠ ' : ''}${t.entryPrice.toFixed(2)}`,
+          textLines: [
+            [{ text: tradeNumLabel(t.num, entryIdx), color: dirColor }],
+            isBad
+              ? [{ text: '⚠ ', color: '#F44336' }, { text: t.entryPrice.toFixed(2), color: dirColor }]
+              : [{ text: t.entryPrice.toFixed(2), color: dirColor }],
+          ],
         })
       }
       if (exitIn) {
