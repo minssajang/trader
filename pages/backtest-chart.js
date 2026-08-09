@@ -507,15 +507,7 @@ const DEFAULT_DEAD_COLOR = '#FF1744'
 // - NAS100(Cash): 계약크기 1, 틱당 가치 USD $1. 수수료/스프레드는 계산하지 않음.
 const POINT_VALUE_PER_LOT = { GOLD: 100, NASDAQ: 1 }
 const DEFAULT_STARTING_BALANCE = 10000
-// "볼린저 눌림" 조건 고정 페어 - 크로스/더블비와 달리 이건 원래부터 5분↔15분으로 고정이었고
-// 슬롯/드롭다운으로 바꾸지 말라는 요청(사용자 확인) - 그대로 고정 유지.
-const BOLL_INNER_SHORT_ID = 'sma100' // 5분
-const BOLL_INNER_LONG_ID = 'sma300'  // 15분
 const EMPTY_PAIR_SLOTS = [{ a: '', b: '' }, { a: '', b: '' }, { a: '', b: '' }]
-// 더블비 슬롯 드롭다운에 쓰는 라인 옵션 목록 - 밴드 5개 × 상/중/하 = 15개, state에 안 의존하니 모듈 레벨에서 한 번만 계산
-const DOUBLE_B_LINE_OPTIONS = BOLLINGER_BANDS.flatMap(b =>
-  [['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => ({ id: `${b.id}:${which}`, label: `${b.label} ${wlabel}` }))
-)
 // 라벨링(학습용 수동 마킹) - 재생 위치의 캔들에 사용자가 직접 찍는 마커. 매매 포지션과 무관하게
 // 화면 표시 + DB 저장(학습 데이터화)만을 목적으로 한다.
 const ANNOTATION_STYLES = {
@@ -750,54 +742,22 @@ export default function BacktestChart() {
   const [deadShape, setDeadShapeState] = useState(rs.deadShape ?? 'arrowDown')
   const [deadColor, setDeadColorState] = useState(rs.deadColor ?? DEFAULT_DEAD_COLOR)
   const [deadSize, setDeadSizeState] = useState(rs.deadSize ?? 3) // 기본 셋팅(사용자 요청) - 크로스 신호 크기 3번
-  // 더블비 신호(왼쪽 표시용) - 슬롯 1/2/3마다 라인(`${bandId}:${upper|middle|lower}`) 2개를 드롭다운으로 골라
-  // 그 쌍의 겹침만 본다. 반자동/시뮬레이션의 더블비 조건(autoDoubleBPairs/simDoubleBPairs)과 슬롯 상태는
-  // 따로 관리하지만, 계산 함수(computeDoubleBTouchForPair)는 공유한다.
-  const [doubleBPairs, setDoubleBPairsState] = useState(rs.doubleBPairs ?? EMPTY_PAIR_SLOTS)
-  // 더블비 신호 모양/색상/크기 - 매수(롱)/매도(숏) 방향별로 따로 저장하고, 크로스 신호(골든/데드)와 같은
-  // 방식으로 롱/숏 두 행을 탭 전환 없이 항상 같이 보여준다(사용자 요청 - 통일성)
-  const [doubleBShapeLong, setDoubleBShapeLongState] = useState(rs.doubleBShapeLong ?? 'square')
-  const [doubleBColorLong, setDoubleBColorLongState] = useState(rs.doubleBColorLong ?? '#00BCD4')
-  const [doubleBSizeLong, setDoubleBSizeLongState] = useState(rs.doubleBSizeLong ?? 1)
-  const [doubleBShapeShort, setDoubleBShapeShortState] = useState(rs.doubleBShapeShort ?? 'square')
-  const [doubleBColorShort, setDoubleBColorShortState] = useState(rs.doubleBColorShort ?? '#FF6D00')
-  const [doubleBSizeShort, setDoubleBSizeShortState] = useState(rs.doubleBSizeShort ?? 1)
-  // 볼린저 눌림 신호(왼쪽 표시용, 5분↔15분 고정) - 반자동/시뮬레이션의 볼린저 눌림 조건과 켜고 끄는 체크는
-  // 따로 관리하지만 계산 함수(computeBollInnerTouchForPair)는 공유한다.
-  const [bollInnerSignalSellEnabled, setBollInnerSignalSellEnabled] = useState(rs.bollInnerSignalSellEnabled ?? false) // 5분 상단선이 15분 상단선 안(아래)
-  const [bollInnerSignalBuyEnabled, setBollInnerSignalBuyEnabled] = useState(rs.bollInnerSignalBuyEnabled ?? false)   // 5분 하단선이 15분 하단선 안(위)
-  // 롱/숏 모양/색상/크기 - 더블비와 같은 이유로 탭 전환 없이 두 행을 항상 같이 보여준다
-  const [bollInnerShapeLong, setBollInnerShapeLongState] = useState(rs.bollInnerShapeLong ?? 'circle')
-  const [bollInnerColorLong, setBollInnerColorLongState] = useState(rs.bollInnerColorLong ?? '#26A69A')
-  const [bollInnerSizeLong, setBollInnerSizeLongState] = useState(rs.bollInnerSizeLong ?? 1)
-  const [bollInnerShapeShort, setBollInnerShapeShortState] = useState(rs.bollInnerShapeShort ?? 'circle')
-  const [bollInnerColorShort, setBollInnerColorShortState] = useState(rs.bollInnerColorShort ?? '#EF5350')
-  const [bollInnerSizeShort, setBollInnerSizeShortState] = useState(rs.bollInnerSizeShort ?? 1)
   // 매매 연습 - 헤징 허용(바이/셀 동시 보유 가능), 수수료/스프레드는 계산 안 함
   const [startingBalance, setStartingBalanceState] = useState(rs.startingBalance ?? DEFAULT_STARTING_BALANCE)
   const [balance, setBalance] = useState(DEFAULT_STARTING_BALANCE)
   const [lotSize, setLotSize] = useState(rs.lotSize ?? 0.01)
   const [positions, setPositions] = useState([]) // { id, side:'buy'|'sell', symbol, lot, entryPrice, entryTime }
   const [pnlDisplay, setPnlDisplay] = useState(rs.pnlDisplay ?? 'dollar') // 'dollar' | 'point'
-  // 반자동진입 - 왼쪽 표시(크로스는 crossPairs, 더블비는 doubleBPairs 슬롯)와 켜고 끄는 슬롯 상태는
-  // 따로 관리한다(화면엔 여러 개 띄워두고 그중 일부만 실전 진입 조건으로 쓸 수 있게). 계산 로직
-  // (findMACrossForPair / computeDoubleBTouchForPair / computeBollInnerTouchForPair)은 공유하므로,
+  // 반자동진입 - 왼쪽 표시(crossPairs 슬롯)와 켜고 끄는 슬롯 상태는 따로 관리한다(화면엔 여러 개
+  // 띄워두고 그중 일부만 실전 진입 조건으로 쓸 수 있게). 계산 로직(findMACrossForPair)은 공유하므로,
   // 왼쪽과 여기에 같은 조합을 골라두면 마커 표시 캔들 = 실제 진입 캔들이 항상 일치한다.
-  // 볼린저 눌림은 크로스/더블비와 달리 원래부터 5분↔15분 고정이라 여기도 그대로 고정 유지.
   const [semiAutoEnabled, setSemiAutoEnabled] = useState(rs.semiAutoEnabled ?? false)
   const [autoCrossPairs, setAutoCrossPairsState] = useState(rs.autoCrossPairs ?? EMPTY_PAIR_SLOTS)
-  const [autoDoubleBPairs, setAutoDoubleBPairsState] = useState(rs.autoDoubleBPairs ?? EMPTY_PAIR_SLOTS)
-  // "볼린저 눌림"(5분↔15분 고정) - 상단/하단 조건을 따로 켜고 끌 수 있다
-  const [autoBollInnerSellEnabled, setAutoBollInnerSellEnabled] = useState(rs.autoBollInnerSellEnabled ?? false) // 5분 상단선이 15분 상단선 안(아래)일 때 매도
-  const [autoBollInnerBuyEnabled, setAutoBollInnerBuyEnabled] = useState(rs.autoBollInnerBuyEnabled ?? false)   // 5분 하단선이 15분 하단선 안(위)일 때 매수
 
   // 시뮬레이션 - 반자동과 조건 구성은 완전히 동일하되, 켜고 끄는 체크 상태와 트리거 타임라인은 독립적이라
   // 반자동과 시뮬레이션을 동시에 켜두고 서로 다른 조건 조합을 비교해볼 수 있다
   const [simulationEnabled, setSimulationEnabled] = useState(rs.simulationEnabled ?? false)
   const [simCrossPairs, setSimCrossPairsState] = useState(rs.simCrossPairs ?? EMPTY_PAIR_SLOTS)
-  const [simDoubleBPairs, setSimDoubleBPairsState] = useState(rs.simDoubleBPairs ?? EMPTY_PAIR_SLOTS)
-  const [simBollInnerSellEnabled, setSimBollInnerSellEnabled] = useState(rs.simBollInnerSellEnabled ?? false)
-  const [simBollInnerBuyEnabled, setSimBollInnerBuyEnabled] = useState(rs.simBollInnerBuyEnabled ?? false)
   // 시뮬레이션 결과 저장 - 청산된 거래를 여기 쌓아뒀다가 "결과 저장" 누르면 한 번에 DB로 보낸다.
   // (Claude가 나중에 MCP run_sql로 simulation_results 테이블을 조회해서 분석해줄 수 있게 하는 용도 -
   // 사이트 화면 어디에도 노출 안 되는, 세션에서만 쓰는 백엔드 기록)
@@ -865,8 +825,6 @@ export default function BacktestChart() {
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
   const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
-  const doubleBSignalPointsRef = useRef([]) // 더블비 신호(표시용) 전체 [{idx, time, side}]
-  const bollInnerSignalPointsRef = useRef([]) // 볼린저 눌림 신호(표시용) 전체 [{idx, time, side}]
   const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
   const annotationsRef = useRef([]) // annotations state의 최신값 거울(재생 루프/applyAllMarkers가 클로저 stale 없이 읽기 위함)
   const hoveredIdxRef = useRef(null) // 크로스헤어가 지금 가리키는 캔들 인덱스(라벨링 위치) - 차트 밖이면 null(그때는 재생 위치를 씀)
@@ -916,8 +874,6 @@ export default function BacktestChart() {
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
-    doubleBSignalPointsRef.current = []
-    bollInnerSignalPointsRef.current = []
     sessionPointsRef.current = []
     annotationsRef.current = []
     setAnnotations([])
@@ -1270,7 +1226,7 @@ export default function BacktestChart() {
   }
   const syncMACD5 = (idx) => applyMACD5Index(idx)
 
-  // 크로스/더블비 신호 마커 둘 다 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 지점 중
+  // 크로스 신호 마커는 재생 위치를 앞서가면 안 된다 - 미리 계산해둔 전체 지점 중
   // 아직 재생 안 지난 구간은 걸러서 캔들 시리즈 마커 하나로 합쳐서 얹는다
   // (setMarkers는 호출할 때마다 통째로 교체되므로 두 종류를 항상 같이 계산해서 넘겨야 함).
   // overrides로 넘긴 값만 즉시 반영하고 나머지는 현재 state를 그대로 씀
@@ -1283,18 +1239,6 @@ export default function BacktestChart() {
     const dShape = overrides.deadShape ?? deadShape
     const dColor = overrides.deadColor ?? deadColor
     const dSize = overrides.deadSize ?? deadSize
-    const bShapeLong = overrides.doubleBShapeLong ?? doubleBShapeLong
-    const bColorLong = overrides.doubleBColorLong ?? doubleBColorLong
-    const bSizeLong = overrides.doubleBSizeLong ?? doubleBSizeLong
-    const bShapeShort = overrides.doubleBShapeShort ?? doubleBShapeShort
-    const bColorShort = overrides.doubleBColorShort ?? doubleBColorShort
-    const bSizeShort = overrides.doubleBSizeShort ?? doubleBSizeShort
-    const iShapeLong = overrides.bollInnerShapeLong ?? bollInnerShapeLong
-    const iColorLong = overrides.bollInnerColorLong ?? bollInnerColorLong
-    const iSizeLong = overrides.bollInnerSizeLong ?? bollInnerSizeLong
-    const iShapeShort = overrides.bollInnerShapeShort ?? bollInnerShapeShort
-    const iColorShort = overrides.bollInnerColorShort ?? bollInnerColorShort
-    const iSizeShort = overrides.bollInnerSizeShort ?? bollInnerSizeShort
 
     // ⚙ 셋팅 단계에서 차트가 이미 전 구간 다 그려진 채로 시작하므로(재생은 화면 스크롤일 뿐 데이터를
     // 새로 드러내지 않음), 마커도 더 이상 재생 위치까지만 자르지 않고 항상 전체를 그린다.
@@ -1303,23 +1247,11 @@ export default function BacktestChart() {
         ? { time: p.time, position: 'belowBar', color: gColor, shape: gShape, size: gSize, text: '' }
         : { time: p.time, position: 'aboveBar', color: dColor, shape: dShape, size: dSize, text: '' })
 
-    // 더블비 신호는 매수(롱)/매도(숏) 방향에 따라 서로 다른 모양·색상·크기로 그린다
-    const doubleBMarkers = doubleBSignalPointsRef.current
-      .map(p => p.side === 'buy'
-        ? { time: p.time, position: 'inBar', color: bColorLong, shape: bShapeLong, size: bSizeLong, text: '' }
-        : { time: p.time, position: 'inBar', color: bColorShort, shape: bShapeShort, size: bSizeShort, text: '' })
-
-    // 볼린저 눌림 신호도 더블비와 같은 방식 - 매수(롱)/매도(숏) 방향별로 다른 모양·색상·크기
-    const bollInnerMarkers = bollInnerSignalPointsRef.current
-      .map(p => p.side === 'buy'
-        ? { time: p.time, position: 'inBar', color: iColorLong, shape: iShapeLong, size: iSizeLong, text: '' }
-        : { time: p.time, position: 'inBar', color: iColorShort, shape: iShapeShort, size: iSizeShort, text: '' })
-
     // 세계 3대 시장 개장 시각 - 매매 신호가 아니라 항상 고정으로 보여주는 참고 마커(텍스트로 세션 이름 표시)
     const sessionMarkers = sessionPointsRef.current
       .map(p => ({ time: p.time, position: 'aboveBar', color: p.color, shape: 'circle', size: 1, text: p.label }))
 
-    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...doubleBMarkers, ...bollInnerMarkers, ...sessionMarkers].sort((a, b) => a.time - b.time))
+    markersPrimitiveRef.current?.setMarkers([...crossMarkers, ...sessionMarkers].sort((a, b) => a.time - b.time))
 
     // 라벨링(수동 마킹)은 기본 markers API가 아니라 별도 프리미티브로 정확한 가격 위치에 그린다
     annotationPrimitiveRef.current?.setMarkers(
@@ -1449,7 +1381,10 @@ export default function BacktestChart() {
     // 패닝으로 앞뒤에 불러온 컨텍스트 캔들(사용자 요청, 리플레이는 제외)을 항상 같이 붙여서 그린다 -
     // 재생 위치(idx)와 무관하게 다 보여줘도 되는 이유는 "그 날"의 재생 진행과는 별개인 참고용 데이터라서.
     seriesRef.current?.setData([...contextBeforeRef.current, ...dayRows, ...contextAfterRef.current])
-    markerSeriesRef.current?.setData(dayRows.map(r => ({ time: r.time, value: r.close })))
+    // 마커 전용 투명 시리즈는 항상 구간 전체를 앵커로 갖고 있어야 한다 - 크로스/세션 마커는 idx와
+    // 무관하게 항상 전체를 그리는데, idx까지만 주면 슬라이더로 되감았을 때 그 마커들이 앵커를 못
+    // 찾아서 화면 오른쪽 끝에 쏠려 붙는 버그가 생긴다.
+    markerSeriesRef.current?.setData(rowsRef.current.map(r => ({ time: r.time, value: r.close })))
     syncBands(idx)
     syncMA(idx)
     syncRSI(idx)
@@ -1647,8 +1582,6 @@ export default function BacktestChart() {
     macd5DataRef.current = { macd: macd5Points, signal: signal5Points, hist: hist5Points }
 
     refreshCross()
-    refreshDoubleBSignal()
-    refreshBollInnerSignal()
     refreshAutoEvents()
     refreshSimEvents()
     refreshSessionMarkers()
@@ -1696,8 +1629,6 @@ export default function BacktestChart() {
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
-    doubleBSignalPointsRef.current = []
-    bollInnerSignalPointsRef.current = []
     sessionPointsRef.current = []
     annotationsRef.current = []
     setAnnotations([])
@@ -1888,8 +1819,6 @@ export default function BacktestChart() {
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
-    doubleBSignalPointsRef.current = []
-    bollInnerSignalPointsRef.current = []
     sessionPointsRef.current = []
     annotationsRef.current = []
     setAnnotations([])
@@ -1961,12 +1890,9 @@ export default function BacktestChart() {
         enabledMACD5, macd5LineColor, macd5SignalColor,
         upColor, downColor, candleVisible,
         crossPairs, goldenShape, goldenColor, goldenSize, deadShape, deadColor, deadSize,
-        doubleBPairs, doubleBShapeLong, doubleBColorLong, doubleBSizeLong, doubleBShapeShort, doubleBColorShort, doubleBSizeShort,
-        bollInnerSignalSellEnabled, bollInnerSignalBuyEnabled,
-        bollInnerShapeLong, bollInnerColorLong, bollInnerSizeLong, bollInnerShapeShort, bollInnerColorShort, bollInnerSizeShort,
         startingBalance, lotSize, pnlDisplay,
-        semiAutoEnabled, autoCrossPairs, autoDoubleBPairs, autoBollInnerSellEnabled, autoBollInnerBuyEnabled,
-        simulationEnabled, simCrossPairs, simDoubleBPairs, simBollInnerSellEnabled, simBollInnerBuyEnabled,
+        semiAutoEnabled, autoCrossPairs,
+        simulationEnabled, simCrossPairs,
       }))
     } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 */ }
   }, [
@@ -1980,12 +1906,9 @@ export default function BacktestChart() {
     enabledMACD5, macd5LineColor, macd5SignalColor,
     upColor, downColor, candleVisible,
     crossPairs, goldenShape, goldenColor, goldenSize, deadShape, deadColor, deadSize,
-    doubleBPairs, doubleBShapeLong, doubleBColorLong, doubleBSizeLong, doubleBShapeShort, doubleBColorShort, doubleBSizeShort,
-    bollInnerSignalSellEnabled, bollInnerSignalBuyEnabled,
-    bollInnerShapeLong, bollInnerColorLong, bollInnerSizeLong, bollInnerShapeShort, bollInnerColorShort, bollInnerSizeShort,
     startingBalance, lotSize, pnlDisplay,
-    semiAutoEnabled, autoCrossPairs, autoDoubleBPairs, autoBollInnerSellEnabled, autoBollInnerBuyEnabled,
-    simulationEnabled, simCrossPairs, simDoubleBPairs, simBollInnerSellEnabled, simBollInnerBuyEnabled,
+    semiAutoEnabled, autoCrossPairs,
+    simulationEnabled, simCrossPairs,
   ])
 
   // 초기화 버튼 - 저장된 설정을 지우고 새로고침하면 위의 모든 useState가 기본값으로 다시 시작된다.
@@ -2496,153 +2419,37 @@ export default function BacktestChart() {
     applyAllMarkers(indexRef.current)
   }
 
-  // "더블비" - 라인(윗선/중심/아래선) 2개를 골라(다른 밴드끼리도 조합 가능), 그 두 라인 값 사이 구간을
-  // 캔들이 동시에 건드렸는지 확인한다. 겹친 구간이 두 밴드 중심선 평균보다 위면 매도(과열/저항),
-  // 아래면 매수(과매도/지지) 신호로 본다. 왼쪽/반자동/시뮬레이션의 더블비 슬롯이 전부 이 함수를 공유한다.
-  const computeDoubleBTouchForPair = (lineKeyA, lineKeyB) => {
-    const rows = rowsRef.current
-    const sepA = lineKeyA.lastIndexOf(':'), sepB = lineKeyB.lastIndexOf(':')
-    const A = { bandId: lineKeyA.slice(0, sepA), which: lineKeyA.slice(sepA + 1) }
-    const B = { bandId: lineKeyB.slice(0, sepB), which: lineKeyB.slice(sepB + 1) }
-    if (A.bandId === B.bandId && A.which === B.which) return []
-    const Aband = bandDataRef.current[A.bandId]
-    const Bband = bandDataRef.current[B.bandId]
-    if (!Aband || !Bband) return []
-    const points = []
-    for (let i = 0; i < rows.length; i++) {
-      const av = Aband[A.which]?.[i], bv = Bband[B.which]?.[i]
-      const am = Aband.middle[i], bm = Bband.middle[i]
-      if (!av || !bv || !am || !bm) continue
-      const lowVal = Math.min(av.value, bv.value)
-      const highVal = Math.max(av.value, bv.value)
-      const candle = rows[i]
-      if (candle.low > highVal || candle.high < lowVal) continue
-      const overlapMid = (lowVal + highVal) / 2
-      const avgMid = (am.value + bm.value) / 2
-      points.push({ idx: i, time: candle.time, side: overlapMid > avgMid ? 'sell' : 'buy' })
-    }
-    return points
-  }
-
-  // "볼린저 눌림" - shortId 밴드가 longId 밴드 안쪽으로 눌려 들어온 상태가 유지되는 모든 캔들마다 신호로
-  // 본다(더블비와 같은 방식 - 상태가 풀릴 때까지 매 캔들 계속 신호). short 상단선이 long 상단선보다
-  // 아래에 있으면 매도, short 하단선이 long 하단선보다 위에 있으면 매수. 왼쪽/반자동/시뮬레이션의
-  // 눌림 슬롯이 전부 이 함수를 공유한다(예전엔 5분↔15분으로 고정이었는데 이제 슬롯마다 자유롭게 고름).
-  const computeBollInnerTouchForPair = (shortId, longId) => {
-    const rows = rowsRef.current
-    const points = []
-    const short = bandDataRef.current[shortId]
-    const long = bandDataRef.current[longId]
-    if (!short || !long) return points
-    for (let i = 0; i < rows.length; i++) {
-      const candle = rows[i]
-      const su = short.upper[i], sl = short.lower[i]
-      const lu = long.upper[i], ll = long.lower[i]
-      if (su && lu && su.value < lu.value) points.push({ idx: i, time: candle.time, side: 'sell' })
-      if (sl && ll && sl.value > ll.value) points.push({ idx: i, time: candle.time, side: 'buy' })
-    }
-    return points
-  }
-
-  // 크로스/더블비 슬롯(pairs)과 볼린저 눌림(5분↔15분 고정, sell/buy 두 방향만 켜고 끔)을 각각 계산해서
-  // 하나의 이벤트 배열로 합치는 공용 헬퍼 - 반자동(refreshAutoEvents)과 시뮬레이션(refreshSimEvents)이
+  // 크로스 슬롯(pairs)을 계산하는 공용 헬퍼 - 반자동(refreshAutoEvents)과 시뮬레이션(refreshSimEvents)이
   // 완전히 같은 구조라 여기서 공유한다.
-  const computePairEvents = (crossPairsArg, doubleBPairsArg, bollInnerSell, bollInnerBuy) => {
-    const crossEvents = crossPairsArg
+  const computePairEvents = (crossPairsArg) => {
+    return crossPairsArg
       .flatMap(({ a, b }) => (a && b && a !== b ? findMACrossForPair(a, b) : []))
       .map(p => ({ idx: p.idx, time: p.time, side: p.type === 'golden' ? 'buy' : 'sell', source: 'cross' }))
-
-    const doubleBEvents = doubleBPairsArg
-      .flatMap(({ a, b }) => (a && b && a !== b ? computeDoubleBTouchForPair(a, b) : []))
-      .map(p => ({ ...p, source: 'doubleB' }))
-
-    const bollInnerEvents = computeBollInnerTouchForPair(BOLL_INNER_SHORT_ID, BOLL_INNER_LONG_ID)
-      .filter(p => (p.side === 'sell' && bollInnerSell) || (p.side === 'buy' && bollInnerBuy))
-      .map(p => ({ ...p, source: 'bollInner' }))
-
-    return [...crossEvents, ...doubleBEvents, ...bollInnerEvents].sort((a, b) => a.idx - b.idx)
+      .sort((a, b) => a.idx - b.idx)
   }
 
-  // 반자동진입 트리거 3종을 모두 다시 계산해 하나의 타임라인으로 합친다
-  const refreshAutoEvents = (
-    crossP = autoCrossPairs,
-    doubleBP = autoDoubleBPairs,
-    bollInnerSell = autoBollInnerSellEnabled,
-    bollInnerBuy = autoBollInnerBuyEnabled,
-  ) => {
-    autoEventsRef.current = computePairEvents(crossP, doubleBP, bollInnerSell, bollInnerBuy)
+  // 반자동진입 트리거를 다시 계산한다
+  const refreshAutoEvents = (crossP = autoCrossPairs) => {
+    autoEventsRef.current = computePairEvents(crossP)
   }
 
   const setAutoCrossPair = (slotIndex, which, maId) => {
     setAutoCrossPairsState(prev => {
       const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: maId } : p))
-      refreshAutoEvents(next, autoDoubleBPairs, autoBollInnerSellEnabled, autoBollInnerBuyEnabled)
+      refreshAutoEvents(next)
       return next
     })
   }
 
-  const setAutoDoubleBPair = (slotIndex, which, lineKey) => {
-    setAutoDoubleBPairsState(prev => {
-      const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: lineKey } : p))
-      refreshAutoEvents(autoCrossPairs, next, autoBollInnerSellEnabled, autoBollInnerBuyEnabled)
-      return next
-    })
-  }
-
-  const toggleAutoBollInnerSell = () => {
-    setAutoBollInnerSellEnabled(prev => {
-      const next = !prev
-      refreshAutoEvents(autoCrossPairs, autoDoubleBPairs, next, autoBollInnerBuyEnabled)
-      return next
-    })
-  }
-
-  const toggleAutoBollInnerBuy = () => {
-    setAutoBollInnerBuyEnabled(prev => {
-      const next = !prev
-      refreshAutoEvents(autoCrossPairs, autoDoubleBPairs, autoBollInnerSellEnabled, next)
-      return next
-    })
-  }
-
-  // 시뮬레이션 트리거 3종 - 반자동(refreshAutoEvents)과 완전히 같은 계산이지만 별도 타임라인(simEventsRef)에 쌓는다
-  const refreshSimEvents = (
-    crossP = simCrossPairs,
-    doubleBP = simDoubleBPairs,
-    bollInnerSell = simBollInnerSellEnabled,
-    bollInnerBuy = simBollInnerBuyEnabled,
-  ) => {
-    simEventsRef.current = computePairEvents(crossP, doubleBP, bollInnerSell, bollInnerBuy)
+  // 시뮬레이션 트리거 - 반자동(refreshAutoEvents)과 완전히 같은 계산이지만 별도 타임라인(simEventsRef)에 쌓는다
+  const refreshSimEvents = (crossP = simCrossPairs) => {
+    simEventsRef.current = computePairEvents(crossP)
   }
 
   const setSimCrossPair = (slotIndex, which, maId) => {
     setSimCrossPairsState(prev => {
       const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: maId } : p))
-      refreshSimEvents(next, simDoubleBPairs, simBollInnerSellEnabled, simBollInnerBuyEnabled)
-      return next
-    })
-  }
-
-  const setSimDoubleBPair = (slotIndex, which, lineKey) => {
-    setSimDoubleBPairsState(prev => {
-      const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: lineKey } : p))
-      refreshSimEvents(simCrossPairs, next, simBollInnerSellEnabled, simBollInnerBuyEnabled)
-      return next
-    })
-  }
-
-  const toggleSimBollInnerSell = () => {
-    setSimBollInnerSellEnabled(prev => {
-      const next = !prev
-      refreshSimEvents(simCrossPairs, simDoubleBPairs, next, simBollInnerBuyEnabled)
-      return next
-    })
-  }
-
-  const toggleSimBollInnerBuy = () => {
-    setSimBollInnerBuyEnabled(prev => {
-      const next = !prev
-      refreshSimEvents(simCrossPairs, simDoubleBPairs, simBollInnerSellEnabled, next)
+      refreshSimEvents(next)
       return next
     })
   }
@@ -2661,61 +2468,6 @@ export default function BacktestChart() {
   const setDeadShape = (v) => { setDeadShapeState(v); applyAllMarkers(indexRef.current, { deadShape: v }) }
   const setDeadColor = (v) => { setDeadColorState(v); applyAllMarkers(indexRef.current, { deadColor: v }) }
   const setDeadSize = (v) => { setDeadSizeState(v); applyAllMarkers(indexRef.current, { deadSize: v }) }
-  const setDoubleBShapeLong = (v) => { setDoubleBShapeLongState(v); applyAllMarkers(indexRef.current, { doubleBShapeLong: v }) }
-  const setDoubleBColorLong = (v) => { setDoubleBColorLongState(v); applyAllMarkers(indexRef.current, { doubleBColorLong: v }) }
-  const setDoubleBSizeLong = (v) => { setDoubleBSizeLongState(v); applyAllMarkers(indexRef.current, { doubleBSizeLong: v }) }
-  const setDoubleBShapeShort = (v) => { setDoubleBShapeShortState(v); applyAllMarkers(indexRef.current, { doubleBShapeShort: v }) }
-  const setDoubleBColorShort = (v) => { setDoubleBColorShortState(v); applyAllMarkers(indexRef.current, { doubleBColorShort: v }) }
-  const setDoubleBSizeShort = (v) => { setDoubleBSizeShortState(v); applyAllMarkers(indexRef.current, { doubleBSizeShort: v }) }
-
-  const refreshDoubleBSignal = (pairs = doubleBPairs) => {
-    const points = []
-    for (const { a, b } of pairs) {
-      if (a && b && a !== b) points.push(...computeDoubleBTouchForPair(a, b))
-    }
-    doubleBSignalPointsRef.current = points.sort((p, q) => p.idx - q.idx)
-    applyAllMarkers(indexRef.current)
-  }
-
-  const setDoubleBPair = (slotIndex, which, lineKey) => {
-    setDoubleBPairsState(prev => {
-      const next = prev.map((p, i) => (i === slotIndex ? { ...p, [which]: lineKey } : p))
-      refreshDoubleBSignal(next)
-      return next
-    })
-  }
-
-  const setBollInnerShapeLong = (v) => { setBollInnerShapeLongState(v); applyAllMarkers(indexRef.current, { bollInnerShapeLong: v }) }
-  const setBollInnerColorLong = (v) => { setBollInnerColorLongState(v); applyAllMarkers(indexRef.current, { bollInnerColorLong: v }) }
-  const setBollInnerSizeLong = (v) => { setBollInnerSizeLongState(v); applyAllMarkers(indexRef.current, { bollInnerSizeLong: v }) }
-  const setBollInnerShapeShort = (v) => { setBollInnerShapeShortState(v); applyAllMarkers(indexRef.current, { bollInnerShapeShort: v }) }
-  const setBollInnerColorShort = (v) => { setBollInnerColorShortState(v); applyAllMarkers(indexRef.current, { bollInnerColorShort: v }) }
-  const setBollInnerSizeShort = (v) => { setBollInnerSizeShortState(v); applyAllMarkers(indexRef.current, { bollInnerSizeShort: v }) }
-
-  // 볼린저 눌림 신호(왼쪽 표시용) - computeBollInnerTouchForPair()는 반자동/시뮬레이션과 공유, 슬롯별 매도/매수 표시만 따로 켜고 끈다
-  // 볼린저 눌림 신호(왼쪽 표시용) - computeBollInnerTouchForPair()는 반자동/시뮬레이션과 공유, 매도/매수 표시만 따로 켜고 끈다
-  const refreshBollInnerSignal = (sellEnabled = bollInnerSignalSellEnabled, buyEnabled = bollInnerSignalBuyEnabled) => {
-    bollInnerSignalPointsRef.current = computeBollInnerTouchForPair(BOLL_INNER_SHORT_ID, BOLL_INNER_LONG_ID)
-      .filter(p => (p.side === 'sell' && sellEnabled) || (p.side === 'buy' && buyEnabled))
-      .sort((p, q) => p.idx - q.idx)
-    applyAllMarkers(indexRef.current)
-  }
-
-  const toggleBollInnerSignalSell = () => {
-    setBollInnerSignalSellEnabled(prev => {
-      const next = !prev
-      refreshBollInnerSignal(next, bollInnerSignalBuyEnabled)
-      return next
-    })
-  }
-
-  const toggleBollInnerSignalBuy = () => {
-    setBollInnerSignalBuyEnabled(prev => {
-      const next = !prev
-      refreshBollInnerSignal(bollInnerSignalSellEnabled, next)
-      return next
-    })
-  }
 
   // 지금 화면에 보이는 상태 그대로(재생/스크럽 위치, 켜둔 지표·마커 전부 포함) PNG로 캡처해서 바로 다운로드.
   // lightweight-charts 내장 takeScreenshot()은 지금까지 그려진 캔버스를 그대로 캡처하므로,
@@ -2922,9 +2674,6 @@ export default function BacktestChart() {
           ending_balance: balance,
           config: {
             crossPairs: simCrossPairs,
-            doubleBPairs: simDoubleBPairs,
-            bollInnerSellEnabled: simBollInnerSellEnabled,
-            bollInnerBuyEnabled: simBollInnerBuyEnabled,
           },
           trades,
         }),
@@ -3617,36 +3366,6 @@ export default function BacktestChart() {
                 {renderPairSlots(crossPairs, setCrossPair, MOVING_AVERAGES, '크로스')}
               </CollapsibleCard>
 
-              <CollapsibleCard title="더블비 신호" maxWidth={170} defaultOpen={false}>
-                {renderCrossRow('더블비 롱', doubleBShapeLong, setDoubleBShapeLong, doubleBColorLong, setDoubleBColorLong, doubleBSizeLong, setDoubleBSizeLong)}
-                {renderCrossRow('더블비 숏', doubleBShapeShort, setDoubleBShapeShort, doubleBColorShort, setDoubleBColorShort, doubleBSizeShort, setDoubleBSizeShort)}
-                {renderPairSlots(doubleBPairs, setDoubleBPair, DOUBLE_B_LINE_OPTIONS, '더블비')}
-              </CollapsibleCard>
-
-              <CollapsibleCard title="볼린저 눌림 신호" maxWidth={170} defaultOpen={false}>
-                {renderCrossRow('눌림 롱', bollInnerShapeLong, setBollInnerShapeLong, bollInnerColorLong, setBollInnerColorLong, bollInnerSizeLong, setBollInnerSizeLong)}
-                {renderCrossRow('눌림 숏', bollInnerShapeShort, setBollInnerShapeShort, bollInnerColorShort, setBollInnerColorShort, bollInnerSizeShort, setBollInnerSizeShort)}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: bollInnerSignalSellEnabled ? '#ef5350' : '#9aa0ab', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={bollInnerSignalSellEnabled}
-                      onChange={toggleBollInnerSignalSell}
-                      style={{ width: 12, height: 12, margin: 0, accentColor: '#ef5350', flexShrink: 0 }}
-                    />
-                    5분 상단 눌림 (매도)
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: bollInnerSignalBuyEnabled ? '#26a69a' : '#9aa0ab', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={bollInnerSignalBuyEnabled}
-                      onChange={toggleBollInnerSignalBuy}
-                      style={{ width: 12, height: 12, margin: 0, accentColor: '#26a69a', flexShrink: 0 }}
-                    />
-                    5분 하단 눌림 (매수)
-                  </label>
-                </div>
-              </CollapsibleCard>
             </div>
 
             {/* 오른쪽 컬럼: 상태줄 / 차트 / 컨트롤 */}
