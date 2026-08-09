@@ -19,7 +19,7 @@ const PRACTICE_FEATURES = [
   },
   {
     tag: '📈 일중 패턴 분석', title: '언제 크게 움직였는지 분석',
-    desc: '원하는 날짜(들)의 과거 시세를 겹쳐보고, 하루 중 언제 방향이 크게 바뀌었는지·언제 가장 많이 움직였는지를 분석해줘요. 전체 분석을 PDF 리포트로 다운로드할 수도 있어요.',
+    desc: '원하는 날짜(들)의 과거 시세를 겹쳐보고, 하루 중 언제 방향이 크게 바뀌었는지·언제 가장 많이 움직였는지를 분석해줘요. 볼린저밴드·도치안 채널을 그 날짜 가격선에 겹쳐볼 수도 있어요.',
     href: '/backtest-intraday', cta: '📈 일중 패턴 분석 해보기',
   },
 ]
@@ -205,17 +205,6 @@ export default function Home() {
             </div>
           ))}
         </div>
-        <div className="card" style={{ marginBottom: 20, textAlign: 'center' }}>
-          <img
-            src="/images/intraday-report-preview.png"
-            alt="일중 패턴 분석 PDF 리포트 예시 — 전환점 분석 그래프와 오늘의 분석 서술"
-            style={{ maxWidth: 560, width: '100%', borderRadius: 10, border: '1px solid var(--border)', display: 'inline-block' }}
-          />
-          <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12, marginBottom: 0 }}>
-            일중 패턴 분석에서 날짜를 하나 고르면, 그날 실제로 있었던 일을 정리한 &quot;오늘의 분석&quot;과 함께 PDF 리포트로 받아볼 수 있어요.
-          </p>
-        </div>
-
         <div className="section-title">
           <h2>버전 선택</h2>
           <p>사용 중인 플랫폼에 맞는 버전을 선택하세요</p>

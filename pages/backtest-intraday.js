@@ -26,21 +26,32 @@ const SYMBOL_NAME = { GOLD: '골드', NASDAQ: '나스닥' }
 const DAY_COLORS = ['#4FC3F7', '#FFB74D', '#BA68C8', '#81C784', '#F06292', '#FFD54F', '#4DB6AC', '#E57373']
 function dayColor(i) { return DAY_COLORS[i % DAY_COLORS.length] }
 
-// 하루 전체(0~1439분)를 한 화면에 우겨넣지 않고, 트레이딩뷰처럼 드래그로 좌우 이동 + 휠로 확대/축소한다
+// 오버레이 차트의 "하루" 구간은 달력상 00:00~23:59가 아니라 05:00~다음날 06:00(25시간)이다(사용자 요청 -
+// "한국에서 기준을 5시 정도부터 다음 6시까지 보이게 해줘"). 예: 8월3일 = 8/3 05:00 ~ 8/4 06:00.
+// 이 규칙을 매일 그대로 적용하면 05:00~06:00(1시간)이 "전날의 연장"과 "당일의 시작" 양쪽에 다 걸치는데,
+// 그것도 사용자가 말한 규칙을 문자 그대로 적용한 결과라 그대로 둔다(의도된 중복 구간).
+// 이 05:00~익일06:00 재정의는 메인 오버레이 차트뿐 아니라 "시간대별 변동성 분석"/"앞으로 최대
+// 이동폭 분석"(TOTAL_BUCKETS 100개, MINUTES_PER_BUCKET 그대로)에도 동일하게 적용했다(사용자 요청 -
+// "다 적용을 해야지"). PDF 리포트 기능은 제거했다(사용자 요청).
+const DAY_WINDOW_START_MIN = 5 * 60 // 05:00 - 오버레이 차트 "하루"의 시작
+const DAY_WINDOW_TOTAL_MIN = 25 * 60 // 05:00 ~ 다음날 06:00 = 25시간(1500분)
+
+// 하루 전체를 한 화면에 우겨넣지 않고, 트레이딩뷰처럼 드래그로 좌우 이동 + 휠로 확대/축소한다
 // (사용자 요청 - 아래 슬라이드바 대신 차트를 직접 끌고 스크롤하는 방식).
 const DEFAULT_WINDOW_MIN = 12 * 60 // 처음엔 12시간만 보이게 시작
 const MIN_WINDOW_MIN = 60   // 최대로 확대하면 1시간까지만
-const MAX_WINDOW_MIN = 24 * 60 // 최대로 축소하면 하루 전체
+const MAX_WINDOW_MIN = DAY_WINDOW_TOTAL_MIN // 최대로 축소하면 05:00~다음날06:00 전체
 
 // 한국 시간 기준 실제 거래 시작은 00:00이 아니라 07:00(브로커 01시=한국 07시, candleCsv.js 오프셋
-// 규칙 참고) - x축(00:00~23:59)은 그대로 두고, 시가(0선) 기준만 07:00 시점 가격으로 삼는다(사용자 요청).
+// 규칙 참고) - 시가(0선) 기준을 07:00 시점 가격으로 삼는다(사용자 요청). "시간대별 분석" 등에서 실제
+// 시각(0~1439) 그대로 써야 하는 곳이 있어 이 값 자체는 그대로 둔다(위 DAY_WINDOW_START_MIN과는 별개).
 const REFERENCE_MIN = 7 * 60 // 07:00
 
 // "시간대별 변동성 분석" 막대그래프의 세분화 단위 - 1시간 하나로는 뭉뚱그려져서 15분 단위(1시간=4칸)로
-// 쪼개달라는 요청(사용자)에 맞춘 것. 하루 24시간 = 96개 15분 버킷.
+// 쪼개달라는 요청(사용자)에 맞춘 것. 하루 25시간(05:00~익일06:00, DAY_WINDOW_TOTAL_MIN) = 100개 15분 버킷.
 const MINUTES_PER_BUCKET = 15
 const BUCKETS_PER_HOUR = 60 / MINUTES_PER_BUCKET
-const TOTAL_BUCKETS = 24 * BUCKETS_PER_HOUR
+const TOTAL_BUCKETS = DAY_WINDOW_TOTAL_MIN / MINUTES_PER_BUCKET
 
 // 세계 주요 시장 개장 시각 - backtest-chart.js와 동일한 시간 라벨(브로커 서버+서머타임 오프셋) 기준
 // 분(minute-of-day). 유럽(런던)은 서머타임(BST) 기준 07:00 UTC=16:00 이 라벨(겨울엔 17:00).
@@ -60,6 +71,25 @@ const FORWARD_WINDOWS_BUCKETS = [1, 4, 8, 16] // 15분/1시간/2시간/4시간 �
 
 function publicUrl(storagePath) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${storagePath}`
+}
+
+// "YYYY-MM-DD" 문자열의 하루 전 - 05:00~익일06:00 트레이딩데이 버킷팅에서 씀(components/BacktestCalendar.js의
+// addDays와 같은 로직, 이 파일에선 -1일만 필요해서 별도로 둠).
+function prevLocalDateStr(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() - 1)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+
+// 실제 시각(0~1439, 자정 기준)을 오버레이 차트 x축 오프셋(0~1499, 05:00 기준)으로. 05:00 이전(00:00~04:59)은
+// "전날의 연장"이라 1440을 더해 뒤쪽(1140~1439)으로 이어붙인다.
+function toChartOffset(minuteOfDay) {
+  return minuteOfDay >= DAY_WINDOW_START_MIN ? minuteOfDay - DAY_WINDOW_START_MIN : minuteOfDay + (1440 - DAY_WINDOW_START_MIN)
+}
+// 오버레이 차트 x축 오프셋을 다시 실제 시각(0~1439)으로 - 축 라벨(HH:MM) 표시용.
+function fromChartOffset(offsetMinute) {
+  return (((offsetMinute + DAY_WINDOW_START_MIN) % 1440) + 1440) % 1440
 }
 
 // 새로고침하면 골라둔 심볼/달/날짜/표시설정이 전부 날아간다는 지적(사용자) - replay.js/backtest-chart.js와
@@ -113,9 +143,6 @@ export default function BacktestIntraday() {
   const [hourlyAnalysis, setHourlyAnalysis] = useState(null)
   // "앞으로 최대 이동폭 분석"(전환점 무관) 버튼 결과 - 위와 같은 모양, 전환점 분석과 별도로 둘 다 볼 수 있게 함
   const [forwardAnalysis, setForwardAnalysis] = useState(null)
-  // "PDF 다운로드" 진행 상태 - null(평소) | {hourly, forward, series, symbol, upDays, avgFinal, maxAbs} (캡처 대상 렌더 중)
-  const [pdfReportData, setPdfReportData] = useState(null)
-  const [pdfBuilding, setPdfBuilding] = useState(false)
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
@@ -127,8 +154,6 @@ export default function BacktestIntraday() {
   const rangeAnchorRef = useRef('') // 마지막으로 클릭한 날짜 - Shift+클릭으로 범위 선택할 때 시작점(replay.js와 같은 방식)
   const datasetCacheRef = useRef({}) // dataset.id -> parsed rows(전체) 캐시
   const dayRowsRef = useRef({}) // date -> 그 날의 원본 캔들 행(open/high/low/close/time) - "시간대별 변동성 분석"에서 씀
-  const pdfContainerRef = useRef(null) // PDF로 캡처할 숨겨진(화면 밖) 리포트 DOM
-  const pdfCanvasRef = useRef(null) // PDF 전용 - 하루 전체(00:00~24:00, 확대축소 없이)를 그리는 정적 캔버스
 
   // 심볼/달/고른 날짜/표시설정이 바뀔 때마다 localStorage에 저장 - 새로고침해도 그대로 유지된다(사용자 지적).
   useEffect(() => {
@@ -212,17 +237,38 @@ export default function BacktestIntraday() {
           }
         }
 
+        // 트레이딩데이 버킷팅 - 하루가 "그 날짜 05:00 ~ 다음날 06:00"이라(DAY_WINDOW_START_MIN 위 설명
+        // 참고), fullRows를 그냥 달력 날짜로만 나누지 않고, 자정을 넘긴 00:00~05:59 캔들을 "전날"
+        // 버킷에도 같이 얹는다. fullRows가 이미 시간순 정렬돼있어서, 특정 날짜 D의 버킷엔 먼저 D 자신의
+        // 05:00~23:59가 순서대로 쌓이고 그 다음(달이 넘어가며) D+1의 00:00~05:59가 이어붙어서, 결과
+        // 배열이 그대로 시간순이 된다(별도 정렬 불필요).
         const byDate = new Map()
-        for (const r of fullRows) {
-          const dateStr = toLocalDateStr(r.time)
-          if (!dateStr.startsWith(`${y}-${String(m + 1).padStart(2, '0')}`)) continue
+        const addRow = (dateStr, r) => {
           if (!byDate.has(dateStr)) byDate.set(dateStr, [])
           byDate.get(dateStr).push(r)
         }
+        for (const r of fullRows) {
+          const calDate = toLocalDateStr(r.time)
+          const d = new Date(r.time * 1000)
+          const minuteOfDay = d.getHours() * 60 + d.getMinutes()
+          if (minuteOfDay >= DAY_WINDOW_START_MIN) addRow(calDate, r) // 그 날짜 자신의 05:00~23:59
+          if (minuteOfDay < DAY_WINDOW_START_MIN + 60) addRow(prevLocalDateStr(calDate), r) // 전날의 05:00~익일06:00 연장분(00:00~05:59, 05:00~05:59 겹침 포함)
+        }
+        // 화면에 노출할 날짜는 여전히 이번 달(viewMonth) 기준만 - 위 버킷팅은 fullRows(파일 전체) 기준으로
+        // 해뒀으니 달 경계(예: 7/31의 연장분인 8/1 새벽)도 정확히 잡힌다.
+        const monthPrefix = `${y}-${String(m + 1).padStart(2, '0')}`
 
         const nextDays = []
         const nextDayRows = {}
-        for (const [date, rows] of [...byDate.entries()].sort()) {
+        for (const [date, rows] of [...byDate.entries()].filter(([d]) => d.startsWith(monthPrefix)).sort()) {
+          // 이 날짜(트레이딩데이) 소속 캔들을 실제 x축 오프셋(0=05:00 ~ 1499=익일05:59)으로 바꾼다.
+          // 자기 날짜(D) 소속이면 05:00 기준 그대로, 다음날(D+1) 새벽 연장분이면 1440을 더해 뒤로 이어붙인다
+          // (05:00~05:59는 D의 "연장"과 D+1의 "자기 날짜" 양쪽에 다 있을 수 있어 실제 달력날짜로 구분해야 함).
+          const rowOffset = (r) => {
+            const d = new Date(r.time * 1000)
+            const minuteOfDay = d.getHours() * 60 + d.getMinutes()
+            return toLocalDateStr(r.time) === date ? (minuteOfDay - DAY_WINDOW_START_MIN) : (minuteOfDay + (1440 - DAY_WINDOW_START_MIN))
+          }
           // 완전한 하루가 아니어도(데이터 경계에 걸려 일부 시간대만 있어도) 있는 부분만 그린다.
           // 시가(0선) 기준은 07:00 시점 가격 - 정확히 07:00 캔들이 있으면 그걸 쓰고, 없으면(경계에
           // 걸려 07:00 근처가 비어있으면) 그날 안에서 07:00에 가장 가까운 캔들로 대체한다.
@@ -245,16 +291,11 @@ export default function BacktestIntraday() {
                 const idx = timeToIdx.get(r.time)
                 const w = bandWidth[idx]
                 if (w == null) return null
-                const d = new Date(r.time * 1000)
-                return [d.getHours() * 60 + d.getMinutes(), Math.round(w * 100) / 100]
+                return [rowOffset(r), Math.round(w * 100) / 100]
               })
               .filter(Boolean)
           } else {
-            points = rows.map(r => {
-              const d = new Date(r.time * 1000)
-              const minutes = d.getHours() * 60 + d.getMinutes()
-              return [minutes, Math.round((r.close - dayOpen) * 100) / 100]
-            })
+            points = rows.map(r => [rowOffset(r), Math.round((r.close - dayOpen) * 100) / 100])
           }
 
           // price 모드 전용 오버레이 - 밴드 상단/중심선/하단을 "시가(0) 기준" 같은 스케일(값 - dayOpen)로
@@ -270,11 +311,10 @@ export default function BacktestIntraday() {
                 const idx = timeToIdx.get(r.time)
                 const u = upsLows.ups[idx], l = upsLows.lows[idx], m = upsLows.mids[idx]
                 if (u == null || l == null || m == null) continue
-                const d = new Date(r.time * 1000)
-                const minutes = d.getHours() * 60 + d.getMinutes()
-                upper.push([minutes, Math.round((u - dayOpen) * 100) / 100])
-                mid.push([minutes, Math.round((m - dayOpen) * 100) / 100])
-                lower.push([minutes, Math.round((l - dayOpen) * 100) / 100])
+                const off = rowOffset(r)
+                upper.push([off, Math.round((u - dayOpen) * 100) / 100])
+                mid.push([off, Math.round((m - dayOpen) * 100) / 100])
+                lower.push([off, Math.round((l - dayOpen) * 100) / 100])
               }
               overlays[band.id] = { upper, mid, lower }
             }
@@ -414,7 +454,8 @@ export default function BacktestIntraday() {
       const x = px(mnt)
       ctx.beginPath(); ctx.moveTo(x, 16); ctx.lineTo(x, H - 34); ctx.stroke()
       ctx.textAlign = 'center'
-      const hh = Math.floor(mnt / 60) % 24, mm = mnt % 60
+      const real = fromChartOffset(mnt)
+      const hh = Math.floor(real / 60), mm = real % 60
       ctx.fillText(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, x, H - 16)
     }
     for (let i = 0; i <= 5; i++) {
@@ -438,11 +479,14 @@ export default function BacktestIntraday() {
       ctx.fillText('시가(07:00, 0)', 58, zeroY - 5)
     }
 
-    // 세계 주요 시장 개장 시각 - 지금 보이는 구간 안에 있을 때만 세로 점선 + 라벨로 표시
+    // 세계 주요 시장 개장 시각 - 지금 보이는 구간 안에 있을 때만 세로 점선 + 라벨로 표시.
+    // SESSION_OPENS.minute은 실제 시각(0~1439) 그대로 두고(시간대별 분석 쪽 막대그래프도 실제 시(hour)
+    // 기준으로 비교하고 있어서), 여기 메인 차트에서만 x축 오프셋으로 변환해서 쓴다.
     ctx.font = '10px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif'
     for (const session of SESSION_OPENS) {
-      if (!inWindow(session.minute)) continue
-      const sx = px(session.minute)
+      const sessionOffset = toChartOffset(session.minute)
+      if (!inWindow(sessionOffset)) continue
+      const sx = px(sessionOffset)
       ctx.strokeStyle = session.color
       ctx.globalAlpha = 0.5
       ctx.setLineDash([3, 3])
@@ -578,7 +622,7 @@ export default function BacktestIntraday() {
       if (drag.mode === 'pan') {
         const deltaPx = e.clientX - drag.startClientX
         const deltaMin = -(deltaPx / plotW) * windowSize
-        const maxStart = Math.max(0, 1440 - windowSize)
+        const maxStart = Math.max(0, DAY_WINDOW_TOTAL_MIN - windowSize)
         setWindowStart(Math.max(0, Math.min(maxStart, Math.round(drag.startWindowStart + deltaMin))))
 
         // 세로로 끌면 0점을 포함한 세로 위치 자체가 그만큼 옮겨간다(사용자 요청) - 잡고 아래로 끌면
@@ -597,7 +641,7 @@ export default function BacktestIntraday() {
         const factor = Math.exp(-deltaPx / 150)
         const center = drag.startWindowStart + drag.startWindowSize / 2
         const nextSize = Math.max(MIN_WINDOW_MIN, Math.min(MAX_WINDOW_MIN, Math.round(drag.startWindowSize * factor)))
-        const maxStart = Math.max(0, 1440 - nextSize)
+        const maxStart = Math.max(0, DAY_WINDOW_TOTAL_MIN - nextSize)
         setWindowSize(nextSize)
         setWindowStart(Math.max(0, Math.min(maxStart, Math.round(center - nextSize / 2))))
       }
@@ -631,7 +675,7 @@ export default function BacktestIntraday() {
     const cursorMinute = windowStart + t * (windowSize - 1)
     const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15
     const nextSize = Math.max(MIN_WINDOW_MIN, Math.min(MAX_WINDOW_MIN, Math.round(windowSize * factor)))
-    const maxStart = Math.max(0, 1440 - nextSize)
+    const maxStart = Math.max(0, DAY_WINDOW_TOTAL_MIN - nextSize)
     const nextStart = Math.max(0, Math.min(maxStart, Math.round(cursorMinute - t * (nextSize - 1))))
     setWindowSize(nextSize)
     setWindowStart(nextStart)
@@ -643,21 +687,11 @@ export default function BacktestIntraday() {
     return () => window.removeEventListener('mouseup', onMouseUp)
   }, [])
 
-  const fmtHM = (mnt) => `${String(Math.floor((mnt % 1440 + 1440) % 1440 / 60)).padStart(2, '0')}:${String(mnt % 60).padStart(2, '0')}`
-  const fmtBucket = (idx) => `${String(Math.floor(idx / BUCKETS_PER_HOUR)).padStart(2, '0')}:${String((idx % BUCKETS_PER_HOUR) * MINUTES_PER_BUCKET).padStart(2, '0')}`
-
-  // PDF 리포트 제목/파일명에 쓰는 날짜 라벨 - "3일"처럼 개수만 보여주면 어느 날짜인지 알 수 없다는
-  // 지적(사용자)으로, 실제 고른 날짜(들)를 그대로 보여주게 고침. selectedDates는 항상 오름차순
-  // 정렬된 상태로 유지되므로(handleDayClick에서 .sort()) 첫/마지막만 보면 범위를 알 수 있다.
-  const fmtKoreanDate = (dateStr) => {
-    const [, m, d] = dateStr.split('-').map(Number)
-    return `${m}월${d}일`
-  }
-  const formatDateRangeLabel = (dates) => {
-    if (!dates || dates.length === 0) return ''
-    if (dates.length === 1) return fmtKoreanDate(dates[0])
-    return `${fmtKoreanDate(dates[0])}~${fmtKoreanDate(dates[dates.length - 1])}`
-  }
+  // mnt는 이제 05:00을 0으로 삼는 x축 오프셋이라, 실제 시:분 라벨로 보여줄 땐 fromChartOffset으로
+  // 되돌려야 한다(05:00~다음날06:00 구간이라 자정을 넘어가는 오프셋도 정확한 실제 시각으로 나옴).
+  const fmtHM = (mnt) => { const real = fromChartOffset(mnt); return `${String(Math.floor(real / 60)).padStart(2, '0')}:${String(real % 60).padStart(2, '0')}` }
+  // idx(오프셋 버킷 번호, 0=05:00대)를 실제 시:분 라벨로 - fmtHM과 같은 이유로 fromChartOffset을 거친다.
+  const fmtBucket = (idx) => fmtHM(idx * MINUTES_PER_BUCKET)
 
   // 설정 초기화 버튼 - backtest-chart.js(학습페이지)와 같은 기능(사용자 요청). 다만 이 페이지는
   // 심볼/달/고른 날짜까지 같은 저장키에 같이 담아두므로(학습페이지는 별도 키로 분리돼있음), 초기화해도
@@ -712,13 +746,24 @@ export default function BacktestIntraday() {
   // (2026-07-01 나스닥 실측으로 검증 - 09:30이 실제로 3위권 전환점으로 나옴, 사용자가 짚은 지점과 일치)
   const PIVOT_WINDOW = 3 // 앞뒤 3버킷(45분) 안에서 극값이면 전환점 후보로 봄
 
-  const findPivotScores = (rows) => {
+  // rows(dayRowsRef.current[date])의 버킷 인덱스를 실제 시각이 아니라 "05:00을 0으로 삼는 오프셋"
+  // 기준으로 구한다(메인 오버레이 차트와 동일한 05:00~익일06:00 하루 정의, 사용자 요청 - "다 적용을
+  // 해야지"). rows엔 그 날짜 자신의 05:00~23:59와 다음날 00:00~05:59(연장분)가 섞여있는데, 실제
+  // 달력날짜(date)와 같은지로 "자기 날짜 몫"인지 "다음날 연장 몫"인지 구분해야 05:00~05:59 겹침
+  // 구간에서 서로 다른 두 날의 캔들이 같은 버킷으로 충돌하지 않는다(main 오버레이 차트의 rowOffset과 동일 로직).
+  const rowBucketIdx = (r, date) => {
+    const d = new Date(r.time * 1000)
+    const minuteOfDay = d.getHours() * 60 + d.getMinutes()
+    const offset = toLocalDateStr(r.time) === date ? (minuteOfDay - DAY_WINDOW_START_MIN) : (minuteOfDay + (1440 - DAY_WINDOW_START_MIN))
+    return Math.floor(offset / MINUTES_PER_BUCKET)
+  }
+
+  const findPivotScores = (rows, date) => {
     const dayLast = new Array(TOTAL_BUCKETS).fill(null)
     const dayRangeSum = new Array(TOTAL_BUCKETS).fill(0)
     const dayRangeCnt = new Array(TOTAL_BUCKETS).fill(0)
     for (const r of rows) {
-      const d = new Date(r.time * 1000)
-      const idx = d.getHours() * BUCKETS_PER_HOUR + Math.floor(d.getMinutes() / MINUTES_PER_BUCKET)
+      const idx = rowBucketIdx(r, date)
       dayLast[idx] = r.close
       dayRangeSum[idx] += r.high - r.low
       dayRangeCnt[idx] += 1
@@ -748,8 +793,7 @@ export default function BacktestIntraday() {
     return { pivotScore, dayRangeSum, dayRangeCnt }
   }
 
-  // 두 분석 버튼(runHourlyAnalysis/runForwardMoveAnalysis)과 PDF 다운로드가 전부 이 순수 계산 함수들을
-  // 공유한다 - 버튼은 결과를 state로 저장하고, PDF는 버튼을 안 눌러도 그 자리에서 최신 값을 바로 계산해서 쓴다.
+  // 이 순수 계산 함수를 runHourlyAnalysis 버튼이 결과를 state로 저장할 때 쓴다.
   const computeHourlyAnalysis = useCallback((dates) => {
     if (!dates || dates.length === 0) return null
     const bucketRangeSum = new Array(TOTAL_BUCKETS).fill(0)
@@ -759,7 +803,7 @@ export default function BacktestIntraday() {
     for (const date of dates) {
       const rows = dayRowsRef.current[date]
       if (!rows || rows.length === 0) continue
-      const { pivotScore, dayRangeSum, dayRangeCnt } = findPivotScores(rows)
+      const { pivotScore, dayRangeSum, dayRangeCnt } = findPivotScores(rows, date)
       for (let idx = 0; idx < TOTAL_BUCKETS; idx++) {
         bucketRangeSum[idx] += dayRangeSum[idx]
         bucketRangeCnt[idx] += dayRangeCnt[idx]
@@ -794,13 +838,12 @@ export default function BacktestIntraday() {
   // 가격과 비교해서 그중 가장 많이 움직인 폭"만 본다 - 반전이든 계속되는 흐름이든 다 잡힌다.
   // (2026-07-01 나스닥 실측으로 검증 - 09:00~10:15 전 구간과 15:00 모두 0 아닌 값으로 잡힘,
   // 전환점 지표에서 09:30 한 칸만 잡히던 것보다 훨씬 넓게 커버함)
-  const findForwardMoveScores = (rows) => {
+  const findForwardMoveScores = (rows, date) => {
     const dayLast = new Array(TOTAL_BUCKETS).fill(null)
     const dayRangeSum = new Array(TOTAL_BUCKETS).fill(0)
     const dayRangeCnt = new Array(TOTAL_BUCKETS).fill(0)
     for (const r of rows) {
-      const d = new Date(r.time * 1000)
-      const idx = d.getHours() * BUCKETS_PER_HOUR + Math.floor(d.getMinutes() / MINUTES_PER_BUCKET)
+      const idx = rowBucketIdx(r, date)
       dayLast[idx] = r.close
       dayRangeSum[idx] += r.high - r.low
       dayRangeCnt[idx] += 1
@@ -830,7 +873,7 @@ export default function BacktestIntraday() {
     for (const date of dates) {
       const rows = dayRowsRef.current[date]
       if (!rows || rows.length === 0) continue
-      const { score, dayRangeSum, dayRangeCnt } = findForwardMoveScores(rows)
+      const { score, dayRangeSum, dayRangeCnt } = findForwardMoveScores(rows, date)
       for (let idx = 0; idx < TOTAL_BUCKETS; idx++) {
         bucketRangeSum[idx] += dayRangeSum[idx]
         bucketRangeCnt[idx] += dayRangeCnt[idx]
@@ -877,24 +920,28 @@ export default function BacktestIntraday() {
       <div style={{ marginTop: 14, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20 }}>
         <div style={{ fontSize: 12.5, color: '#9aa0ab', marginBottom: 18 }}>{captionNode}</div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 0, height: 200 }}>
-          {Array.from({ length: 24 }, (_, hour) => {
-            const sessionHere = SESSION_OPENS.find(s => Math.floor(s.minute / 60) === hour)
+          {/* hourGroup은 버킷 인덱스 그룹(0=05:00대 ~ 24=익일05:00대, 05:00~익일06:00 하루 기준의 25개
+              시간대) - 화면에 보여줄 실제 시(hour)는 fromChartOffset으로 되돌려서 구한다(사용자 요청 -
+              "다 적용을 해야지"). */}
+          {Array.from({ length: TOTAL_BUCKETS / BUCKETS_PER_HOUR }, (_, hourGroup) => {
+            const displayHour = Math.floor(fromChartOffset(hourGroup * 60) / 60)
+            const sessionHere = SESSION_OPENS.find(s => Math.floor(s.minute / 60) === displayHour)
             return (
               <div
-                key={hour}
+                key={hourGroup}
                 style={{
                   flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
-                  borderLeft: hour !== 0 ? '1px solid #2a2e38' : 'none', paddingLeft: hour !== 0 ? 3 : 0,
+                  borderLeft: hourGroup !== 0 ? '1px solid #2a2e38' : 'none', paddingLeft: hourGroup !== 0 ? 3 : 0,
                 }}
               >
                 {/* 1시간마다 세로선으로 구분 - 그 시간의 15분 버킷 4개를 한 그룹으로 묶어서 아래 시간 숫자가 정가운데에 오게 한다 */}
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, width: '100%', height: 180 }}>
                   {Array.from({ length: BUCKETS_PER_HOUR }, (_, quarter) => {
-                    const idx = hour * BUCKETS_PER_HOUR + quarter
+                    const idx = hourGroup * BUCKETS_PER_HOUR + quarter
                     const info = byBucket.get(idx)
                     const barH = info ? Math.max(3, (info.sharePct / maxShare) * 158) : 0
                     const top3 = !!info && info.rank <= 3
-                    const label = `${String(hour).padStart(2, '0')}:${String(quarter * MINUTES_PER_BUCKET).padStart(2, '0')}`
+                    const label = fmtBucket(idx)
                     return (
                       <div key={idx} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
                         <span style={{
@@ -916,7 +963,7 @@ export default function BacktestIntraday() {
                   })}
                 </div>
                 <span style={{ fontSize: 9.5, color: sessionHere ? sessionHere.color : '#5a5f6a', fontWeight: sessionHere ? 800 : 400, marginTop: 5 }}>
-                  {String(hour).padStart(2, '0')}
+                  {String(displayHour).padStart(2, '0')}
                 </span>
                 {sessionHere && (
                   <span style={{ fontSize: 8, color: sessionHere.color, marginTop: 1 }}>{sessionHere.label}</span>
@@ -928,199 +975,6 @@ export default function BacktestIntraday() {
       </div>
     )
   }
-
-  // "오늘의 분석" - PDF 리포트 전용. 날짜를 하루만 골랐을 때만 그날 실제로 무슨 일이 있었는지
-  // 뉴스 시황처럼 서술한다(사용자 요청 - 여러 날 고르면 "그날 있었던 일"이라는 서술 자체가
-  // 성립 안 하니 그때는 안내 문구만 보여줌). 지어내지 않고 hourly/forward 분석 결과와 실제
-  // 편차 시계열(points)에서 직접 뽑은 값만 쓴다.
-  const nearestSessionLabel = (bucketIdx) => {
-    const minute = bucketIdx * MINUTES_PER_BUCKET
-    const near = SESSION_OPENS.find(s => Math.abs(s.minute - minute) <= 60)
-    return near ? near.label : null
-  }
-
-  const buildTodayAnalysis = (hourly, forward, series, sym) => {
-    if (series.length > 1) {
-      return { title: '오늘의 분석', body: '이 분석은 날짜를 하루만 선택했을 때만 제공됩니다.' }
-    }
-    if (!hourly || !forward || series.length === 0) return null
-    const points = series[0].points
-    if (!points.length || hourly.ranked.length < 4 || forward.ranked.length < 1) {
-      return { title: '오늘의 분석', body: '이 날은 뚜렷한 전환점이 적어 분석을 생략합니다.' }
-    }
-    let peakI = 0, troughI = 0
-    for (let i = 1; i < points.length; i++) {
-      if (points[i][1] > points[peakI][1]) peakI = i
-      if (points[i][1] < points[troughI][1]) troughI = i
-    }
-    const [p1, p2, p3, p4] = hourly.ranked
-    const fTop3Hours = [...new Set(forward.ranked.slice(0, 3).map(r => Math.floor(r.bucket / BUCKETS_PER_HOUR)))].sort((a, b) => a - b)
-    const finalDev = points[points.length - 1][1]
-    const maxAbsDev = Math.max(...points.map(p => Math.abs(p[1])))
-    const sessionNote = nearestSessionLabel(p1.bucket)
-
-    const body =
-      `${SYMBOL_NAME[sym]}은 오늘 새벽 완만한 상승세로 출발해 ${fmtHM(points[peakI][0])} +${points[peakI][1].toFixed(1)}pt까지 올랐지만, ` +
-      `${fmtBucket(p3.bucket)}을 기점으로 분위기가 바뀌었습니다. 이후 매도세가 이어지며 서서히 밀렸고(${fmtBucket(p4.bucket)} 한 차례 더 저점을 확인), ` +
-      `저녁 들어 하락에 속도가 붙었습니다. ${fmtBucket(p1.bucket)} 고점${sessionNote ? `(${sessionNote} 개장 시간대와 겹침)` : ''}을 마지막으로 ` +
-      `급격한 매도가 나왔고, ${fmtHM(points[troughI][0])}에 하루 최저점(${points[troughI][1].toFixed(1)}pt)을 찍은 뒤 소폭 반등하며 장을 마쳤습니다. ` +
-      `결국 시가 대비 ${finalDev.toFixed(1)}pt ${finalDev < 0 ? '하락' : '상승'} 마감, 일중 변동폭은 ${maxAbsDev.toFixed(1)}pt였습니다. ` +
-      `(1번·2번 그래프 모두 ${fTop3Hours.map(h => String(h).padStart(2, '0')).join('~')}시 구간을 오늘 가장 바쁜 시간대로 지목했습니다.)`
-
-    return { title: '오늘의 분석', body }
-  }
-
-  // PDF 전용 - 인터랙티브 캔버스(draw)와 별개로, 언제나 하루 전체(00:00~24:00, 확대/축소 없이)를 그린다
-  const drawStaticOverlay = (canvas, series) => {
-    if (!canvas) return
-    const rect = { width: canvas.clientWidth || 900, height: canvas.clientHeight || 320 }
-    const dpr = window.devicePixelRatio || 1
-    canvas.width = rect.width * dpr
-    canvas.height = rect.height * dpr
-    const ctx = canvas.getContext('2d')
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    const W = rect.width, H = rect.height
-    ctx.fillStyle = '#171a21'
-    ctx.fillRect(0, 0, W, H)
-
-    let lo = Infinity, hi = -Infinity
-    for (const d of series) for (const [, v] of d.points) { if (v < lo) lo = v; if (v > hi) hi = v }
-    if (!Number.isFinite(lo)) { lo = -1; hi = 1 }
-    const pad = (hi - lo) * 0.1 || 1
-    lo -= pad; hi += pad
-
-    const px = mnt => 50 + (mnt / 1439) * (W - 50 - 16)
-    const py = v => 14 + (1 - (v - lo) / (hi - lo)) * (H - 14 - 28)
-
-    ctx.font = '10px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif'
-    ctx.strokeStyle = '#232733'
-    for (let h = 0; h <= 24; h += 2) {
-      const x = px(Math.min(h * 60, 1439))
-      ctx.beginPath(); ctx.moveTo(x, 14); ctx.lineTo(x, H - 28); ctx.stroke()
-      ctx.fillStyle = '#9aa0ab'; ctx.textAlign = 'center'
-      ctx.fillText(`${String(h % 24).padStart(2, '0')}:00`, x, H - 12)
-    }
-    for (let i = 0; i <= 4; i++) {
-      const v = lo + (hi - lo) * (i / 4)
-      const y = py(v)
-      ctx.strokeStyle = '#232733'
-      ctx.beginPath(); ctx.moveTo(50, y); ctx.lineTo(W - 16, y); ctx.stroke()
-      ctx.fillStyle = '#9aa0ab'; ctx.textAlign = 'right'
-      ctx.fillText(v.toFixed(0), 44, y + 3)
-    }
-    const zeroY = py(0)
-    ctx.strokeStyle = '#9aa0ab'
-    ctx.setLineDash([4, 4])
-    ctx.beginPath(); ctx.moveTo(50, zeroY); ctx.lineTo(W - 16, zeroY); ctx.stroke()
-    ctx.setLineDash([])
-    ctx.fillStyle = '#9aa0ab'; ctx.textAlign = 'left'
-    ctx.fillText('시가(07:00, 0)', 52, zeroY - 4)
-
-    for (const session of SESSION_OPENS) {
-      const sx = px(session.minute)
-      ctx.strokeStyle = session.color
-      ctx.globalAlpha = 0.55
-      ctx.setLineDash([3, 3])
-      ctx.beginPath(); ctx.moveTo(sx, 14); ctx.lineTo(sx, H - 28); ctx.stroke()
-      ctx.setLineDash([])
-      ctx.globalAlpha = 1
-      ctx.fillStyle = session.color; ctx.textAlign = 'center'
-      ctx.fillText(session.label, sx, 24)
-    }
-
-    series.forEach((d, i) => {
-      ctx.strokeStyle = dayColor(i)
-      ctx.lineWidth = 1.4
-      ctx.beginPath()
-      let started = false
-      d.points.forEach(([mnt, v]) => {
-        const x = px(mnt), y = py(v)
-        if (!started) { ctx.moveTo(x, y); started = true } else ctx.lineTo(x, y)
-      })
-      ctx.stroke()
-    })
-  }
-
-  // "PDF 다운로드" - 지금 화면 그대로가 아니라 별도로 조립한 리포트(오늘의 분석 + 그래프 3개 +
-  // 통계 + CTA)를 화면 밖에 렌더링한 뒤 html2canvas로 캡처해서 jsPDF로 저장한다. 두 분석 버튼을
-  // 미리 안 눌러도 되게, 이 시점에 항상 최신 데이터로 다시 계산한다.
-  const handleDownloadPdf = () => {
-    if (selectedDates.length === 0) {
-      setError('PDF로 받으려면 왼쪽 달력에서 날짜를 먼저 골라주세요')
-      return
-    }
-    // PDF 리포트(오늘의 분석/시간대별 변동성 분석 등)는 전부 "시가 대비 가격 편차" 전제로 짜여있어서,
-    // 밴드 폭 모드에서 그대로 캡처하면 폭 값을 가격인 것처럼 잘못 표시하게 된다 - 가격 모드로
-    // 돌아가야만 받을 수 있게 막는다.
-    if (seriesMode !== 'price') {
-      setError('PDF 리포트는 "가격(시가 대비 편차)" 모드에서만 받을 수 있습니다 - 위 표시 선택을 가격으로 바꿔주세요')
-      return
-    }
-    const hourly = computeHourlyAnalysis(selectedDates)
-    const forward = computeForwardAnalysis(selectedDates)
-    if (!hourly || !forward) return
-    setPdfBuilding(true)
-    setPdfReportData({
-      hourly, forward,
-      series: selectedSeries,
-      symbol,
-      upDays, avgFinal, maxAbs,
-      missingHoursSet: new Set(hourly.missingBuckets.map(idx => Math.floor(idx / BUCKETS_PER_HOUR))),
-    })
-  }
-
-  // pdfReportData가 채워지면(위 handleDownloadPdf) 화면 밖 리포트가 렌더될 때까지 한 프레임 기다린 뒤
-  // 캡처한다 - state 반영 직후엔 아직 새 DOM이 안 그려져 있을 수 있어서 requestAnimationFrame으로 넘긴다.
-  useEffect(() => {
-    if (!pdfReportData) return
-    let cancelled = false
-    ;(async () => {
-      try {
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-        if (cancelled) return
-        drawStaticOverlay(pdfCanvasRef.current, pdfReportData.series)
-        await new Promise(resolve => requestAnimationFrame(resolve))
-        if (cancelled) return
-
-        const html2canvas = (await import('html2canvas')).default
-        const { jsPDF } = await import('jspdf')
-
-        // 캡처 영역을 이 컨테이너의 실제 크기로 못박아서(x/y/width/height/windowWidth/windowHeight)
-        // html2canvas가 문서 전체 스크롤 크기를 기준으로 캔버스를 잡는 걸 막는다 - 216페이지짜리
-        // PDF가 나왔던 원인이 바로 이거였다(화면 밖 -99999px 오프셋과 맞물려 캔버스가 수십만 px로 부풀었음).
-        const target = pdfContainerRef.current
-        const targetWidth = target.scrollWidth
-        const targetHeight = target.scrollHeight
-        const canvas = await html2canvas(target, {
-          backgroundColor: '#0f1115', scale: 2, useCORS: true,
-          x: 0, y: 0, width: targetWidth, height: targetHeight,
-          windowWidth: targetWidth, windowHeight: targetHeight,
-        })
-        const imgData = canvas.toDataURL('image/png')
-        const pdf = new jsPDF('p', 'mm', 'a4')
-        const pageWidth = 210, pageHeight = 297
-        const imgWidth = pageWidth
-        const imgHeight = (canvas.height * imgWidth) / canvas.width
-        let heightLeft = imgHeight
-        let position = 0
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-        heightLeft -= pageHeight
-        while (heightLeft > 0) {
-          position = heightLeft - imgHeight
-          pdf.addPage()
-          pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
-          heightLeft -= pageHeight
-        }
-        const dateLabel = formatDateRangeLabel(pdfReportData.series.map(d => d.date))
-        pdf.save(`easytrade_일중패턴_${pdfReportData.symbol}_${dateLabel}.pdf`)
-      } catch (e) {
-        if (!cancelled) setError(`PDF 생성 실패: ${e.message}`)
-      } finally {
-        if (!cancelled) { setPdfReportData(null); setPdfBuilding(false) }
-      }
-    })()
-    return () => { cancelled = true }
-  }, [pdfReportData])
 
   return (
     <>
@@ -1136,29 +990,14 @@ export default function BacktestIntraday() {
         </header>
 
         <main style={{ maxWidth: 1200, margin: '0 auto', padding: '28px 20px 60px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-            <div>
-              <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>일중 패턴 — 시가 대비 편차 오버레이</h1>
-              <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 20, maxWidth: 760 }}>
-                왼쪽 달력에서 날짜를 하나씩 클릭해서 겹쳐볼 날짜를 골라주세요. 고른 날짜의 종가에서 그날 시가(한국시간 07:00 기준 - 실제 거래 시작 시점)를 뺀 값을 시간대별로 겹쳐 그립니다 - 0선이 07:00 가격입니다. 차트를 드래그하면 좌우로 이동하고, 마우스 휠로 확대/축소할 수 있습니다.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleDownloadPdf}
-              disabled={selectedDates.length === 0 || pdfBuilding}
-              style={{
-                flexShrink: 0, background: pdfBuilding ? '#2a2e38' : '#4CAF50', color: '#fff', border: 'none', borderRadius: 9,
-                padding: '10px 18px', fontSize: 13, fontWeight: 700,
-                cursor: (selectedDates.length === 0 || pdfBuilding) ? 'default' : 'pointer',
-                opacity: selectedDates.length === 0 ? 0.5 : 1,
-              }}
-            >
-              {pdfBuilding ? '⏳ PDF 만드는 중...' : '📄 PDF 다운로드'}
-            </button>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>일중 패턴 — 시가 대비 편차 오버레이</h1>
+            <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 20, maxWidth: 760 }}>
+              왼쪽 달력에서 날짜를 하나씩 클릭해서 겹쳐볼 날짜를 골라주세요. 고른 날짜의 종가에서 그날 시가(한국시간 07:00 기준 - 실제 거래 시작 시점)를 뺀 값을 시간대별로 겹쳐 그립니다 - 0선이 07:00 가격입니다. 차트를 드래그하면 좌우로 이동하고, 마우스 휠로 확대/축소할 수 있습니다.
+            </p>
           </div>
 
-          {/* 하루 24시간(15분 단위 96칸) 중 언제 변동이 몰리는지(=언제 자리를 지키고 있어야 하는지) 별도 분석 */}
+          {/* 하루 25시간(05:00~익일06:00, 15분 단위 100칸) 중 언제 변동이 몰리는지(=언제 자리를 지키고 있어야 하는지) 별도 분석 */}
           <div style={{ marginBottom: 20 }}>
             <button
               type="button"
@@ -1182,10 +1021,10 @@ export default function BacktestIntraday() {
             )}
 
             {hourlyAnalysis && !hourlyAnalysis.error && (() => {
-              const missingHoursSet = new Set(hourlyAnalysis.missingBuckets.map(idx => Math.floor(idx / BUCKETS_PER_HOUR)))
+              const missingHoursSet = new Set(hourlyAnalysis.missingBuckets.map(idx => Math.floor(fromChartOffset(idx * MINUTES_PER_BUCKET) / 60)))
               const caption = (
                 <>
-                  {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 그 15분 구간이 국소 고점/저점(전환점)이었던 날짜에서, 그 다음 전환점까지 실제로 얼마나 움직였는지로 비중을 매김. 막대가 있는 곳 = 여기서부터 지켜보고 있었어야 할 시점, 막대가 없으면 그 구간엔 전환점이 없었다는 뜻(활동량과 무관). 순위 숫자는 96칸 전부 표시(세로쓰기), 상위 3개는 초록색.
+                  {SYMBOL_LABEL[symbol]} · 고른 날짜 {hourlyAnalysis.dayCount}일 기준 - 그 15분 구간이 국소 고점/저점(전환점)이었던 날짜에서, 그 다음 전환점까지 실제로 얼마나 움직였는지로 비중을 매김. 막대가 있는 곳 = 여기서부터 지켜보고 있었어야 할 시점, 막대가 없으면 그 구간엔 전환점이 없었다는 뜻(활동량과 무관). 순위 숫자는 100칸 전부 표시(세로쓰기), 상위 3개는 초록색.
                   {missingHoursSet.size > 0 && (
                     <> · {[...missingHoursSet].sort((a, b) => a - b).map(h => `${String(h).padStart(2, '0')}시`).join(', ')} 구간엔 데이터 없음</>
                   )}
@@ -1217,10 +1056,10 @@ export default function BacktestIntraday() {
             )}
 
             {forwardAnalysis && !forwardAnalysis.error && (() => {
-              const missingHoursSet = new Set(forwardAnalysis.missingBuckets.map(idx => Math.floor(idx / BUCKETS_PER_HOUR)))
+              const missingHoursSet = new Set(forwardAnalysis.missingBuckets.map(idx => Math.floor(fromChartOffset(idx * MINUTES_PER_BUCKET) / 60)))
               const caption = (
                 <>
-                  {SYMBOL_LABEL[symbol]} · 고른 날짜 {forwardAnalysis.dayCount}일 기준 - 전환점 여부와 무관하게, 이 15분 구간에서부터 15분/1시간/2시간/4시간 뒤 가격들과 비교해 그중 가장 많이 움직인 폭으로 비중을 매김. 방향이 안 바뀌고 계속 같은 쪽으로 크게 움직이는 구간도 여기선 잡힘. 순위 숫자는 96칸 전부 표시(세로쓰기), 상위 3개는 초록색.
+                  {SYMBOL_LABEL[symbol]} · 고른 날짜 {forwardAnalysis.dayCount}일 기준 - 전환점 여부와 무관하게, 이 15분 구간에서부터 15분/1시간/2시간/4시간 뒤 가격들과 비교해 그중 가장 많이 움직인 폭으로 비중을 매김. 방향이 안 바뀌고 계속 같은 쪽으로 크게 움직이는 구간도 여기선 잡힘. 순위 숫자는 100칸 전부 표시(세로쓰기), 상위 3개는 초록색.
                   {missingHoursSet.size > 0 && (
                     <> · {[...missingHoursSet].sort((a, b) => a - b).map(h => `${String(h).padStart(2, '0')}시`).join(', ')} 구간엔 데이터 없음</>
                   )}
@@ -1411,85 +1250,6 @@ export default function BacktestIntraday() {
         </main>
       </div>
 
-      {/* PDF 캡처 전용 - 화면엔 안 보이지만(화면 밖으로 밀어둠) html2canvas는 캡처할 수 있게 display:none은 안 씀.
-          예전엔 left:-99999px처럼 극단적으로 멀리 밀어뒀는데, html2canvas가 문서 전체 크기를 그 좌표까지
-          포함해서 계산해버려서 캔버스가 수십만 px로 부풀고 PDF가 200페이지 넘게 나오는 버그가 있었다
-          (사용자가 받아본 파일이 216페이지/21MB였음) - 오프셋을 화면 밖으로 나가기에 충분한 정도(-3000px)로만
-          줄이고, html2canvas 호출에도 캡처 영역을 이 컨테이너 크기로 명시해서 문서 전체를 못 훑게 막는다. */}
-      <div style={{ position: 'fixed', top: 0, left: -3000, zIndex: -1 }}>
-        <div
-          ref={pdfContainerRef}
-          style={{
-            width: 900, background: '#0f1115', color: '#e8eaed', padding: 28,
-            fontFamily: '-apple-system, "Segoe UI", "Malgun Gothic", sans-serif',
-          }}
-        >
-          {pdfReportData && (() => {
-            const { hourly, forward, series, symbol: sym, upDays: pUp, avgFinal: pAvg, maxAbs: pMax, missingHoursSet } = pdfReportData
-            const today = buildTodayAnalysis(hourly, forward, series, sym)
-            const dateLabel = formatDateRangeLabel(series.map(d => d.date))
-            return (
-              <>
-                <h1 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 6px' }}>EasyTrade 백테스팅 — 일중 패턴 분석 리포트</h1>
-                <p style={{ color: '#9aa0ab', fontSize: 12, margin: '0 0 4px' }}>{SYMBOL_LABEL[sym]} · {dateLabel} · 서머타임 적용 시간 라벨</p>
-                <p style={{ color: '#5a5f6a', fontSize: 10, margin: '0 0 18px' }}>생성 시각: {new Date().toLocaleString('ko-KR')} · easytrade 백테스팅 페이지에서 다운로드됨</p>
-
-                {today && (
-                  <div style={{ background: '#171a21', border: '1px solid #4CAF50', borderRadius: 12, padding: 16, marginBottom: 18 }}>
-                    <div style={{ color: '#4CAF50', fontWeight: 800, fontSize: 13, marginBottom: 8 }}>{today.title}</div>
-                    <div style={{ fontSize: 11.5, lineHeight: 1.7 }}>{today.body}</div>
-                  </div>
-                )}
-
-                {renderBucketAnalysisPanel(hourly, (
-                  <>
-                    1번 그래프 — 전환점 분석 · {SYMBOL_NAME[sym]} · {dateLabel} 기준 - 그 15분 구간이 국소 고점/저점(전환점)이었던 날짜에서, 그 다음 전환점까지 실제로 얼마나 움직였는지로 비중을 매김. 순위 숫자는 96칸 전부 표시, 상위 3개는 초록색.
-                    {missingHoursSet.size > 0 && <> · {[...missingHoursSet].sort((a, b) => a - b).map(h => `${String(h).padStart(2, '0')}시`).join(', ')} 구간엔 데이터 없음</>}
-                  </>
-                ))}
-
-                {renderBucketAnalysisPanel(forward, (
-                  <>
-                    2번 그래프 — 최대 이동폭 분석 · {SYMBOL_NAME[sym]} · {dateLabel} 기준 - 전환점 여부와 무관하게, 15분/1시간/2시간/4시간 뒤 가격과 비교해 가장 많이 움직인 폭으로 비중을 매김.
-                  </>
-                ))}
-
-                <div style={{ marginTop: 14, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20 }}>
-                  <div style={{ fontSize: 12, color: '#9aa0ab', marginBottom: 10 }}>3번 그래프 — 시가 대비 편차 오버레이</div>
-                  <canvas ref={pdfCanvasRef} style={{ width: '100%', height: 300, display: 'block' }} />
-                  <div style={{ fontSize: 10.5, color: '#9aa0ab', marginTop: 10, lineHeight: 1.6 }}>
-                    그날 종가에서 그날 시가(07:00 기준)를 뺀 값을 시간대별로 그립니다 - 0선이 07:00 가격입니다. 세로 점선은 세계 주요 시장 개장 시각(아시아 07:00 · 도쿄 09:00 · 홍콩 10:30 · 유럽 16:00 · 미장 22:30).
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                  {[
-                    ['날짜', dateLabel],
-                    ['마감이 시가보다 높은 날', `${pUp} / ${series.length}일`],
-                    ['평균 마감 편차(시가 대비)', `${pAvg.toFixed(1)}pt`],
-                    ['일중 최대 편차폭', `${pMax.toFixed(0)}pt`],
-                  ].map(([k, v]) => (
-                    <div key={k} style={{ flex: 1, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 10, padding: '12px 14px' }}>
-                      <div style={{ color: '#9aa0ab', fontSize: 10.5, marginBottom: 4 }}>{k}</div>
-                      <div style={{ fontSize: 15, fontWeight: 700 }}>{v}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ marginTop: 18, background: '#171a21', border: '1px solid #4CAF50', borderRadius: 12, padding: 16 }}>
-                  <div style={{ fontWeight: 800, fontSize: 12.5, marginBottom: 6 }}>EasyTrade에 오면 원하는 날짜의 과거 데이터를 직접 골라 이 분석을 볼 수 있습니다</div>
-                  <div style={{ color: '#4CAF50', fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>trader-beta-liard.vercel.app/backtest-intraday</div>
-                  <div style={{ color: '#9aa0ab', fontSize: 10 }}>TIP. 이 PDF를 그대로 ChatGPT·Claude 등 원하는 AI에 업로드해서 &quot;왜 이렇게 움직였어?&quot;, &quot;다음엔 언제 지켜봐야 해?&quot; 같은 걸 더 물어봐도 됩니다.</div>
-                </div>
-
-                <div style={{ marginTop: 14, fontSize: 9.5, color: '#5a5f6a' }}>
-                  easytrade — 백테스팅 도구 · 이 리포트는 과거 데이터 기반 참고자료이며 투자 조언이 아닙니다.
-                </div>
-              </>
-            )
-          })()}
-        </div>
-      </div>
     </>
   )
 }
