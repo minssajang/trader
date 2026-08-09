@@ -299,6 +299,23 @@ function findSessionSegmentsIn(rows, startHour, endHour) {
   })
 }
 
+// 패닝 컨텍스트(사용자 요청, 학습과 동일) - fullRows(캐시된 파일들을 합친 전체 rows, 시간순 정렬됨)
+// 에서 anchorDate 기준 바로 다음/이전 "거래일"의 캔들 전체를 반환한다. 주말/휴장일은 파일에 애초에
+// 그 날짜 행이 없으므로 따로 걸러낼 필요 없이 자동으로 건너뛰어진다.
+function findAdjacentDateRows(fullRows, anchorDate, direction) {
+  const dates = []
+  let lastDate = null
+  for (const r of fullRows) {
+    const d = toLocalDateStr(r.time)
+    if (d !== lastDate) { dates.push(d); lastDate = d }
+  }
+  const targetDate = direction === 'before'
+    ? [...dates].reverse().find(d => d < anchorDate)
+    : dates.find(d => d > anchorDate)
+  if (!targetDate) return null
+  return fullRows.filter(r => toLocalDateStr(r.time) === targetDate)
+}
+
 // 리본 전용 - 오를 땐 라임/내릴 땐 레드로(Madrid 원본 색, 사용자 요청 "트레이딩뷰처럼").
 // lightweight-charts는 선 하나 안에서 구간별 색을 못 바꾸므로, 예전엔 상승/하락 구간을 시리즈
 // 2개(라임/레드)로 쪼개서 겹쳐 그리는 방식을 썼는데 - 방향이 짧은 간격으로 자주 바뀌는 구간(예:
@@ -790,6 +807,21 @@ export default function ReplayChart() {
   const intervalRef = useRef(null)
   const indexRef = useRef(0)
   const datasetCacheRef = useRef({}) // dataset.id -> 파싱된 전체 rows (CSV 재요청 방지용)
+  // 패닝 컨텍스트(사용자 요청, 학습과 동일한 기능) - 선택한 날 좌우로 패닝하다 화면 끝에 닿으면 하루씩
+  // 더 불러와 이어붙인다. rowsRef.current(재생 대상인 "그 날") 자체는 절대 안 건드리고 - 그러면 total/
+  // idx/RSI/MACD/횡보 등 "하루 기준" 계산이 전부 안전하다. contextBeforeRef/contextAfterRef는 순수
+  // 참고용 캔들만 담아 차트 시리즈 앞뒤에 붙여서 보여줄 뿐이다. 다만 lightweight-charts의 logical
+  // index는 "차트에 실제로 setData한 배열" 전체 기준이라, 앞에 캔들을 붙이면(contextBeforeRef) 그만큼
+  // 기존 idx 기반 계산(세션박스 fromIndex/toIndex, 이평선 dual-color 선, 라벨링 클릭/호버, 재생 카메라
+  // 추적)이 전부 밀려버린다 - contextOffsetRef(=contextBeforeRef.current.length)를 그 계산들에 더해서 보정한다.
+  const contextBeforeRef = useRef([]) // 선택한 날 이전(과거) 방향으로 미리 불러온 캔들 - [{time,open,high,low,close}]
+  const contextAfterRef = useRef([])  // 선택한 날 이후(미래) 방향으로 미리 불러온 캔들
+  const contextOffsetRef = useRef(0)  // contextBeforeRef.current.length와 항상 동일하게 유지 - 매번 다시 계산 안 하고 캐시
+  const fullRowsRef = useRef([])      // 현재 심볼의 캐시된 파일들을 시간순으로 합친 전체 rows (loadRange가 매번 새로 계산하는 fullRows와 동일한 값을 재사용하기 위해 보관)
+  const loadingContextRef = useRef({ before: false, after: false }) // 패닝 중 같은 방향으로 중복 요청 방지
+  const contextDayCountRef = useRef({ before: 0, after: 0 }) // 방향별로 몇 거래일치 컨텍스트를 불러왔는지 - 재생 자동추적이 우연히 경계 근처를 지나갈 때도 계속 불러오는 걸 막는 상한선용
+  const ensureAdjacentDayLoadedRef = useRef(null) // 차트 생성(마운트 1회) 이펙트가 항상 최신 클로저(datasets/symbol)를 쓰도록 매 렌더 갱신되는 참조
+  const originalSelectionRef = useRef({ date: '', dateTo: '' }) // loadRange가 실제로 불러온 원래 선택(범위) - 패닝으로 컨텍스트 날짜를 보여주다가 원래 구간으로 돌아오면 이 값으로 복원한다
   const bandDataRef = useRef({})     // bandId -> { upper, middle, lower } - 선택한 날짜분, 워밍업 포함해서 계산됨
   const bandSeriesRef = useRef({})   // bandId -> { upper, middle, lower } lightweight-charts 라인 시리즈
   const maDataRef = useRef({})       // maId -> [{time,value}|null] - 선택한 날짜분, 워밍업 포함해서 계산됨
@@ -1023,8 +1055,41 @@ export default function ReplayChart() {
 
     const onResize = () => chart.applyOptions({ width: containerRef.current.clientWidth })
     window.addEventListener('resize', onResize)
+
+    // 화면 좌우 끝(패닝 경계)에 닿으면 하루씩 더 불러온다(사용자 요청). ensureAdjacentDayLoadedRef를
+    // 거치는 이유는 이 이펙트가 마운트 시 딱 한 번만 만들어져 datasets/symbol을 그때 값으로 그대로
+    // 클로저에 가둬버리기 때문 - ref로 우회해서 항상 최신 함수를 부른다.
+    const onVisibleLogicalRangeChange = (range) => {
+      if (!range || !rowsRef.current.length) return
+      const combined = [...contextBeforeRef.current, ...rowsRef.current.slice(0, indexRef.current), ...contextAfterRef.current]
+      if (range.from < 5) ensureAdjacentDayLoadedRef.current?.('before')
+      if (range.to > combined.length - 5) ensureAdjacentDayLoadedRef.current?.('after')
+
+      // 패닝으로 화면에 보이는 날짜가 바뀌면 선택 날짜(달력 강조 + 하단 바 표시)도 같이 옮긴다
+      // (사용자 요청) - 화면 정중앙에 있는 캔들의 날짜를 기준으로 삼는다. 원래 선택했던 구간
+      // (originalSelectionRef, 여러 날 범위일 수도 있음) 안에 있을 땐 그 원래 선택을 그대로 유지하고,
+      // 패닝으로 불러온 컨텍스트(전/후) 쪽으로 넘어갔을 때만 그 컨텍스트 날짜로 바꾼다 - 안 그러면
+      // 화면이 조금만 움직여도 매번 원래 범위 선택(예: 여러 날 선택)이 단일 날짜로 지워져버린다.
+      const beforeLen = contextBeforeRef.current.length
+      const dayLen = rowsRef.current.slice(0, indexRef.current).length
+      const centerLogical = Math.max(0, Math.min(Math.round((range.from + range.to) / 2), combined.length - 1))
+      if (centerLogical < beforeLen) {
+        const c = contextBeforeRef.current[centerLogical]
+        if (c) { setSelectedDate(toLocalDateStr(c.time)); setSelectedDateTo('') }
+      } else if (centerLogical >= beforeLen + dayLen) {
+        const c = contextAfterRef.current[centerLogical - beforeLen - dayLen]
+        if (c) { setSelectedDate(toLocalDateStr(c.time)); setSelectedDateTo('') }
+      } else {
+        const orig = originalSelectionRef.current
+        setSelectedDate(orig.date)
+        setSelectedDateTo(orig.dateTo)
+      }
+    }
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleLogicalRangeChange)
+
     return () => {
       window.removeEventListener('resize', onResize)
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleLogicalRangeChange)
       chart.remove()
     }
   }, [])
@@ -1059,11 +1124,15 @@ export default function ReplayChart() {
 
   // DUAL_COLOR_IDS(리본18+hma60) 전용 - DualColorLinePrimitive는 순수 숫자(또는 null) 배열을 받는다
   // (own/other로 쪼갠 시리즈가 아니라 원본 값 그대로 넘기고, 색은 그릴 때마다 직접 계산함).
+  // DualColorLinePrimitive는 배열 인덱스를 그대로 차트의 logical index로 써서 좌표를 구하므로
+  // (SessionBoxesPrimitive와 같은 이유), 패닝으로 앞에 컨텍스트 캔들이 붙어있으면 그만큼 null을
+  // 앞에 채워 넣어야 값 배열의 인덱스가 차트 logical index와 다시 맞는다.
   const applyDualMAIndex = (maId, idx) => {
     const primitive = maDualPrimitiveRef.current[maId]
     const data = maDataRef.current[maId]
     if (!primitive || !data) return
-    primitive.setPoints(data.slice(0, idx).map(p => p ? p.value : null))
+    const padded = contextOffsetRef.current > 0 ? new Array(contextOffsetRef.current).fill(null) : []
+    primitive.setPoints([...padded, ...data.slice(0, idx).map(p => p ? p.value : null)])
   }
 
   const syncMA = (idx) => {
@@ -1157,7 +1226,7 @@ export default function ReplayChart() {
         if (seg.startIdx >= idx) continue
         const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
         if (clippedEndIdx < seg.startIdx) continue
-        boxes.push({ fromIndex: seg.startIdx, toIndex: clippedEndIdx, high: seg.high, low: seg.low })
+        boxes.push({ fromIndex: seg.startIdx + contextOffsetRef.current, toIndex: clippedEndIdx + contextOffsetRef.current, high: seg.high, low: seg.low })
       }
       primitive.setBoxes(boxes)
     }
@@ -1432,7 +1501,9 @@ export default function ReplayChart() {
 
   const applyIndex = (idx) => {
     const dayRows = rowsRef.current.slice(0, idx)
-    seriesRef.current?.setData(dayRows)
+    // 패닝으로 앞뒤에 불러온 컨텍스트 캔들(사용자 요청)을 항상 같이 붙여서 그린다 - 재생 위치(idx)와
+    // 무관하게 다 보여줘도 되는 이유는 "그 날"의 재생 진행과는 별개인 참고용 데이터라서.
+    seriesRef.current?.setData([...contextBeforeRef.current, ...dayRows, ...contextAfterRef.current])
     // 마커 전용 투명 시리즈는 항상 구간 전체를 앵커로 갖고 있어야 한다 - 재생 위치(idx)까지만 주면
     // 아직 재생 안 된 시각의 마커(특히 재생 위치와 무관하게 항상 표시하는 업로드 매매내역)가 앵커를
     // 못 찾아서 화면 오른쪽 끝에 전부 쏠려 붙는 버그가 있었다. 다른 신호 마커들은 어차피
@@ -1460,8 +1531,15 @@ export default function ReplayChart() {
     if (sidewaysEnabled) applySidewaysBands(to)
     applySessionBands(to)
     const rows = rowsRef.current
+    // 패닝으로 뒤(미래 방향)에 컨텍스트 캔들을 이미 불러온 상태면, 그 컨텍스트 캔들의 시각이 지금
+    // 막 재생으로 드러나는 캔들보다 더 나중 시각이라 update()로 하나씩 이어붙이면 시간 역행이 된다
+    // (lightweight-charts는 시간이 뒤로 가는 update를 허용 안 함) - 그때만 setData로 통째로 다시 그린다.
+    if (contextAfterRef.current.length > 0) {
+      seriesRef.current?.setData([...contextBeforeRef.current, ...rows.slice(0, to), ...contextAfterRef.current])
+    } else {
+      for (let i = from; i < to; i++) seriesRef.current?.update(rows[i])
+    }
     for (let i = from; i < to; i++) {
-      seriesRef.current?.update(rows[i])
       markerSeriesRef.current?.update({ time: rows[i].time, value: rows[i].close })
     }
     syncBands(to)
@@ -1515,6 +1593,7 @@ export default function ReplayChart() {
     setError('')
     setSelectedDate(fromStr)
     setSelectedDateTo(fromStr === toStr ? '' : toStr)
+    originalSelectionRef.current = { date: fromStr, dateTo: fromStr === toStr ? '' : toStr }
 
     // symbol 전환 직후엔 datasets state가 아직 이전 심볼 목록일 수 있다(비동기 fetch가 덜 끝난 사이 클릭한 경우) -
     // d.symbol 체크 없이 날짜 범위만 보면 그 사이에 이전 심볼(예: GOLD) 파일을 잘못 불러오는 버그가 있었다.
@@ -1558,6 +1637,12 @@ export default function ReplayChart() {
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
     setPlayIndex(0)
+    // 새로 날짜를 고르면 이전에 패닝으로 불러둔 앞뒤 컨텍스트 캔들은 의미가 없으니 비운다
+    contextBeforeRef.current = []
+    contextAfterRef.current = []
+    contextOffsetRef.current = 0
+    loadingContextRef.current = { before: false, after: false }
+    contextDayCountRef.current = { before: 0, after: 0 }
     try {
       // 아직 캐시 안 된 파일만 병렬로 받아온다 (캐시된 건 재요청 안 함)
       const toFetch = symbolDatasets.filter(d => !datasetCacheRef.current[d.id])
@@ -1575,6 +1660,7 @@ export default function ReplayChart() {
         for (const r of datasetCacheRef.current[d.id]) mergedByTime.set(r.time, r)
       }
       const fullRows = Array.from(mergedByTime.values()).sort((a, b) => a.time - b.time)
+      fullRowsRef.current = fullRows // ensureAdjacentDayLoaded가 매번 다시 합치지 않고 재사용
 
       // fromStr 그 날짜에 캔들이 하나도 없어도(주말/휴장일) 통째로 실패시키지 않고, 그 날짜 이후
       // 첫 캔들부터 시작한다 - 범위 중간의 주말은 원래도 그냥 건너뛰어지므로, 시작일도 같은 방식으로 맞춤.
@@ -1764,6 +1850,75 @@ export default function ReplayChart() {
     }
     setLoadingCsv(false)
   }
+
+  // 새로 불러온 컨텍스트 캔들(rows)을 앞/뒤에 붙이고 다시 그린다. setData를 다시 부르면 화면이
+  // 기본 위치로 튈 수 있어서, 시간 기준 보이는 범위(getVisibleRange/setVisibleRange)를 그대로
+  // 저장했다가 되돌려서 사용자가 보던 자리 그대로 이어지게 한다(logical 기준은 배열 길이가
+  // 바뀌면 같이 밀리니 여기선 안 쓴다 - 시간은 안 밀린다).
+  const appendContextAndRedraw = (direction, rows) => {
+    if (!rows.length) return
+    contextDayCountRef.current = { ...contextDayCountRef.current, [direction]: contextDayCountRef.current[direction] + 1 }
+    if (direction === 'before') {
+      contextBeforeRef.current = [...rows, ...contextBeforeRef.current]
+      contextOffsetRef.current = contextBeforeRef.current.length
+    } else {
+      contextAfterRef.current = [...contextAfterRef.current, ...rows]
+    }
+    const ts = chartRef.current?.timeScale()
+    const savedRange = ts?.getVisibleRange()
+    const dayRows = rowsRef.current.slice(0, indexRef.current)
+    seriesRef.current?.setData([...contextBeforeRef.current, ...dayRows, ...contextAfterRef.current])
+    if (savedRange) ts?.setVisibleRange(savedRange)
+    // 세션박스/이평선 dual-color 선은 logical index로 그려서, 앞(before)에 캔들이 새로 붙어
+    // offset이 바뀌면 다시 그려야 밀린 위치가 맞다. 뒤(after)는 기존 인덱스에 영향이 없다.
+    if (direction === 'before') {
+      applySessionBands(indexRef.current)
+      Object.keys(maDualPrimitiveRef.current).forEach(maId => applyDualMAIndex(maId, indexRef.current))
+    }
+  }
+
+  const MAX_CONTEXT_DAYS = 5 // 재생 자동추적이 우연히 경계 근처를 지나갈 때도 이 핸들러가 불려서, 방향당 상한을 둬 무한정 불러오지 않게 한다
+  // 패닝하다 화면 끝에 닿으면 호출된다. 캐시된 파일들 안에 인접 거래일이 이미 있으면 바로 쓰고,
+  // 없으면(월 경계 등) 그 방향에서 가장 가까운 아직 안 받은 파일을 하나 더 받아와 합친 뒤 다시 찾는다.
+  // 더 받을 파일도 없으면(데이터의 처음/끝에 도달) 조용히 아무 것도 안 한다.
+  const ensureAdjacentDayLoaded = async (direction) => {
+    if (loadingContextRef.current[direction] || !rowsRef.current.length) return
+    if (contextDayCountRef.current[direction] >= MAX_CONTEXT_DAYS) return
+    loadingContextRef.current[direction] = true
+    try {
+      const edgeRows = direction === 'before' ? contextBeforeRef.current : contextAfterRef.current
+      const anchorRows = edgeRows.length ? edgeRows : rowsRef.current
+      const anchorTime = direction === 'before' ? anchorRows[0].time : anchorRows[anchorRows.length - 1].time
+      const anchorDate = toLocalDateStr(anchorTime)
+
+      let found = findAdjacentDateRows(fullRowsRef.current, anchorDate, direction)
+      if (!found) {
+        const symbolDatasets = datasets.filter(d => d.symbol === symbol)
+        const uncached = symbolDatasets.filter(d => !datasetCacheRef.current[d.id])
+        const candidate = direction === 'before'
+          ? uncached.filter(d => d.date_to < anchorDate).sort((a, b) => b.date_to.localeCompare(a.date_to))[0]
+          : uncached.filter(d => d.date_from > anchorDate).sort((a, b) => a.date_from.localeCompare(b.date_from))[0]
+        if (!candidate) return
+        const res = await fetch(publicUrl(candidate.storage_path))
+        if (!res.ok) return
+        const csvText = await res.text()
+        datasetCacheRef.current[candidate.id] = parseCandleCsv(csvText, summerTime ? BROKER_OFFSET_SECONDS.summer : BROKER_OFFSET_SECONDS.winter).rows
+        const mergedByTime = new Map()
+        for (const d of symbolDatasets) {
+          const rs = datasetCacheRef.current[d.id]
+          if (!rs) continue
+          for (const r of rs) mergedByTime.set(r.time, r)
+        }
+        fullRowsRef.current = Array.from(mergedByTime.values()).sort((a, b) => a.time - b.time)
+        found = findAdjacentDateRows(fullRowsRef.current, anchorDate, direction)
+        if (!found) return
+      }
+      appendContextAndRedraw(direction, found)
+    } finally {
+      loadingContextRef.current[direction] = false
+    }
+  }
+  ensureAdjacentDayLoadedRef.current = ensureAdjacentDayLoaded // 마운트 1회뿐인 차트 이펙트가 이 ref를 통해 항상 최신 함수를 호출하게 함
 
   const loadDate = (dateStr) => loadRange(dateStr, dateStr)
 
@@ -2222,7 +2377,7 @@ export default function ReplayChart() {
       if (seg.startIdx >= idx) continue
       const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
       if (clippedEndIdx < seg.startIdx) continue
-      boxes.push({ fromIndex: seg.startIdx, toIndex: clippedEndIdx, high: seg.high, low: seg.low })
+      boxes.push({ fromIndex: seg.startIdx + contextOffsetRef.current, toIndex: clippedEndIdx + contextOffsetRef.current, high: seg.high, low: seg.low })
     }
     primitive.setBoxes(boxes)
   }
@@ -2269,7 +2424,7 @@ export default function ReplayChart() {
           if (seg.startIdx >= idx) continue
           const clippedEndIdx = Math.min(seg.endIdx, idx - 1)
           if (clippedEndIdx < seg.startIdx) continue
-          boxes.push({ fromIndex: seg.startIdx, toIndex: clippedEndIdx, high: seg.high, low: seg.low })
+          boxes.push({ fromIndex: seg.startIdx + contextOffsetRef.current, toIndex: clippedEndIdx + contextOffsetRef.current, high: seg.high, low: seg.low })
         }
         sessionBandRefs.current[sessionId]?.setBoxes(boxes)
       }
@@ -2914,7 +3069,10 @@ export default function ReplayChart() {
     const ts = chart.timeScale()
     const range = ts.getVisibleLogicalRange()
     const width = range ? (range.to - range.from) : 60
-    ts.setVisibleLogicalRange({ from: idx - width / 2, to: idx + width / 2 })
+    // idx는 rowsRef.current(그 날) 기준 위치라서, 패닝으로 앞에 컨텍스트 캔들이 붙어있으면
+    // 차트의 logical index는 그만큼(contextOffsetRef.current) 더 밀려 있다 - 세션박스 등과 같은 보정.
+    const centerIdx = idx + contextOffsetRef.current
+    ts.setVisibleLogicalRange({ from: centerIdx - width / 2, to: centerIdx + width / 2 })
   }
 
   // 매매목록 클릭 시 진입 시점으로 이동 - 진입이 다른 날짜(전날 등)라 지금 불러온 구간 밖이면
