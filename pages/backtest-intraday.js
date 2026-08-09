@@ -347,11 +347,13 @@ export default function BacktestIntraday() {
     const pad = (hi - lo) * 0.08 || 1
     return { yLo: lo - pad, yHi: hi + pad }
   }, [selectedSeries])
+  // 차트 본문을 위아래로 끌면 세로 위치(0점 포함) 자체가 그만큼 옮겨진다(사용자 요청) - value 단위 오프셋.
+  const [yPan, setYPan] = useState(0)
   const { yLo, yHi } = useMemo(() => {
-    const center = (baseYLo + baseYHi) / 2
+    const center = (baseYLo + baseYHi) / 2 - yPan
     const halfRange = (baseYHi - baseYLo) / 2 / yZoom
     return { yLo: center - halfRange, yHi: center + halfRange }
-  }, [baseYLo, baseYHi, yZoom])
+  }, [baseYLo, baseYHi, yZoom, yPan])
 
   // "평균선 표시" 버튼을 켰을 때만 계산 - 기본은 안 켜져 있으니 매번 계산 안 해도 됨
   const avgMap = useMemo(() => {
@@ -553,6 +555,7 @@ export default function BacktestIntraday() {
       startWindowStart: windowStart,
       startWindowSize: windowSize,
       startYZoom: yZoom,
+      startYPan: yPan,
     }
     setCursorStyle(mode === 'yzoom' ? 'ns-resize' : mode === 'xzoom' ? 'ew-resize' : 'grabbing')
   }
@@ -567,6 +570,7 @@ export default function BacktestIntraday() {
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
     const plotW = rect.width - AXIS_LEFT - 20
+    const plotH = rect.height - 16 - AXIS_BOTTOM
     const drag = dragRef.current
 
     if (drag) {
@@ -575,6 +579,12 @@ export default function BacktestIntraday() {
         const deltaMin = -(deltaPx / plotW) * windowSize
         const maxStart = Math.max(0, 1440 - windowSize)
         setWindowStart(Math.max(0, Math.min(maxStart, Math.round(drag.startWindowStart + deltaMin))))
+
+        // 세로로 끌면 0점을 포함한 세로 위치 자체가 그만큼 옮겨간다(사용자 요청) - 잡고 아래로 끌면
+        // 내용이 손을 따라 아래로 내려온다(가로 팬과 같은 "잡고 끄는" 방향 감각).
+        const deltaPxY = e.clientY - drag.startClientY
+        const valuePerPixel = (yHi - yLo) / plotH
+        setYPan(drag.startYPan - deltaPxY * valuePerPixel)
       } else if (drag.mode === 'yzoom') {
         // 위로 끌면 확대, 아래로 끌면 축소
         const deltaPx = e.clientY - drag.startClientY
