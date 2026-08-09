@@ -491,10 +491,12 @@ class ExactPriceMarkersPrimitive {
 
 // 업로드 매매내역의 "이탈"/롱·숏 진입 화살표가 캔들 옆(aboveBar/belowBar)에 붙으면 다른 캔들·신호에
 // 묻혀 잘 안 보인다는 지적(사용자 요청) - 캔들 가격과 무관하게 pane 맨 위/맨 아래 가장자리에 고정으로
-// 그린다. 청산(exit) 마커는 기존 markers API(aboveBar/belowBar) 그대로 유지, 이탈/진입만 여기로 옮김.
+// 그린다. 청산(exit) 마커도 같은 방식(추가 요청). 이탈/진입이 같은 방향(edge)에 몰릴 때(예: 하단회귀는
+// 이탈도 하단, 진입도 하단) 서로 겹쳐서 화살표가 안 보이는 문제가 있어 row로 세로 단을 나눠 그린다
+// (0=가장자리에 가장 가까움=이탈, 1=그 안쪽=진입/청산).
 class EdgeMarkersPrimitive {
   constructor() {
-    this._points = [] // [{time, edge:'top'|'bottom', color, shape:'arrowUp'|'arrowDown'|'circle', text}]
+    this._points = [] // [{time, edge:'top'|'bottom', row, color, shape:'arrowUp'|'arrowDown'|'circle', text}]
     this._chart = null
     this._requestUpdate = null
   }
@@ -517,8 +519,7 @@ class EdgeMarkersPrimitive {
             const hRatio = scope.horizontalPixelRatio
             const vRatio = scope.verticalPixelRatio
             const margin = 16 * vRatio
-            const topY = margin
-            const bottomY = scope.bitmapSize.height - margin
+            const rowGap = 26 * vRatio
             ctx.save()
             ctx.textAlign = 'center'
             ctx.font = `${Math.round(10 * vRatio)}px sans-serif`
@@ -528,7 +529,8 @@ class EdgeMarkersPrimitive {
               const x = ts.timeToCoordinate(p.time)
               if (x == null) continue
               const px = x * hRatio
-              const py = p.edge === 'top' ? topY : bottomY
+              const rowOffset = margin + (p.row || 0) * rowGap
+              const py = p.edge === 'top' ? rowOffset : scope.bitmapSize.height - rowOffset
               ctx.fillStyle = p.color
               ctx.beginPath()
               if (p.shape === 'circle') {
@@ -1426,6 +1428,13 @@ export default function ReplayChart() {
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
   }
 
+  // 매매목록 패널/차트 마커가 똑같이 쓰는 거래 번호 - 기준은 전체 거래내역(전체관리번호, CSV의
+  // t.num), 그날 캔들 기준 번호(entryIdx+1 등)는 날짜마다 리셋되고 매번 다시 계산되는 값이라
+  // 기준으로 쓰면 안 된다는 지적(사용자 요청) - num이 없는 CSV(전체관리번호 컬럼 없음)에서만
+  // 그날 캔들 번호로 대체한다.
+  const tradeNumLabel = (num, fallbackIdx) =>
+    num != null ? `#${num}` : (fallbackIdx != null ? `#${fallbackIdx + 1}` : '')
+
   // 지금 불러온 구간(rowsRef.current)에 맞춰 업로드한 거래를 진입/청산 마커 + 목록(캔들번호 포함)으로 변환.
   // 재생 위치(idx)와 무관하게 구간 안에 들어오는 건 전부 계산해두고, applyAllMarkers에서 마커를 통째로 얹는다.
   // 목록(uploadedTradeRows)은 "마커가 안 보인다"는 지적 때문에 추가 — 몇 번째 캔들인지 숫자로 보여주고 클릭하면 그 위치로 바로 이동한다.
@@ -1448,34 +1457,36 @@ export default function ReplayChart() {
       const exitIn = t.exitTime >= rangeFrom && t.exitTime <= rangeTo && exitIdx != null
       const breakoutIn = t.breakoutTime != null && t.breakoutTime >= rangeFrom && t.breakoutTime <= rangeTo && breakoutIdx != null
       if (!entryIn && !exitIn && !breakoutIn) continue
+      // 마커 번호는 매매목록 패널과 항상 같은 기준(tradeNumLabel - 전체관리번호가 기본, 사용자 지적)을 쓴다.
       if (breakoutIn) {
         edgeMarkers.push({
           time: t.breakoutTime,
           edge: t.breakoutDir === '상단' ? 'top' : 'bottom',
+          row: 0, // 이탈은 가장자리에 가장 가깝게 - 같은 edge를 쓰는 진입(row 1)과 안 겹치게
           color: '#FFC107',
           shape: 'circle',
-          text: '이탈',
+          text: `${tradeNumLabel(t.num, breakoutIdx)} 이탈`,
         })
       }
       if (entryIn) {
         edgeMarkers.push({
           time: t.entryTime,
           edge: t.dir === 'long' ? 'bottom' : 'top',
+          row: 1,
           color: t.dir === 'long' ? '#C6FF00' : '#AB47BC',
           shape: t.dir === 'long' ? 'arrowUp' : 'arrowDown',
           // 나쁜 조합(건당평균 마이너스로 분류된 1차/2차/3차 조합) 진입은 가격 앞에 ⚠로 표시
-          text: (t.comboLabel === '나쁜' ? '⚠ ' : '') + t.entryPrice.toFixed(2),
+          text: `${tradeNumLabel(t.num, entryIdx)} ${t.comboLabel === '나쁜' ? '⚠ ' : ''}${t.entryPrice.toFixed(2)}`,
         })
       }
       if (exitIn) {
-        // "몇 번 거래의 익절/손절인지" 요청 - 전체관리번호(#num) + 익절/손절 라벨을 가격 앞에 같이 적는다
-        const numLabel = t.num != null ? `#${t.num} ` : ''
         edgeMarkers.push({
           time: t.exitTime,
           edge: t.dir === 'long' ? 'top' : 'bottom',
+          row: 1,
           color: uploadedExitColor(t.exitReason),
           shape: 'circle',
-          text: `${numLabel}${uploadedExitLabel(t.exitReason)} ${t.exitPrice.toFixed(2)}`,
+          text: `${tradeNumLabel(t.num, exitIdx)} ${uploadedExitLabel(t.exitReason)} ${t.exitPrice.toFixed(2)}`,
         })
       }
       listRows.push({
@@ -3221,15 +3232,15 @@ export default function ReplayChart() {
                                 </div>
                               )}
                               <div style={{ marginTop: 1 }}>
-                                {r.entryIdx != null ? `#${r.entryIdx + 1}(${fmtHm(r.entryTime)})` : '이전구간'}
+                                {r.entryIdx != null ? `${tradeNumLabel(r.num, r.entryIdx)}(${fmtHm(r.entryTime)})` : '이전구간'}
                                 {' → '}
                                 <span style={{ color: uploadedExitColor(r.exitReason) }}>
-                                  {r.exitIdx != null ? `#${r.exitIdx + 1}(${fmtHm(r.exitTime)})` : '다음구간'}
+                                  {r.exitIdx != null ? `${tradeNumLabel(r.num, r.exitIdx)}(${fmtHm(r.exitTime)})` : '다음구간'}
                                 </span>
                               </div>
                               <div style={{ color: r.breakoutTime != null ? '#FFC107' : '#6b7280', marginTop: 1 }}>
                                 {r.breakoutTime != null
-                                  ? `${r.breakoutDir || ''}이탈: ${r.breakoutIdx != null ? `#${r.breakoutIdx + 1}(${fmtHm(r.breakoutTime)})` : fmtHm(r.breakoutTime)}`
+                                  ? `${r.breakoutDir || ''}이탈: ${r.breakoutIdx != null ? `${tradeNumLabel(r.num, r.breakoutIdx)}(${fmtHm(r.breakoutTime)})` : fmtHm(r.breakoutTime)}`
                                   : '이탈: 크로스전환(새 돌파 없음)'}
                               </div>
                               <div style={{ color: '#6b7280', marginTop: 1 }}>
