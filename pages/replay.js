@@ -518,25 +518,32 @@ class EdgeMarkersPrimitive {
             const ctx = scope.context
             const hRatio = scope.horizontalPixelRatio
             const vRatio = scope.verticalPixelRatio
-            const margin = 16 * vRatio
-            const rowGap = 26 * vRatio
+            const margin = 18 * vRatio
+            const rowGap = 34 * vRatio
             ctx.save()
             ctx.textAlign = 'center'
-            ctx.font = `${Math.round(10 * vRatio)}px sans-serif`
+            ctx.font = `bold ${Math.round(13 * vRatio)}px sans-serif` // 글씨/화살표 크기 키움(사용자 요청)
             ctx.strokeStyle = '#0f1115'
-            ctx.lineWidth = 1 * hRatio
+            ctx.lineWidth = 1.3 * hRatio
+            const lineHeight = 15 * vRatio
             for (const p of this._points) {
               const x = ts.timeToCoordinate(p.time)
               if (x == null) continue
               const px = x * hRatio
-              const rowOffset = margin + (p.row || 0) * rowGap
-              const py = p.edge === 'top' ? rowOffset : scope.bitmapSize.height - rowOffset
+              const lines = p.text ? p.text.split('\n') : []
+              // 텍스트가 가장자리에 가장 가깝고, 화살표/원은 그 텍스트 블록 너머(가장자리 반대쪽, pane
+              // 안쪽)에 그린다 - 아래쪽 가장자리에서 화면을 위→아래로 읽으면 화살표가 맨 처음, 위쪽
+              // 가장자리에서는 반대로 화살표가 맨 마지막에 오게 됨(사용자 요청).
+              const edgeAnchor = margin + (p.row || 0) * rowGap
+              const shapeDist = edgeAnchor + lines.length * lineHeight
+              const toY = (distFromEdge) => p.edge === 'top' ? distFromEdge : scope.bitmapSize.height - distFromEdge
+              const py = toY(shapeDist)
               ctx.fillStyle = p.color
               ctx.beginPath()
               if (p.shape === 'circle') {
-                ctx.arc(px, py, 4 * vRatio, 0, Math.PI * 2)
+                ctx.arc(px, py, 6 * vRatio, 0, Math.PI * 2)
               } else {
-                const w = 5 * hRatio, h = 8 * vRatio
+                const w = 7 * hRatio, h = 11 * vRatio
                 if (p.shape === 'arrowUp') {
                   ctx.moveTo(px, py - h / 2)
                   ctx.lineTo(px - w, py + h / 2)
@@ -550,10 +557,10 @@ class EdgeMarkersPrimitive {
               }
               ctx.fill()
               ctx.stroke()
-              if (p.text) {
-                const ty = p.edge === 'top' ? py + 14 * vRatio : py - 12 * vRatio
-                ctx.fillText(p.text, px, ty)
-              }
+              lines.forEach((line, i) => {
+                const ty = toY(edgeAnchor + i * lineHeight)
+                ctx.fillText(line, px, ty)
+              })
             }
             ctx.restore()
           })
@@ -1469,24 +1476,29 @@ export default function ReplayChart() {
         })
       }
       if (entryIn) {
+        // 한 줄에 몰아넣지 말고 번호/가격을 줄바꿈으로 분리(사용자 요청) - 도형에 가까운 줄부터
+        // 번호 → 가격 순. 나쁜 조합(건당평균 마이너스로 분류된 1차/2차/3차 조합) 진입은 가격 앞에 ⚠
+        // 표시하고, 방향색(롱/숏) 대신 경고색(빨강)으로 화살표+글자 전부 덮어써서 눈에 띄게 한다(사용자 요청).
+        const isBad = t.comboLabel === '나쁜'
         edgeMarkers.push({
           time: t.entryTime,
           edge: t.dir === 'long' ? 'bottom' : 'top',
           row: 1,
-          color: t.dir === 'long' ? '#C6FF00' : '#AB47BC',
+          color: isBad ? '#F44336' : (t.dir === 'long' ? '#C6FF00' : '#AB47BC'),
           shape: t.dir === 'long' ? 'arrowUp' : 'arrowDown',
-          // 나쁜 조합(건당평균 마이너스로 분류된 1차/2차/3차 조합) 진입은 가격 앞에 ⚠로 표시
-          text: `${tradeNumLabel(t.num, entryIdx)} ${t.comboLabel === '나쁜' ? '⚠ ' : ''}${t.entryPrice.toFixed(2)}`,
+          text: `${tradeNumLabel(t.num, entryIdx)}\n${isBad ? '⚠ ' : ''}${t.entryPrice.toFixed(2)}`,
         })
       }
       if (exitIn) {
+        // 줄바꿈 분리(사용자 요청) - 도형에 가까운 줄부터 익절/손절+손익 → 번호 → 가격 순
+        const pnlLabel = `${uploadedExitLabel(t.exitReason)} / ${t.pnl > 0 ? '+' : ''}${t.pnl.toFixed(1)}pt`
         edgeMarkers.push({
           time: t.exitTime,
           edge: t.dir === 'long' ? 'top' : 'bottom',
           row: 1,
           color: uploadedExitColor(t.exitReason),
           shape: 'circle',
-          text: `${tradeNumLabel(t.num, exitIdx)} ${uploadedExitLabel(t.exitReason)} ${t.exitPrice.toFixed(2)}`,
+          text: `${pnlLabel}\n${tradeNumLabel(t.num, exitIdx)}\n${t.exitPrice.toFixed(2)}`,
         })
       }
       listRows.push({
