@@ -676,17 +676,15 @@ export default function BacktestIntraday() {
     window.location.reload()
   }
 
-  // 달력 클릭 = 그 날짜를 선택 목록에 넣거나 뺀다(토글). availableDates는 데이터셋 범위 전체 기준이라
-  // 주말이나 (경계에 걸려 잘려서) 오버레이에서 빠진 날도 "데이터 있음"으로 클릭 가능하게 나올 수 있어서,
-  // 실제로 days 안에 있는(완전한 거래일인) 날짜만 선택 가능하게 막는다.
+  // 달력 클릭 = 그 날짜를 선택 목록에 넣거나 뺀다(토글). replay.js(loadDate/loadRange)는 데이터
+  // 유무를 미리 안 따지고 그냥 시도부터 하고, 없으면 그 결과가 자연히 비어 보일 뿐이다 - 여기서도
+  // 사전에 막지 않고 똑같이 일단 선택목록에 넣는다(사용자 지적 - "리플레이에선 시도라도 하는데
+  // 여기선 클릭도 안 먹힌다"). 데이터가 없는 날을 골라도 오버레이 차트엔 그냥 아무것도 안 그려질 뿐,
+  // 에러로 막지 않는다.
   // Shift+클릭하면 직전 클릭 날짜(anchor)부터 지금 클릭한 날짜까지 구간 안의 거래일을 한번에 전부
   // 선택목록에 추가한다(replay.js의 범위선택을 이식 - 사용자 요청). 이 페이지는 원래도 클릭할 때마다
   // 목록에 "추가"되는 방식이라 replay.js처럼 별도 "여러 날 선택 모드" 스위치 없이 Shift+클릭만으로 충분.
   const handleDayClick = (dateStr, shiftKey) => {
-    if (!days.some(d => d.date === dateStr)) {
-      setError('이 날짜는 완전한 거래일이 아니라 겹쳐볼 수 없습니다(주말이거나 캔들 수 부족)')
-      return
-    }
     setError('')
     if (shiftKey && rangeAnchorRef.current) {
       const anchor = rangeAnchorRef.current
