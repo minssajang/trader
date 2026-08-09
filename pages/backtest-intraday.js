@@ -133,6 +133,9 @@ export default function BacktestIntraday() {
   // 뺀다 - 처음에 자동으로 켜지게 만들었더니 "개별 밴드만 보려고 체크했는데 왜 마음대로 겹쳐서
   // 보여주냐"는 지적(사용자) - 기본은 꺼짐, 원할 때만 켠다.
   const [showIntersection, setShowIntersection] = useState(rs.showIntersection ?? false)
+  // 선 겹침 강조도 교집합과 마찬가지로 자동으로 안 켜지게 별도 토글(사용자 요청 - "1분선이랑 5분선이
+  // 겹치는 곳만 형광선으로"). 기본은 꺼짐.
+  const [showLineMatch, setShowLineMatch] = useState(rs.showLineMatch ?? false)
   // 지금 보고 있는 구간 - 드래그(팬)로 시작 위치를, 휠(줌)로 폭을 바꾼다
   const [windowStart, setWindowStart] = useState(0)
   const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
@@ -161,10 +164,10 @@ export default function BacktestIntraday() {
       window.localStorage.setItem(INTRADAY_SETTINGS_KEY, JSON.stringify({
         symbol,
         viewMonth: { y: viewMonth.getFullYear(), m: viewMonth.getMonth() },
-        selectedDates, showAverage, enabledOverlay, overlayLineVisibility, showIntersection,
+        selectedDates, showAverage, enabledOverlay, overlayLineVisibility, showIntersection, showLineMatch,
       }))
     } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 */ }
-  }, [symbol, viewMonth, selectedDates, showAverage, enabledOverlay, overlayLineVisibility, showIntersection])
+  }, [symbol, viewMonth, selectedDates, showAverage, enabledOverlay, overlayLineVisibility, showIntersection, showLineMatch])
 
   useEffect(() => {
     let ignore = false
@@ -318,7 +321,40 @@ export default function BacktestIntraday() {
             intersection = { upper, mid, lower }
           }
 
-          nextDays.push({ date, points, overlays, intersection })
+          // 선 겹침 강조(사용자 요청 - "1분선이랑 5분선이 겹치는 곳만 형광선으로") - 체크한 밴드들 중
+          // 상단끼리(또는 하단끼리) 정확히 같은 값을 갖는 지점을 찾는다. 도치안은 "최근 N개 중 최고/최저"라
+          // 짧은 기간의 극값이 긴 기간의 극값과 같은 캔들이면(=그 극값이 아주 최근에 생겼으면) 두 선이
+          // 정확히 같은 값으로 겹친다 - 그래서 "가로 직선(도치안 특유의 계단식 선)" 중에 이런 겹침이 보인다.
+          // 연속된 시각만 하나의 형광 구간으로 묶고, 끊기면 별도 구간으로 나눈다(선끼리 이어붙이지 않음).
+          let matchUpperSegments = [], matchLowerSegments = []
+          if (activeBandIds.length >= 2) {
+            const findMatchSegments = (mapsArr) => {
+              const offsetSet = new Set()
+              for (const m of mapsArr) for (const off of m.keys()) offsetSet.add(off)
+              const offsets = [...offsetSet].sort((a, b) => a - b)
+              const matchPoints = []
+              for (const off of offsets) {
+                const vals = mapsArr.map(m => m.get(off)).filter(v => v != null)
+                const counts = new Map()
+                for (const v of vals) counts.set(v, (counts.get(v) || 0) + 1)
+                let matchedVal = null
+                for (const [v, c] of counts) { if (c >= 2) { matchedVal = v; break } }
+                if (matchedVal != null) matchPoints.push([off, matchedVal])
+              }
+              const segments = []
+              let cur = []
+              for (const p of matchPoints) {
+                if (cur.length && p[0] !== cur[cur.length - 1][0] + 1) { segments.push(cur); cur = [] }
+                cur.push(p)
+              }
+              if (cur.length) segments.push(cur)
+              return segments
+            }
+            matchUpperSegments = findMatchSegments(upperMaps)
+            matchLowerSegments = findMatchSegments(lowerMaps)
+          }
+
+          nextDays.push({ date, points, overlays, intersection, matchUpperSegments, matchLowerSegments })
           nextDayRows[date] = rows // "시간대별 변동성 분석"은 편차가 아니라 원본 high/low/close가 필요해서 따로 보관
         }
         if (!ignore) {
@@ -565,6 +601,27 @@ export default function BacktestIntraday() {
         }
         ctx.globalAlpha = 1
       }
+
+      // 선 겹침 강조(사용자 요청) - 체크한 밴드들 상단끼리/하단끼리 정확히 같은 값을 갖는 구간만
+      // 형광색으로 따로 그린다. 연속된 시각끼리만 하나의 선으로 잇고 끊긴 구간은 이어붙이지 않는다.
+      if (showLineMatch) {
+        ctx.strokeStyle = '#CCFF00'
+        ctx.globalAlpha = 1
+        ctx.lineWidth = 3
+        for (const segments of [d.matchUpperSegments, d.matchLowerSegments]) {
+          if (!segments) continue
+          for (const seg of segments) {
+            ctx.beginPath()
+            let started4 = false
+            seg.forEach(([mnt, v]) => {
+              if (!inWindow(mnt)) return
+              const x = px(mnt), y = py(v)
+              if (!started4) { ctx.moveTo(x, y); started4 = true } else ctx.lineTo(x, y)
+            })
+            ctx.stroke()
+          }
+        }
+      }
     })
 
     if (showAverage && n >= 2) {
@@ -589,7 +646,7 @@ export default function BacktestIntraday() {
       ctx.beginPath(); ctx.moveTo(hx, 16); ctx.lineTo(hx, H - 34); ctx.stroke()
       ctx.globalAlpha = 1
     }
-  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd, windowSize, overlayLineVisibility, showIntersection])
+  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd, windowSize, overlayLineVisibility, showIntersection, showLineMatch])
 
   useEffect(() => {
     draw()
@@ -735,7 +792,7 @@ export default function BacktestIntraday() {
         symbol,
         viewMonth: { y: viewMonth.getFullYear(), m: viewMonth.getMonth() },
         selectedDates,
-        showAverage: false, enabledOverlay: {}, overlayLineVisibility: {}, showIntersection: false,
+        showAverage: false, enabledOverlay: {}, overlayLineVisibility: {}, showIntersection: false, showLineMatch: false,
       }))
     } catch { /* ignore */ }
     window.location.reload()
@@ -1239,10 +1296,18 @@ export default function BacktestIntraday() {
                   {/* 밴드 체크만 해도 자동으로 겹쳐 나오지 않게 별도 토글로 분리(사용자 지적) - 2개
                       이상 켰을 때만 의미가 있으니 그때만 노출한다. */}
                   {Object.values(enabledOverlay).filter(Boolean).length >= 2 && (
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={showIntersection} onChange={e => setShowIntersection(e.target.checked)} style={{ width: 13, height: 13, margin: 0 }} />
-                      교집합 표시
-                    </label>
+                    <>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={showIntersection} onChange={e => setShowIntersection(e.target.checked)} style={{ width: 13, height: 13, margin: 0 }} />
+                        교집합 표시
+                      </label>
+                      {/* 도치안 상단끼리/하단끼리 값이 정확히 같아지는 구간만 형광선으로(사용자 요청 -
+                          "1분선이랑 5분선이 겹치는 곳만 형광선으로") - 이것도 자동으로 안 켜지게 별도 토글. */}
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={showLineMatch} onChange={e => setShowLineMatch(e.target.checked)} style={{ width: 13, height: 13, margin: 0, accentColor: '#CCFF00' }} />
+                        선 겹침 강조
+                      </label>
+                    </>
                   )}
                   <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#e8eaed' }}>{fmtHM(windowStart)} ~ {fmtHM(windowEnd + 1)}</span>
                   <button
