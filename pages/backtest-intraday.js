@@ -129,6 +129,10 @@ export default function BacktestIntraday() {
   const toggleOverlayLine = (bandId, which) => {
     setOverlayLineVisibility(prev => ({ ...prev, [`${bandId}:${which}`]: !isOverlayLineVisible(bandId, which) }))
   }
+  // 교집합(체크한 밴드들이 전부 겹치는 구간) 표시는 밴드 체크와 자동으로 같이 켜지지 않고 별도 토글로
+  // 뺀다 - 처음에 자동으로 켜지게 만들었더니 "개별 밴드만 보려고 체크했는데 왜 마음대로 겹쳐서
+  // 보여주냐"는 지적(사용자) - 기본은 꺼짐, 원할 때만 켠다.
+  const [showIntersection, setShowIntersection] = useState(rs.showIntersection ?? false)
   // 지금 보고 있는 구간 - 드래그(팬)로 시작 위치를, 휠(줌)로 폭을 바꾼다
   const [windowStart, setWindowStart] = useState(0)
   const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
@@ -157,10 +161,10 @@ export default function BacktestIntraday() {
       window.localStorage.setItem(INTRADAY_SETTINGS_KEY, JSON.stringify({
         symbol,
         viewMonth: { y: viewMonth.getFullYear(), m: viewMonth.getMonth() },
-        selectedDates, showAverage, enabledOverlay, overlayLineVisibility,
+        selectedDates, showAverage, enabledOverlay, overlayLineVisibility, showIntersection,
       }))
     } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 */ }
-  }, [symbol, viewMonth, selectedDates, showAverage, enabledOverlay, overlayLineVisibility])
+  }, [symbol, viewMonth, selectedDates, showAverage, enabledOverlay, overlayLineVisibility, showIntersection])
 
   useEffect(() => {
     let ignore = false
@@ -545,7 +549,7 @@ export default function BacktestIntraday() {
       // 교집합(사용자 요청) - 체크한 밴드 2개 이상이 전부 겹치는 가장 좁은 구간을 흰색 굵은 선으로
       // 도드라지게 그린다. 개별 밴드 색상과 안 겹치게 흰색 고정, 상/중/하 전부 표시(개별 상/중/하
       // 토글과는 무관 - 교집합은 파생값이라 항상 다 보여줌).
-      if (d.intersection) {
+      if (showIntersection && d.intersection) {
         ctx.strokeStyle = '#FFFFFF'
         ctx.globalAlpha = 0.9
         ctx.lineWidth = 1.8
@@ -585,7 +589,7 @@ export default function BacktestIntraday() {
       ctx.beginPath(); ctx.moveTo(hx, 16); ctx.lineTo(hx, H - 34); ctx.stroke()
       ctx.globalAlpha = 1
     }
-  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd, windowSize, overlayLineVisibility])
+  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd, windowSize, overlayLineVisibility, showIntersection])
 
   useEffect(() => {
     draw()
@@ -731,7 +735,7 @@ export default function BacktestIntraday() {
         symbol,
         viewMonth: { y: viewMonth.getFullYear(), m: viewMonth.getMonth() },
         selectedDates,
-        showAverage: false, enabledOverlay: {}, overlayLineVisibility: {},
+        showAverage: false, enabledOverlay: {}, overlayLineVisibility: {}, showIntersection: false,
       }))
     } catch { /* ignore */ }
     window.location.reload()
@@ -1230,6 +1234,14 @@ export default function BacktestIntraday() {
                     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                       <input type="checkbox" checked={showAverage} onChange={e => setShowAverage(e.target.checked)} style={{ width: 13, height: 13, margin: 0 }} />
                       평균선 표시
+                    </label>
+                  )}
+                  {/* 밴드 체크만 해도 자동으로 겹쳐 나오지 않게 별도 토글로 분리(사용자 지적) - 2개
+                      이상 켰을 때만 의미가 있으니 그때만 노출한다. */}
+                  {Object.values(enabledOverlay).filter(Boolean).length >= 2 && (
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={showIntersection} onChange={e => setShowIntersection(e.target.checked)} style={{ width: 13, height: 13, margin: 0 }} />
+                      교집합 표시
                     </label>
                   )}
                   <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#e8eaed' }}>{fmtHM(windowStart)} ~ {fmtHM(windowEnd + 1)}</span>
