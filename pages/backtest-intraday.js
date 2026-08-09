@@ -1127,13 +1127,18 @@ export default function BacktestIntraday() {
               {selectedDates.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
-                    <span style={{ fontSize: 11, color: '#9aa0ab' }}>고른 날짜 {selectedDates.length}개</span>
+                    {/* replay.js 재생바의 "0/1,020봉"처럼 몇 일 골랐고 그 안에 캔들(봉)이 몇 개인지 바로
+                        보이게(사용자 요청) - 실제 데이터가 들어왔는지 눈으로 바로 확인할 수 있어서 디버깅에도 씀. */}
+                    <span style={{ fontSize: 11, color: '#9aa0ab' }}>
+                      고른 날짜 {selectedDates.length}개 · 총 {selectedDates.reduce((sum, d) => sum + (dayRowsRef.current[d]?.length || 0), 0).toLocaleString()}봉
+                    </span>
                     <button type="button" onClick={() => setSelectedDates([])} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#9aa0ab', cursor: 'pointer', fontSize: 11 }}>전체 지우기</button>
                   </div>
                   {selectedDates.map((date, i) => (
                     <div key={date} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#e8eaed' }}>
                       <span style={{ width: 10, height: 10, borderRadius: 3, background: dayColor(i), display: 'inline-block', flexShrink: 0 }} />
                       <span style={{ flex: 1 }}>{date}</span>
+                      <span style={{ fontSize: 10.5, color: '#5a5f6a' }}>{(dayRowsRef.current[date]?.length || 0).toLocaleString()}봉</span>
                       <button type="button" onClick={() => handleDayClick(date)} style={{ background: 'none', border: 'none', color: '#9aa0ab', cursor: 'pointer', fontSize: 13, padding: 0 }}>✕</button>
                     </div>
                   ))}
