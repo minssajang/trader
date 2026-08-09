@@ -1019,8 +1019,16 @@ export default function ReplayChart() {
     const onVisibleLogicalRangeChange = (range) => {
       if (!range || !rowsRef.current.length) return
       const combined = [...contextBeforeRef.current, ...rowsRef.current.slice(0, indexRef.current), ...contextAfterRef.current]
-      if (range.from < 5) ensureAdjacentDayLoadedRef.current?.('before')
-      if (range.to > combined.length - 5) ensureAdjacentDayLoadedRef.current?.('after')
+      // 재생을 끝까지 다 돌리고 나면(또는 매매내역 CSV로 전체를 바로 펼치면) 그 순간 auto-fit으로
+      // range.from≈0, range.to≈전체길이가 되어 "패닝해서 경계에 닿음" 조건을 항상 만족해버린다 -
+      // 실제로 패닝을 안 했는데도 옆날짜가 자동으로 이어붙는 버그였다(학습에서 먼저 발견, 사용자 지적).
+      // 화면 폭이 전체 구간보다 뚜렷이 좁을 때(=실제로 확대해서 일부만 보고 있을 때)만 경계 판정을 한다.
+      const visibleWidth = range.to - range.from
+      const isZoomedIn = visibleWidth < combined.length * 0.9
+      if (isZoomedIn) {
+        if (range.from < 5) ensureAdjacentDayLoadedRef.current?.('before')
+        if (range.to > combined.length - 5) ensureAdjacentDayLoadedRef.current?.('after')
+      }
 
       // 패닝으로 화면에 보이는 날짜가 바뀌면 선택 날짜(달력 강조 + 하단 바 표시)도 같이 옮긴다
       // (사용자 요청) - 화면 정중앙에 있는 캔들의 날짜를 기준으로 삼는다. 원래 선택했던 구간
@@ -1816,7 +1824,10 @@ export default function ReplayChart() {
     if (savedRange) ts?.setVisibleRange(savedRange)
   }
 
-  const MAX_CONTEXT_DAYS = 5 // 재생 자동추적이 우연히 경계 근처를 지나갈 때도 이 핸들러가 불려서, 방향당 상한을 둬 무한정 불러오지 않게 한다
+  // 고정 ±1일이 아니라 "패닝해서 경계에 닿을 때마다 그 방향으로 하루씩 계속" 이어붙이는 방식(사용자
+  // 확인) - isZoomedIn 가드로 자동추적 오탐 버그는 이미 막혀있으니, 여기 상한은 그냥 안전장치(무한
+  // 로딩 방지)일 뿐 실사용에서 걸릴 일은 거의 없게 넉넉히 잡는다.
+  const MAX_CONTEXT_DAYS = 20
   // 패닝하다 화면 끝에 닿으면 호출된다. 캐시된 파일들 안에 인접 거래일이 이미 있으면 바로 쓰고,
   // 없으면(월 경계 등) 그 방향에서 가장 가까운 아직 안 받은 파일을 하나 더 받아와 합친 뒤 다시 찾는다.
   // 더 받을 파일도 없으면(데이터의 처음/끝에 도달) 조용히 아무 것도 안 한다.
