@@ -90,22 +90,13 @@ const INTRADAY_SETTINGS_KEY = 'intradayPatternSettings'
 // backtest-chart.js의 서머타임 토글과 같은 개념이지만, 이 페이지는 달 단위로 통으로 보기 때문에
 // 별도 상태 없이 항상 서머타임 오프셋을 쓴다(데이터 자체가 전부 2026년 여름 구간).
 export default function BacktestIntraday() {
-  // 마운트 시 딱 한 번만 localStorage를 읽어서 ref에 담아둔다(렌더 중 계산이라 useEffect보다 먼저 값이 준비됨).
-  const settingsRestoreRef = useRef(undefined)
-  if (settingsRestoreRef.current === undefined) {
-    settingsRestoreRef.current = null
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = window.localStorage.getItem(INTRADAY_SETTINGS_KEY)
-        if (raw) settingsRestoreRef.current = JSON.parse(raw)
-      } catch { /* 저장된 값이 깨져있으면 그냥 무시하고 기본값으로 시작 */ }
-    }
-  }
-  const rs = settingsRestoreRef.current || {}
-
-  const [symbol, setSymbol] = useState(rs.symbol ?? 'NASDAQ')
+  // ⚠ localStorage는 SSR(서버)에는 없고 브라우저에만 있다 - 렌더 도중(useState 초깃값)에 바로 읽으면
+  // 서버가 그린 HTML(항상 기본값)과 브라우저의 첫 렌더(복원된 값)가 서로 달라져서 React hydration
+  // 에러(#418/#425/#423)가 난다(실제로 발생 - 콘솔에 찍혔었음). 그래서 모든 state는 SSR과 똑같은
+  // 기본값으로 시작하고, 복원은 마운트 후 useEffect(아래, 브라우저에서만 실행됨)에서 한다.
+  const [symbol, setSymbol] = useState('NASDAQ')
   const [datasets, setDatasets] = useState([])
-  const [viewMonth, setViewMonth] = useState(() => rs.viewMonth ? new Date(rs.viewMonth.y, rs.viewMonth.m, 1) : new Date())
+  const [viewMonth, setViewMonth] = useState(() => new Date())
   const [days, setDays] = useState([]) // [{date, points:[[minute, deviation]]}]
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -113,18 +104,18 @@ export default function BacktestIntraday() {
   // 달력에서 클릭해서 고른 날짜들만 겹쳐 그린다 - 처음엔 아무것도 안 골랐으니 차트가 비어있다
   // (예전엔 그 달 전체를 자동으로 다 그렸는데, "왜 선이 미리 그려져 있냐"는 피드백으로 사용자가
   // 직접 고른 날짜만 그리는 방식으로 바꿈)
-  const [selectedDates, setSelectedDates] = useState(rs.selectedDates ?? [])
+  const [selectedDates, setSelectedDates] = useState([])
   // 평균선은 기본으로 자동으로 안 그리고, 이 버튼을 켜야만 그린다(사용자 요청 - 시키지 않은 걸
   // 자동으로 하지 말고 옵션 버튼으로 빼둘 것)
-  const [showAverage, setShowAverage] = useState(rs.showAverage ?? false)
+  const [showAverage, setShowAverage] = useState(false)
   // 각 날짜의 가격선 위에 그 날의 볼린저/도치안 밴드(상단·중심·하단)도 "시가(0선) 기준" 같은 스케일로
   // 겹쳐 그린다(사용자 요청 - "중심선을 기준으로 밴드를 보여줘야 할 거 아니냐"). 왼쪽 체크박스로 여러
   // 개를 동시에 켤 수 있어야 서로 겹쳐볼 수 있다(사용자 요청) - bandId -> boolean.
-  const [enabledOverlay, setEnabledOverlay] = useState(rs.enabledOverlay ?? {})
+  const [enabledOverlay, setEnabledOverlay] = useState({})
   const toggleOverlay = (bandId) => setEnabledOverlay(prev => ({ ...prev, [bandId]: !prev[bandId] }))
   // 위/중심/아래 각 줄을 따로 숨길 수도 있게 - replay.js/backtest-chart.js와 완전히 동일한 기능(사용자
   // 요청 - "리플레이와 똑같이 만들어두라니까" 체크박스만 있고 이게 빠져있었음). 기본은 다 보임(true).
-  const [overlayLineVisibility, setOverlayLineVisibility] = useState(rs.overlayLineVisibility ?? {})
+  const [overlayLineVisibility, setOverlayLineVisibility] = useState({})
   const isOverlayLineVisible = (bandId, which) => overlayLineVisibility[`${bandId}:${which}`] !== false
   const toggleOverlayLine = (bandId, which) => {
     setOverlayLineVisibility(prev => ({ ...prev, [`${bandId}:${which}`]: !isOverlayLineVisible(bandId, which) }))
@@ -132,10 +123,10 @@ export default function BacktestIntraday() {
   // 교집합(체크한 밴드들이 전부 겹치는 구간) 표시는 밴드 체크와 자동으로 같이 켜지지 않고 별도 토글로
   // 뺀다 - 처음에 자동으로 켜지게 만들었더니 "개별 밴드만 보려고 체크했는데 왜 마음대로 겹쳐서
   // 보여주냐"는 지적(사용자) - 기본은 꺼짐, 원할 때만 켠다.
-  const [showIntersection, setShowIntersection] = useState(rs.showIntersection ?? false)
+  const [showIntersection, setShowIntersection] = useState(false)
   // 선 겹침 강조도 교집합과 마찬가지로 자동으로 안 켜지게 별도 토글(사용자 요청 - "1분선이랑 5분선이
   // 겹치는 곳만 형광선으로"). 기본은 꺼짐.
-  const [showLineMatch, setShowLineMatch] = useState(rs.showLineMatch ?? false)
+  const [showLineMatch, setShowLineMatch] = useState(false)
   // 지금 보고 있는 구간 - 드래그(팬)로 시작 위치를, 휠(줌)로 폭을 바꾼다
   const [windowStart, setWindowStart] = useState(0)
   const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
@@ -149,17 +140,49 @@ export default function BacktestIntraday() {
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
   // `${symbol}:${y}-${m}` - localStorage에서 selectedDates를 복원했을 때, 데이터 로딩 effect가 "새 달로 바뀜"으로 오판해서
-  // 복원된 날짜 선택을 곧바로 지워버리지 않도록 복원된 심볼/달로 미리 채워둔다.
-  const lastMonthKeyRef = useRef(rs.selectedDates?.length ? `${rs.symbol ?? 'NASDAQ'}:${viewMonth.getFullYear()}-${viewMonth.getMonth()}` : null)
+  // 복원된 날짜 선택을 곧바로 지워버리지 않도록, 복원 effect(아래)에서 복원된 심볼/달로 미리 채워둔다.
+  const lastMonthKeyRef = useRef(null)
   const lastLoadedSymbolRef = useRef(null) // days/dayRowsRef를 심볼이 바뀔 때만 통째로 새로 시작하기 위한 비교용
   const dragRef = useRef(null) // {startClientX, startWindowStart} - 드래그 중일 때만 값이 있음
   const rangeAnchorRef = useRef('') // 마지막으로 클릭한 날짜 - Shift+클릭으로 범위 선택할 때 시작점(replay.js와 같은 방식)
   const datasetCacheRef = useRef({}) // dataset.id -> parsed rows(전체) 캐시
   const dayRowsRef = useRef({}) // date -> 그 날의 원본 캔들 행(open/high/low/close/time) - "시간대별 변동성 분석"에서 씀
+  // 복원 effect(아래)가 끝나기 전까지 저장 effect가 먼저 실행돼서 기본값으로 localStorage를 덮어써버리는
+  // 걸 막는 플래그 - 같은 마운트 커밋에 두 effect가 둘 다 있으면 선언 순서대로 실행되긴 하지만, 복원
+  // effect의 setState는 그 자리에서 바로 반영되지 않아서(다음 렌더에야 반영) 가드 없이는 저장 effect가
+  // 여전히 옛(기본값) 상태를 읽어 그대로 다시 저장해버린다 - 그래서 복원이 끝나기 전엔 저장을 건너뛴다.
+  const hasRestoredRef = useRef(false)
+
+  // 마운트 후(브라우저에서만) localStorage를 읽어 복원 - useState 초깃값에서 바로 읽지 않는 이유는 위
+  // hydration 에러 설명 참고. 저장된 값이 있으면 전부 적용하고, 없어도 hasRestoredRef만 true로 켠다.
+  useEffect(() => {
+    if (typeof window === 'undefined') { hasRestoredRef.current = true; return }
+    try {
+      const raw = window.localStorage.getItem(INTRADAY_SETTINGS_KEY)
+      const rs = raw ? JSON.parse(raw) : null
+      if (rs) {
+        if (rs.symbol) setSymbol(rs.symbol)
+        if (rs.viewMonth) setViewMonth(new Date(rs.viewMonth.y, rs.viewMonth.m, 1))
+        if (rs.selectedDates) setSelectedDates(rs.selectedDates)
+        if (rs.showAverage) setShowAverage(rs.showAverage)
+        if (rs.enabledOverlay) setEnabledOverlay(rs.enabledOverlay)
+        if (rs.overlayLineVisibility) setOverlayLineVisibility(rs.overlayLineVisibility)
+        if (rs.showIntersection) setShowIntersection(rs.showIntersection)
+        if (rs.showLineMatch) setShowLineMatch(rs.showLineMatch)
+        if (rs.selectedDates?.length) {
+          const y = rs.viewMonth ? rs.viewMonth.y : new Date().getFullYear()
+          const m = rs.viewMonth ? rs.viewMonth.m : new Date().getMonth()
+          lastMonthKeyRef.current = `${rs.symbol ?? 'NASDAQ'}:${y}-${m}`
+        }
+      }
+    } catch { /* 저장된 값이 깨져있으면 그냥 무시하고 기본값으로 시작 */ }
+    hasRestoredRef.current = true
+  }, [])
 
   // 심볼/달/고른 날짜/표시설정이 바뀔 때마다 localStorage에 저장 - 새로고침해도 그대로 유지된다(사용자 지적).
   useEffect(() => {
     if (typeof window === 'undefined') return
+    if (!hasRestoredRef.current) return // 복원 전엔 기본값으로 덮어쓰지 않는다
     try {
       window.localStorage.setItem(INTRADAY_SETTINGS_KEY, JSON.stringify({
         symbol,
@@ -304,9 +327,12 @@ export default function BacktestIntraday() {
           // "밴드는 교집합, 이평선(중심선)은 그 교집합의 한가운데"라는 사용자 설명대로 mid도 같이 둔다.
           let intersection = null
           const activeBandIds = Object.keys(overlays)
+          // upperMaps/lowerMaps는 교집합과 아래 "선 겹침 강조" 계산이 같이 쓴다 - 블록 안에서만 선언하면
+          // 아래 블록에서 "upperMaps is not defined"가 난다(실제로 발생했던 버그) - 바깥 스코프로 뺌.
+          let upperMaps = [], lowerMaps = []
           if (activeBandIds.length >= 2) {
-            const upperMaps = activeBandIds.map(id => new Map(overlays[id].upper))
-            const lowerMaps = activeBandIds.map(id => new Map(overlays[id].lower))
+            upperMaps = activeBandIds.map(id => new Map(overlays[id].upper))
+            lowerMaps = activeBandIds.map(id => new Map(overlays[id].lower))
             const commonOffsets = [...upperMaps[0].keys()]
               .filter(off => upperMaps.every(m => m.has(off)) && lowerMaps.every(m => m.has(off)))
               .sort((a, b) => a - b)
