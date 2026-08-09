@@ -150,6 +150,7 @@ export default function BacktestIntraday() {
   // localStorage에서 selectedDates를 복원했을 때, 데이터 로딩 effect가 "새 달로 바뀜"으로 오판해서
   // 복원된 날짜 선택을 곧바로 지워버리지 않도록 복원된 심볼/달로 미리 채워둔다.
   const lastMonthKeyRef = useRef(rs.selectedDates?.length ? `${rs.symbol ?? 'NASDAQ'}:${viewMonth.getFullYear()}-${viewMonth.getMonth()}` : null)
+  const lastLoadedSymbolRef = useRef(null) // days/dayRowsRef를 심볼이 바뀔 때만 통째로 새로 시작하기 위한 비교용
   const dragRef = useRef(null) // {startClientX, startWindowStart} - 드래그 중일 때만 값이 있음
   const rangeAnchorRef = useRef('') // 마지막으로 클릭한 날짜 - Shift+클릭으로 범위 선택할 때 시작점(replay.js와 같은 방식)
   const datasetCacheRef = useRef({}) // dataset.id -> parsed rows(전체) 캐시
@@ -254,13 +255,13 @@ export default function BacktestIntraday() {
           if (minuteOfDay >= DAY_WINDOW_START_MIN) addRow(calDate, r) // 그 날짜 자신의 05:00~23:59
           if (minuteOfDay < DAY_WINDOW_START_MIN + 60) addRow(prevLocalDateStr(calDate), r) // 전날의 05:00~익일06:00 연장분(00:00~05:59, 05:00~05:59 겹침 포함)
         }
-        // 화면에 노출할 날짜는 여전히 이번 달(viewMonth) 기준만 - 위 버킷팅은 fullRows(파일 전체) 기준으로
-        // 해뒀으니 달 경계(예: 7/31의 연장분인 8/1 새벽)도 정확히 잡힌다.
-        const monthPrefix = `${y}-${String(m + 1).padStart(2, '0')}`
-
         const nextDays = []
         const nextDayRows = {}
-        for (const [date, rows] of [...byDate.entries()].filter(([d]) => d.startsWith(monthPrefix)).sort()) {
+        // monthPrefix로 미리 걸러내지 않고 fullRows(파일 전체) 범위의 모든 날짜를 다 만든다 - 달력에서
+        // 앞/뒤 달로 흐리게 걸쳐나오는 날짜(예: 8월 보는 중에 맨 앞줄의 7월 27~31일)를 클릭했을 때, 지금
+        // 보고 있는 달(viewMonth)만 걸러서 만들면 그 날짜가 통째로 안 만들어져서 0봉으로 나오는 버그가
+        // 있었다(사용자 지적 - "같은 자료인데 왜 0봉이냐"). 파일 하나가 보통 1.5개월치라 비용 부담은 적다.
+        for (const [date, rows] of [...byDate.entries()].sort()) {
           // 이 날짜(트레이딩데이) 소속 캔들을 실제 x축 오프셋(0=05:00 ~ 1499=익일05:59)으로 바꾼다.
           // 자기 날짜(D) 소속이면 05:00 기준 그대로, 다음날(D+1) 새벽 연장분이면 1440을 더해 뒤로 이어붙인다
           // (05:00~05:59는 D의 "연장"과 D+1의 "자기 날짜" 양쪽에 다 있을 수 있어 실제 달력날짜로 구분해야 함).
@@ -324,8 +325,22 @@ export default function BacktestIntraday() {
           nextDayRows[date] = rows // "시간대별 변동성 분석"은 편차가 아니라 원본 high/low/close가 필요해서 따로 보관
         }
         if (!ignore) {
-          setDays(nextDays)
-          dayRowsRef.current = nextDayRows
+          // 달을 넘나들 때마다 days/dayRowsRef를 통째로 새로 바꾸지 않고 누적(merge)한다 - 그래야 이전에
+          // 불러온 달의 날짜(예: 8월 보는 중에도 7월에 골라둔 날짜)가 계속 살아있는다. 심볼이 바뀌면
+          // 다른 상품 데이터라 의미가 없으니 그때만 통째로 새로 시작한다.
+          const symbolChanged = lastLoadedSymbolRef.current !== null && lastLoadedSymbolRef.current !== symbol
+          lastLoadedSymbolRef.current = symbol
+          if (symbolChanged) {
+            setDays(nextDays)
+            dayRowsRef.current = nextDayRows
+          } else {
+            setDays(prev => {
+              const merged = new Map(prev.map(d => [d.date, d]))
+              for (const d of nextDays) merged.set(d.date, d)
+              return [...merged.values()].sort((a, b) => a.date.localeCompare(b.date))
+            })
+            dayRowsRef.current = { ...dayRowsRef.current, ...nextDayRows }
+          }
           // 달/심볼이 바뀔 때만 날짜 선택을 초기화한다 - seriesMode(가격↔밴드폭)만 바꿨을 때는
           // 고른 날짜를 그대로 유지해야 방금 겹쳐보던 날짜들의 폭을 바로 이어서 볼 수 있다(사용자 편의).
           const monthKey = `${symbol}:${y}-${m}`
@@ -1127,18 +1142,13 @@ export default function BacktestIntraday() {
               {selectedDates.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
-                    {/* replay.js 재생바의 "0/1,020봉"처럼 몇 일 골랐고 그 안에 캔들(봉)이 몇 개인지 바로
-                        보이게(사용자 요청) - 실제 데이터가 들어왔는지 눈으로 바로 확인할 수 있어서 디버깅에도 씀. */}
-                    <span style={{ fontSize: 11, color: '#9aa0ab' }}>
-                      고른 날짜 {selectedDates.length}개 · 총 {selectedDates.reduce((sum, d) => sum + (dayRowsRef.current[d]?.length || 0), 0).toLocaleString()}봉
-                    </span>
+                    <span style={{ fontSize: 11, color: '#9aa0ab' }}>고른 날짜 {selectedDates.length}개</span>
                     <button type="button" onClick={() => setSelectedDates([])} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#9aa0ab', cursor: 'pointer', fontSize: 11 }}>전체 지우기</button>
                   </div>
                   {selectedDates.map((date, i) => (
                     <div key={date} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#e8eaed' }}>
                       <span style={{ width: 10, height: 10, borderRadius: 3, background: dayColor(i), display: 'inline-block', flexShrink: 0 }} />
                       <span style={{ flex: 1 }}>{date}</span>
-                      <span style={{ fontSize: 10.5, color: '#5a5f6a' }}>{(dayRowsRef.current[date]?.length || 0).toLocaleString()}봉</span>
                       <button type="button" onClick={() => handleDayClick(date)} style={{ background: 'none', border: 'none', color: '#9aa0ab', cursor: 'pointer', fontSize: 13, padding: 0 }}>✕</button>
                     </div>
                   ))}
@@ -1225,6 +1235,13 @@ export default function BacktestIntraday() {
                 <p style={{ color: '#5a5f6a', fontSize: 11, marginTop: 10, marginBottom: 0 }}>
                   차트 본문을 드래그하면 좌우 이동, 왼쪽 가격축을 드래그하면 세로 확대/축소, 아래 시간축을 드래그하거나 휠을 돌리면 가로 확대/축소됩니다.
                 </p>
+                {/* replay.js 재생바 위 "0/1,020봉"과 같은 자리(차트 바로 아래) - 몇 일 골랐고 그 안에
+                    캔들(봉)이 총 몇 개인지 바로 확인할 수 있게(사용자 요청). */}
+                {selectedDates.length > 0 && (
+                  <div style={{ marginTop: 10, color: '#9aa0ab', fontSize: 13 }}>
+                    {selectedDates.length}일 선택 · {selectedDates.reduce((sum, d) => sum + (dayRowsRef.current[d]?.length || 0), 0).toLocaleString()}봉
+                  </div>
+                )}
               </div>
 
               {selectedSeries.length > 0 && (
