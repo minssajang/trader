@@ -929,6 +929,14 @@ export default function ReplayChart() {
     return () => { ignore = true }
   }, [symbol])
 
+  // 스토캐스틱 pane이 메인 캔들 pane의 6분의 1 높이가 되도록 비율 고정(사용자 요청 - 스토캐스틱이 너무 높았음)
+  function applyStochPaneRatio(chart, stochPaneIndex) {
+    try {
+      chart.panes()[0]?.setStretchFactor(6)
+      chart.panes()[stochPaneIndex]?.setStretchFactor(1)
+    } catch (e) { /* 차트/pane이 아직 준비 안 됐을 수 있음 */ }
+  }
+
   // 차트 인스턴스는 한 번만 생성
   useEffect(() => {
     if (!containerRef.current) return
@@ -1034,6 +1042,7 @@ export default function ReplayChart() {
         stoch3CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive()
         firstStochKSeries.attachPrimitive(stoch3CrossLineStochPaneRef.current)
       }
+      applyStochPaneRatio(chart, stochPaneIndex)
     }
 
     markerSeriesRef.current = chart.addSeries(LineSeries, {
@@ -2450,6 +2459,7 @@ export default function ReplayChart() {
           d: chartRef.current.addSeries(LineSeries, { color: stoch1DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, paneIndex),
         }
         ensureStochPaneCrossLine(stoch1SeriesRef.current.k)
+        applyStochPaneRatio(chartRef.current, paneIndex)
         bumpMarkerLayer()
       }
       applyStoch1Index(indexRef.current)
@@ -2481,6 +2491,7 @@ export default function ReplayChart() {
           d: chartRef.current.addSeries(LineSeries, { color: stoch2DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, paneIndex),
         }
         ensureStochPaneCrossLine(stoch2SeriesRef.current.k)
+        applyStochPaneRatio(chartRef.current, paneIndex)
         bumpMarkerLayer()
       }
       applyStoch2Index(indexRef.current)
@@ -2513,6 +2524,7 @@ export default function ReplayChart() {
           d: chartRef.current.addSeries(LineSeries, { color: stoch3DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, paneIndex),
         }
         ensureStochPaneCrossLine(stoch3SeriesRef.current.k)
+        applyStochPaneRatio(chartRef.current, paneIndex)
         bumpMarkerLayer()
       }
       applyStoch3Index(indexRef.current)
