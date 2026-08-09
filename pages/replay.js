@@ -650,6 +650,7 @@ export default function ReplayChart() {
   const [selectedDateTo, setSelectedDateTo] = useState('') // 여러 날 선택 모드에서 범위의 끝 날짜 (단일 선택이면 '')
   const [multiSelectMode, setMultiSelectMode] = useState(false) // 켜면 달력 클릭 두 번으로 범위(여러 날)를 이어서 불러온다
   const [loadingCsv, setLoadingCsv] = useState(false)
+  const [loadingContext, setLoadingContext] = useState(false) // 패닝으로 옆날짜를 불러오는 중인지(사용자 요청 - 로딩 표시)
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
@@ -1897,6 +1898,7 @@ export default function ReplayChart() {
     if (loadingContextRef.current[direction] || !rowsRef.current.length) return
     if (contextDayCountRef.current[direction] >= MAX_CONTEXT_DAYS) return
     loadingContextRef.current[direction] = true
+    setLoadingContext(true)
     try {
       const anchorTime = direction === 'before' ? rowsRef.current[0].time : rowsRef.current[rowsRef.current.length - 1].time
       const anchorDate = toLocalDateStr(anchorTime)
@@ -1926,6 +1928,8 @@ export default function ReplayChart() {
       extendRangeAndRedraw(direction, found)
     } finally {
       loadingContextRef.current[direction] = false
+      // before/after가 동시에 진행 중일 수 있어(양쪽 경계를 거의 동시에 지나갈 때) 둘 다 끝났을 때만 표시를 끈다
+      if (!loadingContextRef.current.before && !loadingContextRef.current.after) setLoadingContext(false)
     }
   }
   ensureAdjacentDayLoadedRef.current = ensureAdjacentDayLoaded // 마운트 1회뿐인 차트 이펙트가 이 ref를 통해 항상 최신 함수를 호출하게 함
@@ -2131,9 +2135,16 @@ export default function ReplayChart() {
   // 새로고침으로 기존 마운트 로직이 처음부터 다시 실행되게 하는 쪽이 훨씬 안전하다)
   const resetChartSettings = () => {
     if (typeof window === 'undefined') return
-    if (!window.confirm('차트 설정을 전부 기본값으로 초기화할까요? (심볼/날짜/재생위치는 유지됩니다)')) return
+    if (!window.confirm('차트 설정을 전부 기본값으로 초기화할까요? (심볼/재생위치는 유지되고, 날짜는 오늘로 돌아갑니다)')) return
     try {
       window.localStorage.removeItem(REPLAY_SETTINGS_KEY)
+      // 날짜도 초기화(사용자 요청) - 세션 복원값 중 날짜/재생위치만 오늘/0으로 덮어써서, 새로고침 후
+      // 마운트 시 세션 복원 로직이 오늘 날짜를 자동으로 불러오게 한다(심볼은 그대로 유지).
+      const raw = window.sessionStorage.getItem(REPLAY_STATE_KEY)
+      const prev = raw ? JSON.parse(raw) : {}
+      window.sessionStorage.setItem(REPLAY_STATE_KEY, JSON.stringify({
+        ...prev, selectedDate: toLocalDateStr(Math.floor(Date.now() / 1000)), selectedDateTo: '', playIndex: 0,
+      }))
     } catch { /* ignore */ }
     window.location.reload()
   }
@@ -4110,8 +4121,14 @@ export default function ReplayChart() {
                 >{summerTime ? '☀ 서머타임 (+6h)' : '❄ 윈터타임 (+7h)'}</button>
               </div>
 
-              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16 }}>
+              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, position: 'relative' }}>
                 <div ref={containerRef} style={{ width: '100%', height: 860 }} />
+                {loadingContext && (
+                  <div style={{
+                    position: 'absolute', top: 12, right: 12, background: '#0f1115ee', border: '1px solid #2a2e38',
+                    borderRadius: 8, padding: '6px 12px', fontSize: 12.5, color: '#9aa0ab', pointerEvents: 'none',
+                  }}>옆날짜 불러오는 중...</div>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
