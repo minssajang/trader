@@ -5,6 +5,18 @@ import Link from 'next/link'
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
+import { BOLLINGER_BANDS, rollingBollinger, DONCHIAN_CHANNELS, rollingDonchian } from '../lib/indicators'
+
+// 오버레이 차트에서 "가격(시가 대비 편차)" 대신 볼린저/도치안 밴드 "폭"을 날짜별로 겹쳐볼 수 있게
+// 하는 선택지(사용자 요청) - points 배열이 [분, 값] 구조로 동일해서 draw()를 포함한 기존 오버레이
+// 파이프라인(달력 선택/팬·줌/평균선/호버)을 그대로 재사용한다. 값만 "시가 대비 편차"에서 "그 순간
+// 밴드 폭"으로 바뀔 뿐, 그래서 시가(0) 기준선처럼 편차 전용 표시만 모드에 따라 조건부로 뺀다.
+const SERIES_MODE_OPTIONS = [
+  { id: 'price', label: '가격(시가 대비 편차)' },
+  ...BOLLINGER_BANDS.map(b => ({ id: b.id, label: b.label + ' 폭' })),
+  ...DONCHIAN_CHANNELS.map(b => ({ id: b.id, label: b.label + ' 폭' })),
+]
+const ALL_BAND_DEFS = [...BOLLINGER_BANDS, ...DONCHIAN_CHANNELS]
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
@@ -67,6 +79,8 @@ export default function BacktestIntraday() {
   // 평균선은 기본으로 자동으로 안 그리고, 이 버튼을 켜야만 그린다(사용자 요청 - 시키지 않은 걸
   // 자동으로 하지 말고 옵션 버튼으로 빼둘 것)
   const [showAverage, setShowAverage] = useState(false)
+  // 오버레이 차트에 뭘 그릴지 - 'price'(기본, 시가 대비 편차) 또는 볼린저/도치안 밴드 id(그 밴드의 폭)
+  const [seriesMode, setSeriesMode] = useState('price')
   // 지금 보고 있는 구간 - 드래그(팬)로 시작 위치를, 휠(줌)로 폭을 바꾼다
   const [windowStart, setWindowStart] = useState(0)
   const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
@@ -82,6 +96,7 @@ export default function BacktestIntraday() {
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
+  const lastMonthKeyRef = useRef(null) // `${symbol}:${y}-${m}` - seriesMode만 바뀌어 재계산될 땐 날짜 선택을 유지하기 위한 비교용
   const dragRef = useRef(null) // {startClientX, startWindowStart} - 드래그 중일 때만 값이 있음
   const datasetCacheRef = useRef({}) // dataset.id -> parsed rows(전체) 캐시
   const dayRowsRef = useRef({}) // date -> 그 날의 원본 캔들 행(open/high/low/close/time) - "시간대별 변동성 분석"에서 씀
@@ -137,6 +152,24 @@ export default function BacktestIntraday() {
         }
         if (ignore) return
 
+        // seriesMode가 볼린저/도치안 폭일 때만 계산한다("가격" 모드에선 불필요한 비용을 안 씀).
+        // fullRows(이 파일 전체, 이번 달보다 앞선 날짜도 포함)를 그대로 기준으로 계산해야 월초 며칠도
+        // 워밍업(예: 1시간B/1시간D = 1200분 = 20시간치 이전 데이터)이 채워진다 - replay.js와 같은 방식.
+        let bandWidth = null, timeToIdx = null
+        const activeBand = ALL_BAND_DEFS.find(b => b.id === seriesMode)
+        if (activeBand) {
+          // 지금 고른 밴드 하나만 계산(비용 절감) - 볼린저는 종가 기준, 도치안은 고가/저가 기준
+          if (activeBand.type === 'donchian') {
+            const { ups, lows } = rollingDonchian(fullRows, activeBand.period)
+            bandWidth = ups.map((u, i) => (u != null ? u - lows[i] : null))
+          } else {
+            const closes = fullRows.map(r => r.close)
+            const { ups, lows } = rollingBollinger(closes, activeBand.period)
+            bandWidth = ups.map((u, i) => (u != null ? u - lows[i] : null))
+          }
+          timeToIdx = new Map(fullRows.map((r, i) => [r.time, i]))
+        }
+
         const byDate = new Map()
         for (const r of fullRows) {
           const dateStr = toLocalDateStr(r.time)
@@ -161,20 +194,41 @@ export default function BacktestIntraday() {
           // 07:00 캔들 자기 자신의 점도 정확히 0이 된다(그래야 겹쳐 그린 모든 날짜가 07:00에서 전부
           // 같은 점(0)에서 만난다 - 사용자 확인).
           const dayOpen = (refRow || rows[0]).close
-          const points = rows.map(r => {
-            const d = new Date(r.time * 1000)
-            const minutes = d.getHours() * 60 + d.getMinutes()
-            return [minutes, Math.round((r.close - dayOpen) * 100) / 100]
-          })
+          let points
+          if (activeBand) {
+            // 밴드 폭 모드 - 시가 대비 편차가 아니라 그 순간의 실제 폭 값 그대로. 워밍업이 아직 안
+            // 채워진(월초 극초반) 캔들은 폭이 null이라 건너뛴다.
+            points = rows
+              .map(r => {
+                const idx = timeToIdx.get(r.time)
+                const w = bandWidth[idx]
+                if (w == null) return null
+                const d = new Date(r.time * 1000)
+                return [d.getHours() * 60 + d.getMinutes(), Math.round(w * 100) / 100]
+              })
+              .filter(Boolean)
+          } else {
+            points = rows.map(r => {
+              const d = new Date(r.time * 1000)
+              const minutes = d.getHours() * 60 + d.getMinutes()
+              return [minutes, Math.round((r.close - dayOpen) * 100) / 100]
+            })
+          }
           nextDays.push({ date, points })
           nextDayRows[date] = rows // "시간대별 변동성 분석"은 편차가 아니라 원본 high/low/close가 필요해서 따로 보관
         }
         if (!ignore) {
           setDays(nextDays)
           dayRowsRef.current = nextDayRows
-          setSelectedDates([]) // 달/심볼이 바뀌면 이전에 골라둔 날짜는 더 이상 유효하지 않을 수 있으니 초기화
-          setHourlyAnalysis(null)
-          setForwardAnalysis(null)
+          // 달/심볼이 바뀔 때만 날짜 선택을 초기화한다 - seriesMode(가격↔밴드폭)만 바꿨을 때는
+          // 고른 날짜를 그대로 유지해야 방금 겹쳐보던 날짜들의 폭을 바로 이어서 볼 수 있다(사용자 편의).
+          const monthKey = `${symbol}:${y}-${m}`
+          if (lastMonthKeyRef.current !== monthKey) {
+            lastMonthKeyRef.current = monthKey
+            setSelectedDates([])
+            setHourlyAnalysis(null)
+            setForwardAnalysis(null)
+          }
           if (nextDays.length === 0) setError('이 달엔 완전한 거래일 데이터가 없습니다')
         }
       } catch (e) {
@@ -184,7 +238,7 @@ export default function BacktestIntraday() {
     })()
 
     return () => { ignore = true }
-  }, [viewMonth, datasets])
+  }, [viewMonth, datasets, seriesMode])
 
   // 실제로 그릴 대상 = 달력에서 고른 날짜들만(days 전체가 아니라)
   const selectedSeries = useMemo(
@@ -283,13 +337,16 @@ export default function BacktestIntraday() {
       ctx.fillText(v.toFixed(0), 48, y + 4)
     }
 
-    const zeroY = py(0)
-    ctx.strokeStyle = '#9aa0ab'
-    ctx.setLineDash([4, 4])
-    ctx.beginPath(); ctx.moveTo(56, zeroY); ctx.lineTo(W - 20, zeroY); ctx.stroke()
-    ctx.setLineDash([])
-    ctx.textAlign = 'left'
-    ctx.fillText('시가(07:00, 0)', 58, zeroY - 5)
+    // "시가(0)" 기준선은 가격 편차 모드에서만 의미가 있다(밴드 폭은 0 기준이 아니라 그 자체가 값).
+    if (seriesMode === 'price') {
+      const zeroY = py(0)
+      ctx.strokeStyle = '#9aa0ab'
+      ctx.setLineDash([4, 4])
+      ctx.beginPath(); ctx.moveTo(56, zeroY); ctx.lineTo(W - 20, zeroY); ctx.stroke()
+      ctx.setLineDash([])
+      ctx.textAlign = 'left'
+      ctx.fillText('시가(07:00, 0)', 58, zeroY - 5)
+    }
 
     // 세계 주요 시장 개장 시각 - 지금 보이는 구간 안에 있을 때만 세로 점선 + 라벨로 표시
     ctx.font = '10px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif'
@@ -344,7 +401,7 @@ export default function BacktestIntraday() {
       ctx.beginPath(); ctx.moveTo(hx, 16); ctx.lineTo(hx, H - 34); ctx.stroke()
       ctx.globalAlpha = 1
     }
-  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd, windowSize])
+  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd, windowSize, seriesMode])
 
   useEffect(() => {
     draw()
@@ -843,6 +900,13 @@ export default function BacktestIntraday() {
       setError('PDF로 받으려면 왼쪽 달력에서 날짜를 먼저 골라주세요')
       return
     }
+    // PDF 리포트(오늘의 분석/시간대별 변동성 분석 등)는 전부 "시가 대비 가격 편차" 전제로 짜여있어서,
+    // 밴드 폭 모드에서 그대로 캡처하면 폭 값을 가격인 것처럼 잘못 표시하게 된다 - 가격 모드로
+    // 돌아가야만 받을 수 있게 막는다.
+    if (seriesMode !== 'price') {
+      setError('PDF 리포트는 "가격(시가 대비 편차)" 모드에서만 받을 수 있습니다 - 위 표시 선택을 가격으로 바꿔주세요')
+      return
+    }
     const hourly = computeHourlyAnalysis(selectedDates)
     const forward = computeForwardAnalysis(selectedDates)
     if (!hourly || !forward) return
@@ -1060,6 +1124,24 @@ export default function BacktestIntraday() {
             <div style={{ flex: 1, minWidth: 280 }}>
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20, position: 'relative' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14, flexWrap: 'wrap', fontSize: 12.5, color: '#9aa0ab' }}>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span>표시</span>
+                    <select
+                      value={seriesMode}
+                      onChange={e => setSeriesMode(e.target.value)}
+                      style={{ background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}
+                    >
+                      <optgroup label="가격">
+                        <option value="price">시가 대비 편차</option>
+                      </optgroup>
+                      <optgroup label="볼린저 폭">
+                        {BOLLINGER_BANDS.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+                      </optgroup>
+                      <optgroup label="도치안 폭">
+                        {DONCHIAN_CHANNELS.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+                      </optgroup>
+                    </select>
+                  </label>
                   <span>고른 날짜별로 색이 다릅니다(왼쪽 목록 참고)</span>
                   {selectedSeries.length >= 2 && (
                     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -1087,15 +1169,19 @@ export default function BacktestIntraday() {
                       <div style={{ color: '#9aa0ab', fontSize: 11, marginBottom: 4 }}>{fmtHM(hoverInfo.minute)}</div>
                       {showAverage && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                          <span>평균 편차</span><b>{hoverInfo.avg != null ? hoverInfo.avg.toFixed(1) + 'pt' : '-'}</b>
+                          <span>{seriesMode === 'price' ? '평균 편차' : '평균 폭'}</span><b>{hoverInfo.avg != null ? hoverInfo.avg.toFixed(1) + 'pt' : '-'}</b>
                         </div>
                       )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                        <span>시가 위</span><b>{hoverInfo.up}일</b>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                        <span>시가 아래</span><b>{hoverInfo.down}일</b>
-                      </div>
+                      {seriesMode === 'price' && (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                            <span>시가 위</span><b>{hoverInfo.up}일</b>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                            <span>시가 아래</span><b>{hoverInfo.down}일</b>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1106,12 +1192,16 @@ export default function BacktestIntraday() {
 
               {selectedSeries.length > 0 && (
                 <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-                  {[
+                  {(seriesMode === 'price' ? [
                     ['고른 거래일 수', `${selectedSeries.length}일`],
                     ['마감이 시가보다 높은 날', `${upDays} / ${selectedSeries.length}일`],
                     ['평균 마감 편차(시가 대비)', `${avgFinal.toFixed(1)}pt`],
                     ['일중 최대 편차폭', `${maxAbs.toFixed(0)}pt`],
-                  ].map(([k, v]) => (
+                  ] : [
+                    ['고른 거래일 수', `${selectedSeries.length}일`],
+                    ['평균 마감 폭', `${avgFinal.toFixed(1)}pt`],
+                    ['일중 최대 폭', `${maxAbs.toFixed(0)}pt`],
+                  ]).map(([k, v]) => (
                     <div key={k} style={{ flex: '1 1 140px', background: '#171a21', border: '1px solid #2a2e38', borderRadius: 10, padding: '12px 14px' }}>
                       <div style={{ color: '#9aa0ab', fontSize: 11.5, marginBottom: 4 }}>{k}</div>
                       <div style={{ fontSize: 17, fontWeight: 700 }}>{v}</div>
