@@ -406,10 +406,17 @@ export default function BacktestIntraday() {
                 for (const [v, c] of counts) { if (c >= 2) { matchedVal = v; break } }
                 if (matchedVal != null) matchPoints.push([off, matchedVal])
               }
+              // 시간이 연속이어도 값이 다르면 잇지 않는다 - 밴드가 3개 이상 체크됐을 때 이번 분엔
+              // A-B가 겹치다가 바로 다음 분엔 A-B 겹침은 깨지고 C-D가 전혀 다른 가격대에서 겹치는
+              // 식으로 "겹치는 조합" 자체가 바뀔 수 있는데, 그걸 한 선으로 이어버리면 서로 무관한
+              // 두 겹침 사이에 엉뚱한 대각선(박스 모양)이 그려진다(실제 발견된 버그). 도치안은
+              // 계단식이라 같은 조합이 계속 겹치는 동안엔 값이 그대로 유지되므로, 값이 그대로일 때만
+              // 같은 구간으로 잇는다.
               const segments = []
               let cur = []
               for (const p of matchPoints) {
-                if (cur.length && p[0] !== cur[cur.length - 1][0] + 1) { segments.push(cur); cur = [] }
+                const last = cur[cur.length - 1]
+                if (cur.length && (p[0] !== last[0] + 1 || p[1] !== last[1])) { segments.push(cur); cur = [] }
                 cur.push(p)
               }
               if (cur.length) segments.push(cur)
