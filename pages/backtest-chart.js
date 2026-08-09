@@ -810,6 +810,11 @@ export default function BacktestChart() {
   const loadingContextRef = useRef({ before: false, after: false }) // 패닝 중 같은 방향으로 중복 요청 방지
   const contextDayCountRef = useRef({ before: 0, after: 0 }) // 방향별로 몇 거래일치 컨텍스트를 불러왔는지 - 재생 시작 직후처럼 화면이 우연히 경계 근처일 때 계속 불러오는 걸 막는 상한선용
   const ensureAdjacentDayLoadedRef = useRef(null) // 차트 생성(마운트 1회) 이펙트가 항상 최신 클로저(datasets/symbol)를 쓰도록 매 렌더 갱신되는 참조
+  // 코드가 직접 카메라를 옮길 때(setVisibleRange/setVisibleLogicalRange) 그 결과로 발생하는
+  // range-change 이벤트를 무시하기 위한 플래그(사용자 지적 - 옆날짜를 한 번 불러오면 카메라 위치는
+  // 그대로 유지한 채 데이터만 커져서 화면이 "새로 커진 데이터의 가장자리"에 구조적으로 걸치게 되고,
+  // 그게 곧바로 다음 확장을 또 트리거하는 연쇄 버그가 있었다 - 진짜 사용자 패닝만 반응하게 만든다).
+  const programmaticViewChangeRef = useRef(false)
   const originalSelectionRef = useRef({ date: '', dateTo: '' }) // loadRange가 실제로 불러온 원래 선택(범위) - 패닝으로 컨텍스트 날짜를 보여주다가 원래 구간으로 돌아오면 이 값으로 복원한다
   const bandDataRef = useRef({})     // bandId -> { upper, middle, lower } - 선택한 날짜분, 워밍업 포함해서 계산됨
   const bandSeriesRef = useRef({})   // bandId -> { upper, middle, lower } lightweight-charts 라인 시리즈
@@ -1026,6 +1031,7 @@ export default function BacktestChart() {
     // 불러온다. ensureAdjacentDayLoadedRef를 거치는 이유는 이 이펙트가 마운트 시 딱 한 번만 만들어져
     // datasets/symbol을 그때 값으로 그대로 클로저에 가둬버리기 때문 - ref로 우회해서 항상 최신 함수를 부른다.
     const onVisibleLogicalRangeChange = (range) => {
+      if (programmaticViewChangeRef.current) { programmaticViewChangeRef.current = false; return } // 코드가 방금 직접 옮긴 카메라 - 진짜 패닝이 아니므로 무시
       if (!range || !rowsRef.current.length) return
       const combined = [...contextBeforeRef.current, ...rowsRef.current.slice(0, indexRef.current), ...contextAfterRef.current]
       // 학습은 날짜를 불러오면 항상 하루 전체를 바로 다 그리는데(auto-fit), 그러면 처음 뜨는 화면부터
@@ -1713,8 +1719,12 @@ export default function BacktestChart() {
     const newIdx = savedIdx + shift
     indexRef.current = newIdx
     setPlayIndex(newIdx)
-    applyIndex(newIdx) // 재생 진행 상태(newIdx)는 유지한 채 새 구간 기준으로 다시 그림
-    if (savedRange) ts?.setVisibleRange(savedRange)
+    programmaticViewChangeRef.current = true
+    applyIndex(newIdx) // 재생 진행 상태(newIdx)는 유지한 채 새 구간 기준으로 다시 그림 - setData가 auto-fit을 유발할 수 있어 그 이벤트를 무시
+    if (savedRange) {
+      programmaticViewChangeRef.current = true
+      ts?.setVisibleRange(savedRange)
+    }
   }
 
   // 학습 화면 전용(사용자 요청, 리플레이는 제외) - 패닝하다 화면 끝에 닿으면 호출된다. 캐시된
@@ -2559,6 +2569,7 @@ export default function BacktestChart() {
     // idx는 rowsRef.current(그 날) 기준 위치라서, 패닝으로 앞에 컨텍스트 캔들이 붙어있으면
     // 차트의 logical index는 그만큼(contextOffsetRef.current) 더 밀려 있다 - 세션박스 등과 같은 보정.
     const off = contextOffsetRef.current
+    programmaticViewChangeRef.current = true // 코드가 직접 옮기는 카메라 - 패닝으로 오인해 확장 트리거되는 것 방지
     ts.setVisibleLogicalRange({ from: idx - PLAYBACK_VIEW_BARS + off, to: idx + off })
   }
 
