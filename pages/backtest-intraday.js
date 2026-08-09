@@ -748,6 +748,28 @@ export default function BacktestIntraday() {
     setSelectedDates(prev => prev.includes(dateStr) ? prev.filter(d => d !== dateStr) : [...prev, dateStr].sort())
   }
 
+  // replay.js의 "📸 스샷"과 같은 기능(사용자 요청) - 다만 이 페이지는 lightweight-charts가 아니라
+  // 그냥 <canvas>에 직접 그리는 방식이라 chart.takeScreenshot() 같은 라이브러리 메서드가 없다.
+  // <canvas> 자체가 이미 픽셀 버퍼라 canvas.toBlob()으로 바로 지금 보이는 화면 그대로를 PNG로 뽑는다.
+  const captureScreenshot = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.toBlob(blob => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const dateLabel = selectedDates.length
+        ? (selectedDates.length === 1 ? selectedDates[0] : `${selectedDates[0]}_${selectedDates[selectedDates.length - 1]}`)
+        : 'chart'
+      a.href = url
+      a.download = `${symbol}_일중패턴_${dateLabel}.png`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    })
+  }
+
   // "⏱ 시간대별 변동성 분석" - 지금 왼쪽 달력에서 클릭해서 고른 날짜들(selectedDates, 위 오버레이
   // 차트에 그려지는 바로 그 날짜들)만 대상으로, 하루 중 어느 15분 구간에서 "자리를 지키고 있어야
   // 하는지" 계산한다.
@@ -1193,6 +1215,16 @@ export default function BacktestIntraday() {
                     </label>
                   )}
                   <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#e8eaed' }}>{fmtHM(windowStart)} ~ {fmtHM(windowEnd + 1)}</span>
+                  <button
+                    type="button"
+                    onClick={captureScreenshot}
+                    disabled={selectedSeries.length === 0}
+                    title="지금 보이는 상태 그대로 PNG로 저장"
+                    style={{
+                      background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 8,
+                      padding: '5px 10px', fontSize: 12, cursor: selectedSeries.length === 0 ? 'not-allowed' : 'pointer',
+                    }}
+                  >📸 스샷</button>
                 </div>
                 <div ref={wrapRef} style={{ position: 'relative' }}>
                   <canvas
@@ -1235,11 +1267,16 @@ export default function BacktestIntraday() {
                 <p style={{ color: '#5a5f6a', fontSize: 11, marginTop: 10, marginBottom: 0 }}>
                   차트 본문을 드래그하면 좌우 이동, 왼쪽 가격축을 드래그하면 세로 확대/축소, 아래 시간축을 드래그하거나 휠을 돌리면 가로 확대/축소됩니다.
                 </p>
-                {/* replay.js 재생바 위 "0/1,020봉"과 같은 자리(차트 바로 아래) - 몇 일 골랐고 그 안에
-                    캔들(봉)이 총 몇 개인지 바로 확인할 수 있게(사용자 요청). */}
+                {/* replay.js 재생바 위 "0/1,020봉 2026-07-27"과 같은 자리(차트 바로 아래) - 몇 일
+                    골랐고 그 안에 캔들(봉)이 총 몇 개인지, 그리고 정확히 어느 날짜(들)인지 바로 확인할
+                    수 있게(사용자 요청 - "몇월 며칠 선택한건지는 표시 안됨"). */}
                 {selectedDates.length > 0 && (
                   <div style={{ marginTop: 10, color: '#9aa0ab', fontSize: 13 }}>
                     {selectedDates.length}일 선택 · {selectedDates.reduce((sum, d) => sum + (dayRowsRef.current[d]?.length || 0), 0).toLocaleString()}봉
+                    {' · '}
+                    <span style={{ color: '#e8eaed', fontWeight: 700 }}>
+                      {selectedDates.length === 1 ? selectedDates[0] : `${selectedDates[0]} ~ ${selectedDates[selectedDates.length - 1]}`}
+                    </span>
                   </div>
                 )}
               </div>
