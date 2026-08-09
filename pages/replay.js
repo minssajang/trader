@@ -119,6 +119,7 @@ class MultiVerticalLinesPrimitive {
 }
 const STOCH3_CROSS_GOLDEN_COLOR = '#C6FF00' // 70/15/15 스토캐스틱 골든크로스 세로줄(라임, 사용자 요청)
 const STOCH3_CROSS_DEAD_COLOR = '#F44336' // 70/15/15 스토캐스틱 데드크로스 세로줄(레드, 사용자 요청)
+const SHOOTING_5MIN_COLOR = '#00E5FF' // "5분 슈팅" 표시 색 - 캔들/다른 신호들과 안 헷갈리게 튀는 시안색(사용자 요청 "잘보이게")
 
 // 횡보 구간 배경 표시(사용자 요청) - VerticalLinePrimitive와 같은 방식이지만 선 1개가 아니라
 // 여러 개의 [from,to] 시간 구간을 옅은 색 사각형으로 캔들 뒤에 채운다(zOrder: 'bottom').
@@ -426,6 +427,68 @@ class DualColorLinePrimitive {
   setLineWidth(width) { this._lineWidth = width; this._requestUpdate?.() }
 }
 
+// "5분 슈팅"(사용자 요청) - 캔들 위/아래(aboveBar/belowBar)가 아니라 실제로 뚫고 나간 꼬리 끝(정확한
+// 고가/저가 가격)에 정확히 찍어야 해서, 기본 markers API 대신 (time, price) 좌표에 직접 그리는
+// 프리미티브가 필요하다(학습의 라벨링 마커와 같은 방식).
+class ExactPriceMarkersPrimitive {
+  constructor(color) {
+    this._points = [] // [{time, price}]
+    this._color = color
+    this._chart = null
+    this._series = null
+    this._requestUpdate = null
+  }
+  attached({ chart, series, requestUpdate }) {
+    this._chart = chart
+    this._series = series
+    this._requestUpdate = requestUpdate
+  }
+  detached() {
+    this._chart = null
+    this._series = null
+  }
+  updateAllViews() {}
+  paneViews() {
+    return [{
+      renderer: () => ({
+        draw: (target) => {
+          if (!this._chart || !this._series || !this._points.length) return
+          const ts = this._chart.timeScale()
+          target.useBitmapCoordinateSpace((scope) => {
+            const ctx = scope.context
+            const hRatio = scope.horizontalPixelRatio
+            const vRatio = scope.verticalPixelRatio
+            ctx.save()
+            ctx.fillStyle = this._color
+            ctx.strokeStyle = '#0f1115'
+            ctx.lineWidth = 1 * hRatio
+            const r = 3.5 * hRatio
+            for (const p of this._points) {
+              const x = ts.timeToCoordinate(p.time)
+              const y = this._series.priceToCoordinate(p.price)
+              if (x == null || y == null) continue
+              const px = x * hRatio, py = y * vRatio
+              ctx.beginPath()
+              ctx.arc(px, py, r, 0, Math.PI * 2)
+              ctx.fill()
+              ctx.stroke()
+            }
+            ctx.restore()
+          })
+        },
+      }),
+    }]
+  }
+  setPoints(points) {
+    this._points = points
+    this._requestUpdate?.()
+  }
+  setColor(color) {
+    this._color = color
+    this._requestUpdate?.()
+  }
+}
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
 const BUCKET = 'backtest-data'
 
@@ -700,6 +763,9 @@ export default function ReplayChart() {
   const [deadShape, setDeadShapeState] = useState(rs.deadShape ?? 'arrowDown')
   const [deadColor, setDeadColorState] = useState(rs.deadColor ?? DEFAULT_DEAD_COLOR)
   const [deadSize, setDeadSizeState] = useState(rs.deadSize ?? 3) // 기본 셋팅(사용자 요청) - 크로스 신호 크기 3번
+  // "5분 슈팅"(사용자 요청) - 고가/저가가 5분 볼린저를 조금이라도 뚫고 나간 지점을 꼬리 끝(정확한
+  // 가격)에 표시. 기본 항상 체크(사용자 요청).
+  const [shooting5MinEnabled, setShooting5MinEnabled] = useState(rs.shooting5MinEnabled ?? true)
   // 매매 연습 - 헤징 허용(바이/셀 동시 보유 가능), 수수료/스프레드는 계산 안 함
   const [startingBalance, setStartingBalanceState] = useState(rs.startingBalance ?? DEFAULT_STARTING_BALANCE)
   const [balance, setBalance] = useState(DEFAULT_STARTING_BALANCE)
@@ -775,6 +841,8 @@ export default function ReplayChart() {
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
   const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
   const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
+  const shooting5MinPointsRef = useRef([]) // "5분 슈팅" 지점 전체 [{idx, time, price}] - 고가/저가가 5분 볼린저를 뚫은 정확한 가격
+  const shooting5MinPrimitiveRef = useRef(null) // ExactPriceMarkersPrimitive 인스턴스
   const rangeAnchorRef = useRef('') // 여러 날 선택 모드에서 첫 번째 클릭(범위 시작)을 임시로 들고 있다가 두 번째 클릭에서 씀
   const closedTradesRef = useRef([]) // 청산된 거래 전체(수동/반자동/시뮬레이션 다 포함, source로 구분) - "결과 저장" 누르면 DB로 보냄
   const uploadedTradesRef = useRef([]) // 업로드한 CSV 원본 거래 전체 [{entryTime, exitTime, dir, entryPrice, exitPrice, exitReason, pnl}]
@@ -893,6 +961,9 @@ export default function ReplayChart() {
 
     stoch3CrossLineRef.current = new MultiVerticalLinesPrimitive()
     series.attachPrimitive(stoch3CrossLineRef.current)
+
+    shooting5MinPrimitiveRef.current = new ExactPriceMarkersPrimitive(SHOOTING_5MIN_COLOR)
+    series.attachPrimitive(shooting5MinPrimitiveRef.current)
 
     sidewaysBandRef.current = new BackgroundBandsPrimitive(hexToRgba(sidewaysColor, 0.15))
     series.attachPrimitive(sidewaysBandRef.current)
@@ -1375,8 +1446,18 @@ export default function ReplayChart() {
     if (ribbonEnabled) recomputeSpreadExtremes(idx) // 슬라이더로 임의 위치 이동 - 되감기일 수 있어 처음부터 재스캔
     if (sidewaysEnabled) applySidewaysBands(idx)
     applySessionBands(idx) // 세션도 횡보처럼 재생(그려진 캔들) 범위 안에서만 표시(사용자 지적)
+    applyShooting5MinIndex(idx)
     indexRef.current = idx
     setPlayIndex(idx)
+  }
+
+  // "5분 슈팅" - 다른 신호 마커들과 같은 방식으로 재생 위치(idx) 이전 것만 보여준다.
+  const applyShooting5MinIndex = (idx) => {
+    if (!shooting5MinPrimitiveRef.current) return
+    if (!shooting5MinEnabled) { shooting5MinPrimitiveRef.current.setPoints([]); return }
+    shooting5MinPrimitiveRef.current.setPoints(
+      shooting5MinPointsRef.current.filter(p => p.idx < idx).map(p => ({ time: p.time, price: p.price }))
+    )
   }
 
   // 캔들을 하나씩 update()로 이어붙이는 게 setData 전체 재계산보다 가볍다
@@ -1384,6 +1465,7 @@ export default function ReplayChart() {
     if (ribbonEnabled) scanSpreadSwings(from, to, swingStateRef.current) // 재생은 항상 앞으로만 가므로 이어서 스캔
     if (sidewaysEnabled) applySidewaysBands(to)
     applySessionBands(to)
+    applyShooting5MinIndex(to)
     const rows = rowsRef.current
     for (let i = from; i < to; i++) seriesRef.current?.update(rows[i])
     for (let i = from; i < to; i++) {
@@ -1601,7 +1683,23 @@ export default function ReplayChart() {
     refreshAutoEvents()
     refreshSimEvents()
     refreshSessionMarkers()
+    refreshShooting5Min()
     return dayRows
+  }
+
+  // "5분 슈팅"(사용자 요청) - 캔들의 고가가 5분 볼린저(sma100) 상단선을 조금이라도 넘었으면 그
+  // 정확한 고가 위치에, 저가가 하단선을 조금이라도 넘었으면 그 정확한 저가 위치에 표시한다.
+  const refreshShooting5Min = () => {
+    const rows = rowsRef.current
+    const band = bandDataRef.current['sma100']
+    if (!rows.length || !band) { shooting5MinPointsRef.current = []; return }
+    const points = []
+    for (let i = 0; i < rows.length; i++) {
+      const u = band.upper[i], l = band.lower[i]
+      if (u && rows[i].high > u.value) points.push({ idx: i, time: rows[i].time, price: rows[i].high })
+      if (l && rows[i].low < l.value) points.push({ idx: i, time: rows[i].time, price: rows[i].low })
+    }
+    shooting5MinPointsRef.current = points.sort((a, b) => a.idx - b.idx)
   }
 
   // fromStr === toStr이면 하루, fromStr < toStr이면 그 사이 여러 날을 이어서 하나의 재생 구간으로 불러온다
@@ -1848,6 +1946,7 @@ export default function ReplayChart() {
         enabledStoch3, stoch3KColor, stoch3DColor,
         upColor, downColor, candleVisible,
         crossPairs, goldenShape, goldenColor, goldenSize, deadShape, deadColor, deadSize,
+        shooting5MinEnabled,
         startingBalance, lotSize, pnlDisplay,
         semiAutoEnabled, autoCrossPairs,
         simulationEnabled, simCrossPairs,
@@ -1864,6 +1963,7 @@ export default function ReplayChart() {
     enabledMACD5, macd5LineColor, macd5SignalColor,
     upColor, downColor, candleVisible,
     crossPairs, goldenShape, goldenColor, goldenSize, deadShape, deadColor, deadSize,
+    shooting5MinEnabled,
     startingBalance, lotSize, pnlDisplay,
     semiAutoEnabled, autoCrossPairs,
     simulationEnabled, simCrossPairs,
@@ -2116,6 +2216,12 @@ export default function ReplayChart() {
     setSidewaysEnabledState(turningOn)
     if (turningOn) applySidewaysBands(indexRef.current)
     else sidewaysBandRef.current?.setRanges([])
+  }
+
+  const toggleShooting5Min = (checked) => {
+    setShooting5MinEnabled(checked)
+    if (checked) applyShooting5MinIndex(indexRef.current)
+    else shooting5MinPrimitiveRef.current?.setPoints([])
   }
 
   const setSidewaysColor = (hex) => {
@@ -3609,6 +3715,21 @@ export default function ReplayChart() {
                 {renderCrossRow('골든크로스', goldenShape, setGoldenShape, goldenColor, setGoldenColor, goldenSize, setGoldenSize)}
                 {renderCrossRow('데드크로스', deadShape, setDeadShape, deadColor, setDeadColor, deadSize, setDeadSize)}
                 {renderPairSlots(crossPairs, setCrossPair, MOVING_AVERAGES, '크로스')}
+              </CollapsibleCard>
+
+              <CollapsibleCard title="5분 슈팅" maxWidth={170} defaultOpen={false}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={shooting5MinEnabled}
+                    onChange={e => toggleShooting5Min(e.target.checked)}
+                    style={{ width: 13, height: 13, margin: 0, accentColor: SHOOTING_5MIN_COLOR, flexShrink: 0 }}
+                  />
+                  <span style={{ flex: 1 }}>5분 볼린저 이탈 표시</span>
+                </label>
+                <p style={{ color: '#6b7280', fontSize: 10.5, marginTop: 6, marginBottom: 0, lineHeight: 1.5 }}>
+                  고가/저가가 5분 볼린저를 조금이라도 뚫은 지점을 꼬리 끝(정확한 가격)에 표시합니다.
+                </p>
               </CollapsibleCard>
 
             </div>
