@@ -1830,6 +1830,11 @@ export default function BacktestChart() {
   const handleCalendarSelect = (dateStr, shiftKey) => {
     if (!multiSelectMode && !shiftKey) {
       rangeAnchorRef.current = ''
+      // 이미 선택(또는 로드)된 날짜를 또 클릭하면 선택을 취소하고 빈 화면으로 돌아간다(사용자 요청)
+      if (selectedDate === dateStr && !selectedDateTo) {
+        clearSelection()
+        return
+      }
       setSelectedDate(dateStr)
       setSelectedDateTo('')
       setError('')
@@ -1892,6 +1897,14 @@ export default function BacktestChart() {
     markersPrimitiveRef.current?.setMarkers([])
     annotationPrimitiveRef.current?.setMarkers([])
     setPositions([])
+    // 패닝 컨텍스트도 같이 비운다 - 안 그러면 다음에 새 날짜를 고를 때까지 예전 패닝 상태가 남아있게 됨
+    contextBeforeRef.current = []
+    contextAfterRef.current = []
+    contextOffsetRef.current = 0
+    loadingContextRef.current = { before: false, after: false }
+    contextDayCountRef.current = { before: 0, after: 0 }
+    originalSelectionRef.current = { date: '', dateTo: '' }
+    setLoadingContext(false)
   }
 
   // '전체선택' - 지금 보고 있는 달에 데이터 있는 날짜를 전부 하나의 범위로 선택만 해둔다(로드는

@@ -1987,9 +1987,16 @@ export default function ReplayChart() {
   // 달력 클릭 처리 - 여러 날 선택 모드가 꺼져있으면 예전처럼 클릭한 날 하루만 바로 불러온다.
   // 켜져있으면 첫 클릭은 범위 시작점만 표시해두고, 두 번째 클릭에서 시작~끝을 이어서 불러온다
   // (Shift+클릭도 같은 방식으로 동작 - MonthCalendar가 이미 shiftKey를 넘겨주고 있었음).
+  // 단일 선택 모드에서 이미 선택된 날짜를 또 클릭하면 선택을 취소하고 빈 화면으로 돌아간다(사용자 요청) -
+  // 패닝으로 옆날짜까지 넓혀진 상태라도 "지금 선택된 날짜"는 originalSelectionRef가 계속 갖고 있으므로
+  // 그 기준으로 판단한다(여러 날 범위로 넓어졌으면 다시 클릭해도 취소하지 않음 - 범위 선택은 별개).
   const handleCalendarSelect = (dateStr, shiftKey) => {
     if (!multiSelectMode && !shiftKey) {
       rangeAnchorRef.current = ''
+      if (originalSelectionRef.current.date === dateStr && !originalSelectionRef.current.dateTo) {
+        clearSelection()
+        return
+      }
       loadDate(dateStr)
       return
     }
@@ -2045,6 +2052,14 @@ export default function ReplayChart() {
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
     setPositions([])
+    // 패닝 컨텍스트도 같이 비운다 - 안 그러면 다음에 새 날짜를 고를 때까지 예전 패닝 상태가 남아있게 됨
+    contextBeforeRef.current = []
+    contextAfterRef.current = []
+    contextOffsetRef.current = 0
+    loadingContextRef.current = { before: false, after: false }
+    contextDayCountRef.current = { before: 0, after: 0 }
+    originalSelectionRef.current = { date: '', dateTo: '' }
+    setLoadingContext(false)
   }
 
   // '전체선택' - 지금 보고 있는 달에 데이터 있는 날짜를 전부 이어서 하나의 재생 구간으로 불러온다.
