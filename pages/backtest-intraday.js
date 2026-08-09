@@ -336,15 +336,33 @@ export default function BacktestIntraday() {
             const commonOffsets = [...upperMaps[0].keys()]
               .filter(off => upperMaps.every(m => m.has(off)) && lowerMaps.every(m => m.has(off)))
               .sort((a, b) => a - b)
-            const upper = [], mid = [], lower = []
+            // 체크한 밴드들이 실제로 안 겹치는 순간(상단<하단, 즉 min(상단들) < max(하단들))은 "교집합"이
+            // 아니라 빈 집합이다 - 그런 지점은 건너뛰고, 진짜 겹치는(상단≥하단) 부분만 남긴다(사용자 지적
+            // - "교집합 부분 중 겹침부분만 강조해야해"). 끊긴 곳은 선으로 이어붙이지 않게 세그먼트로 나눈다.
+            const upperPts = [], midPts = [], lowerPts = []
             for (const off of commonOffsets) {
               const u = Math.min(...upperMaps.map(m => m.get(off)))
               const l = Math.max(...lowerMaps.map(m => m.get(off)))
-              upper.push([off, u])
-              lower.push([off, l])
-              mid.push([off, Math.round((u + l) / 2 * 100) / 100])
+              if (u < l) continue
+              upperPts.push([off, u])
+              lowerPts.push([off, l])
+              midPts.push([off, Math.round((u + l) / 2 * 100) / 100])
             }
-            intersection = { upper, mid, lower }
+            const toSegments = (pts) => {
+              const segments = []
+              let cur = []
+              for (const p of pts) {
+                if (cur.length && p[0] !== cur[cur.length - 1][0] + 1) { segments.push(cur); cur = [] }
+                cur.push(p)
+              }
+              if (cur.length) segments.push(cur)
+              return segments
+            }
+            intersection = {
+              upperSegments: toSegments(upperPts),
+              midSegments: toSegments(midPts),
+              lowerSegments: toSegments(lowerPts),
+            }
           }
 
           // 선 겹침 강조(사용자 요청 - "1분선이랑 5분선이 겹치는 곳만 형광선으로") - 체크한 밴드들 중
@@ -615,15 +633,19 @@ export default function BacktestIntraday() {
         ctx.strokeStyle = '#FFFFFF'
         ctx.globalAlpha = 0.9
         ctx.lineWidth = 1.8
-        for (const line of [d.intersection.upper, d.intersection.mid, d.intersection.lower]) {
-          ctx.beginPath()
-          let started3 = false
-          line.forEach(([mnt, v]) => {
-            if (!inWindow(mnt)) return
-            const x = px(mnt), y = py(v)
-            if (!started3) { ctx.moveTo(x, y); started3 = true } else ctx.lineTo(x, y)
-          })
-          ctx.stroke()
+        // 실제로 안 겹치는 구간은 위에서 이미 빼뒀고(세그먼트로 분리됨), 여기선 세그먼트마다 따로
+        // 선을 그어서 안 겹치던 구간을 이어붙이지 않는다.
+        for (const segments of [d.intersection.upperSegments, d.intersection.midSegments, d.intersection.lowerSegments]) {
+          for (const seg of segments) {
+            ctx.beginPath()
+            let started3 = false
+            seg.forEach(([mnt, v]) => {
+              if (!inWindow(mnt)) return
+              const x = px(mnt), y = py(v)
+              if (!started3) { ctx.moveTo(x, y); started3 = true } else ctx.lineTo(x, y)
+            })
+            ctx.stroke()
+          }
         }
         ctx.globalAlpha = 1
       }
