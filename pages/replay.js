@@ -1582,6 +1582,186 @@ export default function ReplayChart() {
     setPlayIndex(to)
   }
 
+  // [fromStr,toStr] 구간의 지표(볼린저/도치안/이평선/RSI/MACD/스토캐스틱/횡보/세션/크로스/신호마커)를
+  // 전부 계산해서 rowsRef.current/total과 각 Ref에 반영한다. loadRange(새로 날짜 선택)와
+  // ensureAdjacentDayLoaded(패닝으로 옆날짜 이어붙이기, 사용자 요청 - "체크한 지표가 옆날짜에서도
+  // 똑같이 나와야지")가 공유한다 - 패닝으로 이어붙일 땐 재생 위치(indexRef)·포지션·마커는 안 건드리고
+  // 이 계산만 다시 하면 된다.
+  const computeIndicatorsForRange = (fullRows, fromStr, toStr) => {
+    // fromStr 그 날짜에 캔들이 하나도 없어도(주말/휴장일) 통째로 실패시키지 않고, 그 날짜 이후
+    // 첫 캔들부터 시작한다 - 범위 중간의 주말은 원래도 그냥 건너뛰어지므로, 시작일도 같은 방식으로 맞춤.
+    let startIdx = fullRows.findIndex(r => toLocalDateStr(r.time) >= fromStr)
+    let endIdx = startIdx
+    if (startIdx >= 0) {
+      endIdx = startIdx
+      while (endIdx < fullRows.length && toLocalDateStr(fullRows[endIdx].time) <= toStr) endIdx++
+    }
+    const dayRows = startIdx >= 0 ? fullRows.slice(startIdx, endIdx) : []
+    rowsRef.current = dayRows
+    setTotal(dayRows.length)
+    if (dayRows.length === 0) return dayRows
+
+    // 볼린저는 그 구간 데이터만으론 워밍업이 부족하니(예: 1시간봉 SMA1200 = 20시간 분량)
+    // 같은 파일 안의 이전 날짜들까지 포함해서 계산한 뒤, 표시 구간만 잘라낸다.
+    const closes = fullRows.map(r => r.close)
+    const newBandData = {}
+    for (const band of ALL_BANDS) {
+      const { mids, ups, lows } = band.type === 'donchian' ? rollingDonchian(fullRows, band.period) : rollingBollinger(closes, band.period)
+      const upper = [], middle = [], lower = []
+      for (let i = startIdx; i < endIdx; i++) {
+        const t = fullRows[i].time
+        upper.push(ups[i] != null ? { time: t, value: ups[i] } : null)
+        middle.push(mids[i] != null ? { time: t, value: mids[i] } : null)
+        lower.push(lows[i] != null ? { time: t, value: lows[i] } : null)
+      }
+      newBandData[band.id] = { upper, middle, lower }
+    }
+    bandDataRef.current = newBandData
+
+    const newMaData = {}
+    for (const ma of ALL_MA) {
+      const vals = computeMA(ma, closes)
+      const points = []
+      for (let i = startIdx; i < endIdx; i++) {
+        points.push(vals[i] != null ? { time: fullRows[i].time, value: vals[i] } : null)
+      }
+      newMaData[ma.id] = points
+    }
+    // DUAL_COLOR_IDS(리본18+hma60)는 더 이상 별도 분할 배열을 안 만든다 - DualColorLinePrimitive가
+    // 위 newMaData[ma.id](원본 {time,value} 배열) 그대로를 받아서 그릴 때마다 직접 방향을 계산한다.
+    maDataRef.current = newMaData
+
+    // 횡보 구간(사용자 요청) - 5분B 폭 & 리본(M5-M90) 폭이 둘 다 "이번에 로드된 구간" 안에서
+    // 하위25%일 때 횡보로 본다. 임계값은 로드할 때마다 그 구간 분포로 다시 잡음(고정값 아님).
+    {
+      const bw100 = newBandData['sma100']
+      const ribbon5 = newMaData['madrid05']
+      const ribbon90 = newMaData['madrid90']
+      const widthAt = (i) => {
+        const u = bw100?.upper[i], l = bw100?.lower[i]
+        return (u && l) ? u.value - l.value : null
+      }
+      const spreadAt2 = (i) => {
+        const a = ribbon5?.[i], b = ribbon90?.[i]
+        return (a && b) ? Math.abs(b.value - a.value) : null
+      }
+      const pct = (arr, p) => {
+        if (!arr.length) return null
+        const s = [...arr].sort((a, b) => a - b)
+        return s[Math.min(Math.floor(s.length * p), s.length - 1)]
+      }
+      const widths = [], spreads = []
+      for (let i = 0; i < dayRows.length; i++) {
+        const w = widthAt(i); if (w != null) widths.push(w)
+        const s = spreadAt2(i); if (s != null) spreads.push(s)
+      }
+      const bandThresh = pct(widths, 0.25)
+      const ribbonThresh = pct(spreads, 0.25)
+      const rawSegments = []
+      if (bandThresh != null && ribbonThresh != null) {
+        let segStart = null
+        for (let i = 0; i < dayRows.length; i++) {
+          const w = widthAt(i), s = spreadAt2(i)
+          const isSide = w != null && s != null && w <= bandThresh && s <= ribbonThresh
+          if (isSide && segStart == null) segStart = i
+          if (!isSide && segStart != null) { rawSegments.push({ startIdx: segStart, endIdx: i - 1 }); segStart = null }
+        }
+        if (segStart != null) rawSegments.push({ startIdx: segStart, endIdx: dayRows.length - 1 })
+      }
+      const MIN_SIDEWAYS_MIN = 5 // 1~2캔들짜리 노이즈 제외
+      sidewaysSegmentsRef.current = rawSegments
+        .map(seg => ({ ...seg, startTime: dayRows[seg.startIdx].time, endTime: dayRows[seg.endIdx].time }))
+        .filter(seg => (seg.endTime - seg.startTime) / 60 + 1 >= MIN_SIDEWAYS_MIN)
+    }
+
+    // 세션 표시(아시아/유럽/뉴욕) - 이 차트 시간 라벨이 이미 KST라 SESSIONS의 시/종료시각을 그대로 씀
+    {
+      const newSessionSegments = {}
+      for (const session of SESSIONS) {
+        const hrs = sessionHours[session.id] || { start: session.startHour, end: session.endHour }
+        newSessionSegments[session.id] = findSessionSegmentsIn(dayRows, hrs.start, hrs.end)
+      }
+      sessionSegmentsRef.current = newSessionSegments
+    }
+
+    // RSI/MACD도 이평선처럼 그 구간 데이터만으론 워밍업이 부족할 수 있어 파일 전체로 계산 후 표시 구간만 자름
+    const rsiVals = rollingRSI(closes, RSI_PERIOD)
+    const rsiPoints = []
+    for (let i = startIdx; i < endIdx; i++) {
+      rsiPoints.push(rsiVals[i] != null ? { time: fullRows[i].time, value: rsiVals[i] } : null)
+    }
+    rsiDataRef.current = rsiPoints
+
+    const { macdLine, signalLine, histogram } = rollingMACD(closes, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
+    const macdPoints = [], signalPoints = [], histPoints = []
+    for (let i = startIdx; i < endIdx; i++) {
+      const t = fullRows[i].time
+      macdPoints.push(macdLine[i] != null ? { time: t, value: macdLine[i] } : null)
+      signalPoints.push(signalLine[i] != null ? { time: t, value: signalLine[i] } : null)
+      histPoints.push(histogram[i] != null ? { time: t, value: histogram[i], color: histogram[i] >= 0 ? DEFAULT_MACD_HIST_UP : DEFAULT_MACD_HIST_DOWN } : null)
+    }
+    macdDataRef.current = { macd: macdPoints, signal: signalPoints, hist: histPoints }
+
+    const macd5 = rollingMACD(closes, MACD5_FAST, MACD5_SLOW, MACD5_SIGNAL)
+    const macd5Points = [], signal5Points = [], hist5Points = []
+    for (let i = startIdx; i < endIdx; i++) {
+      const t = fullRows[i].time
+      macd5Points.push(macd5.macdLine[i] != null ? { time: t, value: macd5.macdLine[i] } : null)
+      signal5Points.push(macd5.signalLine[i] != null ? { time: t, value: macd5.signalLine[i] } : null)
+      hist5Points.push(macd5.histogram[i] != null ? { time: t, value: macd5.histogram[i], color: macd5.histogram[i] >= 0 ? DEFAULT_MACD_HIST_UP : DEFAULT_MACD_HIST_DOWN } : null)
+    }
+    macd5DataRef.current = { macd: macd5Points, signal: signal5Points, hist: hist5Points }
+
+    // 스토캐스틱 3세트 - RSI/MACD처럼 파일 전체(fullRows)로 계산해서 워밍업을 채운 뒤 표시 구간만 자른다
+    function sliceStoch(kArr, dArr) {
+      const kPoints = [], dPoints = []
+      for (let i = startIdx; i < endIdx; i++) {
+        const t = fullRows[i].time
+        kPoints.push(kArr[i] != null ? { time: t, value: kArr[i] } : null)
+        dPoints.push(dArr[i] != null ? { time: t, value: dArr[i] } : null)
+      }
+      return { k: kPoints, d: dPoints }
+    }
+    const stoch1 = rollingStochastic(fullRows, ...STOCH1_PARAMS)
+    stoch1DataRef.current = sliceStoch(stoch1.k, stoch1.d)
+    const stoch2 = rollingStochastic(fullRows, ...STOCH2_PARAMS)
+    stoch2DataRef.current = sliceStoch(stoch2.k, stoch2.d)
+    const stoch3 = rollingStochastic(fullRows, ...STOCH3_PARAMS)
+    stoch3DataRef.current = sliceStoch(stoch3.k, stoch3.d)
+
+    // 70/15/15 스토캐스틱 크로스 세로줄 - "5분B(SMA100) 외부로 나간 뒤 아직 안 돌아온 상태"에서
+    // K/D가 교차하는 캔들만 기록한다(볼린저 안으로 돌아온 뒤에 나는 크로스는 표시 안 함, 사용자 요청).
+    {
+      const up100Map = new Map((newBandData.sma100?.upper || []).filter(Boolean).map(p => [p.time, p.value]))
+      const low100Map = new Map((newBandData.sma100?.lower || []).filter(Boolean).map(p => [p.time, p.value]))
+      const crossTimes = []
+      let isOutsideBand = false
+      for (let i = startIdx; i < endIdx; i++) {
+        const t = fullRows[i].time
+        const up = up100Map.get(t), low = low100Map.get(t)
+        if (up != null && low != null) {
+          if (fullRows[i].high > up || fullRows[i].low < low) isOutsideBand = true
+          else if (fullRows[i].high <= up && fullRows[i].low >= low) isOutsideBand = false
+        }
+        const k = stoch3.k[i], d = stoch3.d[i], pk = stoch3.k[i - 1], pd = stoch3.d[i - 1]
+        if (isOutsideBand && k != null && d != null && pk != null && pd != null) {
+          const golden = pk <= pd && k > d
+          const dead = pk >= pd && k < d
+          if (golden || dead) crossTimes.push({ idx: i - startIdx, time: t, color: golden ? STOCH3_CROSS_GOLDEN_COLOR : STOCH3_CROSS_DEAD_COLOR })
+        }
+      }
+      stoch3CrossTimesRef.current = crossTimes
+    }
+
+    refreshCross()
+    refreshDoubleBSignal()
+    refreshBollInnerSignal()
+    refreshAutoEvents()
+    refreshSimEvents()
+    refreshSessionMarkers()
+    return dayRows
+  }
+
   // fromStr === toStr이면 하루, fromStr < toStr이면 그 사이 여러 날을 이어서 하나의 재생 구간으로 불러온다
   // (여러 날 선택 모드에서 두 번째 클릭 시 씀). 단일 날짜 클릭(loadDate)도 내부적으로 이 함수를 그대로 쓴다.
   // datasetsOverride: 세션 복원 직후처럼 setDatasets(rows)를 호출한 바로 그 틱 안에서 곧바로
@@ -1662,178 +1842,7 @@ export default function ReplayChart() {
       const fullRows = Array.from(mergedByTime.values()).sort((a, b) => a.time - b.time)
       fullRowsRef.current = fullRows // ensureAdjacentDayLoaded가 매번 다시 합치지 않고 재사용
 
-      // fromStr 그 날짜에 캔들이 하나도 없어도(주말/휴장일) 통째로 실패시키지 않고, 그 날짜 이후
-      // 첫 캔들부터 시작한다 - 범위 중간의 주말은 원래도 그냥 건너뛰어지므로, 시작일도 같은 방식으로 맞춤.
-      let startIdx = fullRows.findIndex(r => toLocalDateStr(r.time) >= fromStr)
-      let endIdx = startIdx
-      if (startIdx >= 0) {
-        endIdx = startIdx
-        while (endIdx < fullRows.length && toLocalDateStr(fullRows[endIdx].time) <= toStr) endIdx++
-      }
-      const dayRows = startIdx >= 0 ? fullRows.slice(startIdx, endIdx) : []
-      rowsRef.current = dayRows
-      setTotal(dayRows.length)
-
-      // 볼린저는 그 구간 데이터만으론 워밍업이 부족하니(예: 1시간봉 SMA1200 = 20시간 분량)
-      // 같은 파일 안의 이전 날짜들까지 포함해서 계산한 뒤, 표시 구간만 잘라낸다.
-      if (dayRows.length > 0) {
-        const closes = fullRows.map(r => r.close)
-        const newBandData = {}
-        for (const band of ALL_BANDS) {
-          const { mids, ups, lows } = band.type === 'donchian' ? rollingDonchian(fullRows, band.period) : rollingBollinger(closes, band.period)
-          const upper = [], middle = [], lower = []
-          for (let i = startIdx; i < endIdx; i++) {
-            const t = fullRows[i].time
-            upper.push(ups[i] != null ? { time: t, value: ups[i] } : null)
-            middle.push(mids[i] != null ? { time: t, value: mids[i] } : null)
-            lower.push(lows[i] != null ? { time: t, value: lows[i] } : null)
-          }
-          newBandData[band.id] = { upper, middle, lower }
-        }
-        bandDataRef.current = newBandData
-
-        const newMaData = {}
-        for (const ma of ALL_MA) {
-          const vals = computeMA(ma, closes)
-          const points = []
-          for (let i = startIdx; i < endIdx; i++) {
-            points.push(vals[i] != null ? { time: fullRows[i].time, value: vals[i] } : null)
-          }
-          newMaData[ma.id] = points
-        }
-        // DUAL_COLOR_IDS(리본18+hma60)는 더 이상 별도 분할 배열을 안 만든다 - DualColorLinePrimitive가
-        // 위 newMaData[ma.id](원본 {time,value} 배열) 그대로를 받아서 그릴 때마다 직접 방향을 계산한다.
-        maDataRef.current = newMaData
-
-        // 횡보 구간(사용자 요청) - 5분B 폭 & 리본(M5-M90) 폭이 둘 다 "이번에 로드된 구간" 안에서
-        // 하위25%일 때 횡보로 본다. 임계값은 로드할 때마다 그 구간 분포로 다시 잡음(고정값 아님).
-        {
-          const bw100 = newBandData['sma100']
-          const ribbon5 = newMaData['madrid05']
-          const ribbon90 = newMaData['madrid90']
-          const widthAt = (i) => {
-            const u = bw100?.upper[i], l = bw100?.lower[i]
-            return (u && l) ? u.value - l.value : null
-          }
-          const spreadAt2 = (i) => {
-            const a = ribbon5?.[i], b = ribbon90?.[i]
-            return (a && b) ? Math.abs(b.value - a.value) : null
-          }
-          const pct = (arr, p) => {
-            if (!arr.length) return null
-            const s = [...arr].sort((a, b) => a - b)
-            return s[Math.min(Math.floor(s.length * p), s.length - 1)]
-          }
-          const widths = [], spreads = []
-          for (let i = 0; i < dayRows.length; i++) {
-            const w = widthAt(i); if (w != null) widths.push(w)
-            const s = spreadAt2(i); if (s != null) spreads.push(s)
-          }
-          const bandThresh = pct(widths, 0.25)
-          const ribbonThresh = pct(spreads, 0.25)
-          const rawSegments = []
-          if (bandThresh != null && ribbonThresh != null) {
-            let segStart = null
-            for (let i = 0; i < dayRows.length; i++) {
-              const w = widthAt(i), s = spreadAt2(i)
-              const isSide = w != null && s != null && w <= bandThresh && s <= ribbonThresh
-              if (isSide && segStart == null) segStart = i
-              if (!isSide && segStart != null) { rawSegments.push({ startIdx: segStart, endIdx: i - 1 }); segStart = null }
-            }
-            if (segStart != null) rawSegments.push({ startIdx: segStart, endIdx: dayRows.length - 1 })
-          }
-          const MIN_SIDEWAYS_MIN = 5 // 1~2캔들짜리 노이즈 제외
-          sidewaysSegmentsRef.current = rawSegments
-            .map(seg => ({ ...seg, startTime: dayRows[seg.startIdx].time, endTime: dayRows[seg.endIdx].time }))
-            .filter(seg => (seg.endTime - seg.startTime) / 60 + 1 >= MIN_SIDEWAYS_MIN)
-        }
-
-        // 세션 표시(아시아/유럽/뉴욕) - 이 차트 시간 라벨이 이미 KST라 SESSIONS의 시/종료시각을 그대로 씀
-        {
-          const newSessionSegments = {}
-          for (const session of SESSIONS) {
-            const hrs = sessionHours[session.id] || { start: session.startHour, end: session.endHour }
-            newSessionSegments[session.id] = findSessionSegmentsIn(dayRows, hrs.start, hrs.end)
-          }
-          sessionSegmentsRef.current = newSessionSegments
-        }
-
-        // RSI/MACD도 이평선처럼 그 구간 데이터만으론 워밍업이 부족할 수 있어 파일 전체로 계산 후 표시 구간만 자름
-        const rsiVals = rollingRSI(closes, RSI_PERIOD)
-        const rsiPoints = []
-        for (let i = startIdx; i < endIdx; i++) {
-          rsiPoints.push(rsiVals[i] != null ? { time: fullRows[i].time, value: rsiVals[i] } : null)
-        }
-        rsiDataRef.current = rsiPoints
-
-        const { macdLine, signalLine, histogram } = rollingMACD(closes, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
-        const macdPoints = [], signalPoints = [], histPoints = []
-        for (let i = startIdx; i < endIdx; i++) {
-          const t = fullRows[i].time
-          macdPoints.push(macdLine[i] != null ? { time: t, value: macdLine[i] } : null)
-          signalPoints.push(signalLine[i] != null ? { time: t, value: signalLine[i] } : null)
-          histPoints.push(histogram[i] != null ? { time: t, value: histogram[i], color: histogram[i] >= 0 ? DEFAULT_MACD_HIST_UP : DEFAULT_MACD_HIST_DOWN } : null)
-        }
-        macdDataRef.current = { macd: macdPoints, signal: signalPoints, hist: histPoints }
-
-        const macd5 = rollingMACD(closes, MACD5_FAST, MACD5_SLOW, MACD5_SIGNAL)
-        const macd5Points = [], signal5Points = [], hist5Points = []
-        for (let i = startIdx; i < endIdx; i++) {
-          const t = fullRows[i].time
-          macd5Points.push(macd5.macdLine[i] != null ? { time: t, value: macd5.macdLine[i] } : null)
-          signal5Points.push(macd5.signalLine[i] != null ? { time: t, value: macd5.signalLine[i] } : null)
-          hist5Points.push(macd5.histogram[i] != null ? { time: t, value: macd5.histogram[i], color: macd5.histogram[i] >= 0 ? DEFAULT_MACD_HIST_UP : DEFAULT_MACD_HIST_DOWN } : null)
-        }
-        macd5DataRef.current = { macd: macd5Points, signal: signal5Points, hist: hist5Points }
-
-        // 스토캐스틱 3세트 - RSI/MACD처럼 파일 전체(fullRows)로 계산해서 워밍업을 채운 뒤 표시 구간만 자른다
-        function sliceStoch(kArr, dArr) {
-          const kPoints = [], dPoints = []
-          for (let i = startIdx; i < endIdx; i++) {
-            const t = fullRows[i].time
-            kPoints.push(kArr[i] != null ? { time: t, value: kArr[i] } : null)
-            dPoints.push(dArr[i] != null ? { time: t, value: dArr[i] } : null)
-          }
-          return { k: kPoints, d: dPoints }
-        }
-        const stoch1 = rollingStochastic(fullRows, ...STOCH1_PARAMS)
-        stoch1DataRef.current = sliceStoch(stoch1.k, stoch1.d)
-        const stoch2 = rollingStochastic(fullRows, ...STOCH2_PARAMS)
-        stoch2DataRef.current = sliceStoch(stoch2.k, stoch2.d)
-        const stoch3 = rollingStochastic(fullRows, ...STOCH3_PARAMS)
-        stoch3DataRef.current = sliceStoch(stoch3.k, stoch3.d)
-
-        // 70/15/15 스토캐스틱 크로스 세로줄 - "5분B(SMA100) 외부로 나간 뒤 아직 안 돌아온 상태"에서
-        // K/D가 교차하는 캔들만 기록한다(볼린저 안으로 돌아온 뒤에 나는 크로스는 표시 안 함, 사용자 요청).
-        {
-          const up100Map = new Map((newBandData.sma100?.upper || []).filter(Boolean).map(p => [p.time, p.value]))
-          const low100Map = new Map((newBandData.sma100?.lower || []).filter(Boolean).map(p => [p.time, p.value]))
-          const crossTimes = []
-          let isOutsideBand = false
-          for (let i = startIdx; i < endIdx; i++) {
-            const t = fullRows[i].time
-            const up = up100Map.get(t), low = low100Map.get(t)
-            if (up != null && low != null) {
-              if (fullRows[i].high > up || fullRows[i].low < low) isOutsideBand = true
-              else if (fullRows[i].high <= up && fullRows[i].low >= low) isOutsideBand = false
-            }
-            const k = stoch3.k[i], d = stoch3.d[i], pk = stoch3.k[i - 1], pd = stoch3.d[i - 1]
-            if (isOutsideBand && k != null && d != null && pk != null && pd != null) {
-              const golden = pk <= pd && k > d
-              const dead = pk >= pd && k < d
-              if (golden || dead) crossTimes.push({ idx: i - startIdx, time: t, color: golden ? STOCH3_CROSS_GOLDEN_COLOR : STOCH3_CROSS_DEAD_COLOR })
-            }
-          }
-          stoch3CrossTimesRef.current = crossTimes
-        }
-
-        refreshCross()
-        refreshDoubleBSignal()
-        refreshBollInnerSignal()
-        refreshAutoEvents()
-        refreshSimEvents()
-        refreshSessionMarkers()
-      }
+      const dayRows = computeIndicatorsForRange(fullRows, fromStr, toStr)
 
       // 업로드해둔 매매내역이 있으면 새로 불러온 구간 기준으로 마커를 다시 계산하고,
       // 재생 없이 바로 전체를 펼쳐서 보여준다 (재생 연습용이 아니라 결과 검토용이라 사용자 요청대로 처리)
@@ -1851,30 +1860,33 @@ export default function ReplayChart() {
     setLoadingCsv(false)
   }
 
-  // 새로 불러온 컨텍스트 캔들(rows)을 앞/뒤에 붙이고 다시 그린다. setData를 다시 부르면 화면이
-  // 기본 위치로 튈 수 있어서, 시간 기준 보이는 범위(getVisibleRange/setVisibleRange)를 그대로
-  // 저장했다가 되돌려서 사용자가 보던 자리 그대로 이어지게 한다(logical 기준은 배열 길이가
-  // 바뀌면 같이 밀리니 여기선 안 쓴다 - 시간은 안 밀린다).
-  const appendContextAndRedraw = (direction, rows) => {
+  // 패닝으로 옆날짜를 이어붙일 때 실제로 구간을 확장하고 다시 그린다(사용자 요청 - "체크한 지표가
+  // 옆날짜에서도 똑같이 나와야지"). rowsRef.current 자체를 확장한 뒤 computeIndicatorsForRange를
+  // 다시 돌려서 볼린저/이평선/RSI/MACD/스토캐스틱/횡보/세션/크로스/신호마커까지 전부 새 구간 기준으로
+  // 재계산한다(loadRange가 여러 날 범위를 불러올 때와 완전히 같은 계산 - 패닝은 그 범위를 점점
+  // 넓히는 것뿐). 재생 위치(indexRef)·포지션·업로드매매내역은 안 건드린다 - 앞(before)에 캔들이
+  // 붙으면 그만큼(shift) 재생 위치도 같이 밀어야 화면상 보고 있던 캔들이 안 바뀐다. 화면(카메라)은
+  // 시간 기준으로 저장했다가 되돌려서 사용자가 보던 자리 그대로 이어지게 한다.
+  const extendRangeAndRedraw = (direction, rows) => {
     if (!rows.length) return
     contextDayCountRef.current = { ...contextDayCountRef.current, [direction]: contextDayCountRef.current[direction] + 1 }
-    if (direction === 'before') {
-      contextBeforeRef.current = [...rows, ...contextBeforeRef.current]
-      contextOffsetRef.current = contextBeforeRef.current.length
-    } else {
-      contextAfterRef.current = [...contextAfterRef.current, ...rows]
-    }
+    const savedIdx = indexRef.current
+    const shift = direction === 'before' ? rows.length : 0
+    const newFromStr = direction === 'before' ? toLocalDateStr(rows[0].time) : originalSelectionRef.current.date
+    const newToStr = direction === 'after' ? toLocalDateStr(rows[rows.length - 1].time) : (originalSelectionRef.current.dateTo || originalSelectionRef.current.date)
+    originalSelectionRef.current = { date: newFromStr, dateTo: newFromStr === newToStr ? '' : newToStr }
+    setSelectedDate(newFromStr)
+    setSelectedDateTo(newFromStr === newToStr ? '' : newToStr)
+
     const ts = chartRef.current?.timeScale()
     const savedRange = ts?.getVisibleRange()
-    const dayRows = rowsRef.current.slice(0, indexRef.current)
-    seriesRef.current?.setData([...contextBeforeRef.current, ...dayRows, ...contextAfterRef.current])
+    computeIndicatorsForRange(fullRowsRef.current, newFromStr, newToStr)
+    if (uploadedTradesRef.current.length > 0) recomputeUploadedTradeMarkers()
+    const newIdx = savedIdx + shift
+    indexRef.current = newIdx
+    setPlayIndex(newIdx)
+    applyIndex(newIdx) // 재생 진행 상태(newIdx)는 유지한 채 새 구간 기준으로 다시 그림
     if (savedRange) ts?.setVisibleRange(savedRange)
-    // 세션박스/이평선 dual-color 선은 logical index로 그려서, 앞(before)에 캔들이 새로 붙어
-    // offset이 바뀌면 다시 그려야 밀린 위치가 맞다. 뒤(after)는 기존 인덱스에 영향이 없다.
-    if (direction === 'before') {
-      applySessionBands(indexRef.current)
-      Object.keys(maDualPrimitiveRef.current).forEach(maId => applyDualMAIndex(maId, indexRef.current))
-    }
   }
 
   const MAX_CONTEXT_DAYS = 5 // 재생 자동추적이 우연히 경계 근처를 지나갈 때도 이 핸들러가 불려서, 방향당 상한을 둬 무한정 불러오지 않게 한다
@@ -1886,9 +1898,7 @@ export default function ReplayChart() {
     if (contextDayCountRef.current[direction] >= MAX_CONTEXT_DAYS) return
     loadingContextRef.current[direction] = true
     try {
-      const edgeRows = direction === 'before' ? contextBeforeRef.current : contextAfterRef.current
-      const anchorRows = edgeRows.length ? edgeRows : rowsRef.current
-      const anchorTime = direction === 'before' ? anchorRows[0].time : anchorRows[anchorRows.length - 1].time
+      const anchorTime = direction === 'before' ? rowsRef.current[0].time : rowsRef.current[rowsRef.current.length - 1].time
       const anchorDate = toLocalDateStr(anchorTime)
 
       let found = findAdjacentDateRows(fullRowsRef.current, anchorDate, direction)
@@ -1913,7 +1923,7 @@ export default function ReplayChart() {
         found = findAdjacentDateRows(fullRowsRef.current, anchorDate, direction)
         if (!found) return
       }
-      appendContextAndRedraw(direction, found)
+      extendRangeAndRedraw(direction, found)
     } finally {
       loadingContextRef.current[direction] = false
     }
