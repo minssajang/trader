@@ -336,14 +336,35 @@ export default function BacktestIntraday() {
             const commonOffsets = [...upperMaps[0].keys()]
               .filter(off => upperMaps.every(m => m.has(off)) && lowerMaps.every(m => m.has(off)))
               .sort((a, b) => a - b)
-            // 체크한 밴드들이 실제로 안 겹치는 순간(상단<하단, 즉 min(상단들) < max(하단들))은 "교집합"이
-            // 아니라 빈 집합이다 - 그런 지점은 건너뛰고, 진짜 겹치는(상단≥하단) 부분만 남긴다(사용자 지적
-            // - "교집합 부분 중 겹침부분만 강조해야해"). 끊긴 곳은 선으로 이어붙이지 않게 세그먼트로 나눈다.
+            // 체크한 밴드 전부가 한꺼번에 안 겹치면(상단<하단) 그 순간엔 무조건 빈 교집합으로 끊겼었는데,
+            // 그러지 말고 안 맞는 밴드를 하나씩 빼가면서 "그래도 서로 겹치는 나머지들"을 찾는다(사용자
+            // 요청 - "하나씩 빠지면 그것을 제외하는 방식"). 매번 상단을 제일 낮게 만드는 밴드와 하단을
+            // 제일 높게 만드는 밴드 중, 빼봤을 때 더 많이 좁혀지는(개선되는) 쪽을 제거하고 다시 시도 -
+            // 밴드가 2개 미만 남을 때까지도 안 겹치면 그 지점은 포기(정말 아무도 안 겹칠 때만).
+            const narrowestOverlap = (offset) => {
+              let active = upperMaps.map((m, i) => ({ upper: m.get(offset), lower: lowerMaps[i].get(offset) }))
+              while (active.length >= 2) {
+                const u = Math.min(...active.map(b => b.upper))
+                const l = Math.max(...active.map(b => b.lower))
+                if (u >= l) return { u, l }
+                const minUpperBand = active.reduce((a, b) => (a.upper <= b.upper ? a : b))
+                const maxLowerBand = active.reduce((a, b) => (a.lower >= b.lower ? a : b))
+                if (minUpperBand === maxLowerBand) {
+                  active = active.filter(b => b !== minUpperBand)
+                } else {
+                  const without = (band) => active.filter(b => b !== band)
+                  const gapOf = (arr) => Math.max(...arr.map(b => b.lower)) - Math.min(...arr.map(b => b.upper))
+                  const w1 = without(minUpperBand), w2 = without(maxLowerBand)
+                  active = gapOf(w1) <= gapOf(w2) ? w1 : w2
+                }
+              }
+              return null
+            }
             const upperPts = [], midPts = [], lowerPts = []
             for (const off of commonOffsets) {
-              const u = Math.min(...upperMaps.map(m => m.get(off)))
-              const l = Math.max(...lowerMaps.map(m => m.get(off)))
-              if (u < l) continue
+              const overlap = narrowestOverlap(off)
+              if (!overlap) continue
+              const { u, l } = overlap
               upperPts.push([off, u])
               lowerPts.push([off, l])
               midPts.push([off, Math.round((u + l) / 2 * 100) / 100])
