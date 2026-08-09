@@ -934,7 +934,7 @@ export default function ReplayChart() {
     if (!containerRef.current) return
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 860,
+      height: 750,
       layout: {
         background: { color: '#0f1115' }, textColor: '#9aa0ab',
         panes: { separatorColor: '#2a2e38', separatorHoverColor: 'rgba(76,175,80,0.15)', enableResize: true },
@@ -3764,7 +3764,7 @@ export default function ReplayChart() {
               </div>
 
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16 }}>
-                <div ref={containerRef} style={{ width: '100%', height: 860 }} />
+                <div ref={containerRef} style={{ width: '100%', height: 750 }} />
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
