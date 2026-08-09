@@ -1676,14 +1676,15 @@ export default function ReplayChart() {
 
       const dayRows = computeIndicatorsForRange(fullRows, fromStr, toStr)
 
-      // 업로드해둔 매매내역이 있으면 새로 불러온 구간 기준으로 마커를 다시 계산하고,
-      // 재생 없이 바로 전체를 펼쳐서 보여준다 (재생 연습용이 아니라 결과 검토용이라 사용자 요청대로 처리)
-      if (uploadedTradesRef.current.length > 0) {
-        recomputeUploadedTradeMarkers()
-        if (dayRows.length > 0) applyIndex(dayRows.length)
-      }
+      if (uploadedTradesRef.current.length > 0) recomputeUploadedTradeMarkers()
 
-      if (dayRows.length === 0) setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
+      if (dayRows.length === 0) {
+        setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
+      } else {
+        // 날짜를 불러오면 바로 전체를 다 펼쳐서 보여준다(학습과 동일, 사용자 요청) - 재생은
+        // '⏮ 처음부터'를 눌러 0으로 되돌린 뒤 쓰면 됨.
+        applyIndex(dayRows.length)
+      }
     } catch (e) {
       setError(e.message)
       rowsRef.current = []
