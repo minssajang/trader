@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import BrandLogo from '../components/BrandLogo'
-import { MonthCalendar, buildAvailableDates } from '../components/BacktestCalendar'
+import { MonthCalendar, buildAvailableDates, CollapsibleCard } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
 import { BOLLINGER_BANDS, rollingBollinger, DONCHIAN_CHANNELS, rollingDonchian } from '../lib/indicators'
 
@@ -224,24 +224,26 @@ export default function BacktestIntraday() {
             })
           }
 
-          // price 모드 전용 오버레이 - 밴드 상/하단을 "시가(0) 기준" 같은 스케일(값 - dayOpen)로 바꿔서
-          // 그 날 가격선과 나란히 겹쳐 그릴 수 있게 한다(사용자 요청 - "중심선을 기준으로" 보여달라는 것).
-          // 왼쪽 체크박스로 여러 밴드를 동시에 켤 수 있으니 bandId -> {upper,lower}로 전부 담아둔다.
+          // price 모드 전용 오버레이 - 밴드 상단/중심선/하단을 "시가(0) 기준" 같은 스케일(값 - dayOpen)로
+          // 바꿔서 그 날 가격선과 나란히 겹쳐 그릴 수 있게 한다(사용자 요청 - "중심선을 기준으로" 보여달라는
+          // 것 + 중심선 자체도 빠져있었다는 지적). 왼쪽 체크박스로 여러 밴드를 동시에 켤 수 있으니
+          // bandId -> {upper,mid,lower}로 전부 담아둔다.
           const overlays = {}
           if (!activeBand) {
             for (const band of overlayBands) {
               const upsLows = overlayUpsLowsById[band.id]
-              const upper = [], lower = []
+              const upper = [], mid = [], lower = []
               for (const r of rows) {
                 const idx = timeToIdx.get(r.time)
-                const u = upsLows.ups[idx], l = upsLows.lows[idx]
-                if (u == null || l == null) continue
+                const u = upsLows.ups[idx], l = upsLows.lows[idx], m = upsLows.mids[idx]
+                if (u == null || l == null || m == null) continue
                 const d = new Date(r.time * 1000)
                 const minutes = d.getHours() * 60 + d.getMinutes()
                 upper.push([minutes, Math.round((u - dayOpen) * 100) / 100])
+                mid.push([minutes, Math.round((m - dayOpen) * 100) / 100])
                 lower.push([minutes, Math.round((l - dayOpen) * 100) / 100])
               }
-              overlays[band.id] = { upper, lower }
+              overlays[band.id] = { upper, mid, lower }
             }
           }
 
@@ -440,7 +442,7 @@ export default function BacktestIntraday() {
           ctx.strokeStyle = band.color
           ctx.globalAlpha = 0.55
           ctx.lineWidth = 1.2
-          for (const line of [ov.upper, ov.lower]) {
+          for (const line of [ov.upper, ov.mid, ov.lower]) {
             ctx.beginPath()
             let started2 = false
             line.forEach(([mnt, v]) => {
@@ -1171,30 +1173,25 @@ export default function BacktestIntraday() {
               </div>
               {/* 가격선 위에 그 날의 볼린저/도치안 밴드를 겹쳐 그리는 체크박스 - 드롭다운(하나만 고름)이
                   아니라 체크박스로 해야 여러 개를 동시에 켜서 서로 겹쳐볼 수 있다(사용자 요청).
-                  "밴드 폭 자체 보기"(위 오른쪽 표시 드롭다운, seriesMode)와는 별개 기능 - price 모드일 때만 의미있음. */}
-              {seriesMode === 'price' && (
-                <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ fontSize: 11, color: '#9aa0ab', marginBottom: 2 }}>가격선에 밴드 겹쳐보기</div>
-                  {[['볼린저', BOLLINGER_BANDS], ['도치안', DONCHIAN_CHANNELS]].map(([groupLabel, bands]) => (
-                    <div key={groupLabel} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <div style={{ fontSize: 10, color: '#5a5f6a' }}>{groupLabel}</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                        {bands.map(b => (
-                          <label key={b.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={!!enabledOverlay[b.id]}
-                              onChange={() => toggleOverlay(b.id)}
-                              style={{ width: 12, height: 12, margin: 0, accentColor: b.color }}
-                            />
-                            <span style={{ color: enabledOverlay[b.id] ? b.color : '#e8eaed' }}>{b.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                  "밴드 폭 자체 보기"(위 오른쪽 표시 드롭다운, seriesMode)와는 별개 기능 - price 모드일 때만
+                  의미있음. 볼린저/도치안 각각 접었다 펼 수 있는 별도 카드로 분리(사용자 요청, replay.js와 같은 방식). */}
+              {seriesMode === 'price' && [['볼린저', BOLLINGER_BANDS], ['도치안', DONCHIAN_CHANNELS]].map(([groupLabel, bands]) => (
+                <CollapsibleCard key={groupLabel} title={groupLabel} maxWidth={220} defaultOpen={false}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {bands.map(b => (
+                      <label key={b.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!enabledOverlay[b.id]}
+                          onChange={() => toggleOverlay(b.id)}
+                          style={{ width: 12, height: 12, margin: 0, accentColor: b.color }}
+                        />
+                        <span style={{ color: enabledOverlay[b.id] ? b.color : '#e8eaed' }}>{b.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </CollapsibleCard>
+              ))}
               <MonthCalendar
                 viewDate={viewMonth}
                 onNavigate={navigateMonth}
@@ -1223,9 +1220,12 @@ export default function BacktestIntraday() {
             </div>
 
             {/* 오른쪽: 오버레이 차트 */}
-            {/* 왼쪽 사이드바(체크박스/달력/고른 날짜 목록)를 스크롤해서 내려도 이 컬럼이 화면 밖으로
-                사라지지 않게 뷰포트 높이에 sticky로 고정한다 - replay.js/backtest-chart.js와 동일한 방식(사용자 요청). */}
-            <div style={{ flex: 1, minWidth: 280, position: 'sticky', top: 20, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto', overflowX: 'hidden' }}>
+            {/* 왼쪽 사이드바를 스크롤해서 내려도 이 컬럼이 화면 밖으로 사라지지 않게 sticky로 고정한다
+                (사용자 요청). replay.js/backtest-chart.js는 왼쪽 사이드바가 훨씬 길어서 오른쪽 컬럼에도
+                maxHeight+내부스크롤(overflowY:auto)을 같이 걸었는데, 이 페이지는 왼쪽이 그정도로 길지
+                않아서 그 내부스크롤 제약이 오히려 페이지 전체 드래그/스크롤을 막는 문제가 있었다(사용자
+                지적) - maxHeight/overflow 없이 sticky만 남긴다. */}
+            <div style={{ flex: 1, minWidth: 280, position: 'sticky', top: 20 }}>
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20, position: 'relative' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14, flexWrap: 'wrap', fontSize: 12.5, color: '#9aa0ab' }}>
                   <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -1262,7 +1262,7 @@ export default function BacktestIntraday() {
                     onMouseMove={onMouseMove}
                     onMouseLeave={() => { setHoverInfo(null); if (!dragRef.current) setCursorStyle('grab') }}
                     onWheel={onWheel}
-                    style={{ display: 'block', width: '100%', height: 460, cursor: cursorStyle, touchAction: 'none' }}
+                    style={{ display: 'block', width: '100%', height: 600, cursor: cursorStyle, touchAction: 'none' }}
                   />
                   {hoverInfo && (
                     <div style={{
