@@ -361,15 +361,24 @@ export default function BacktestIntraday() {
     ctx.font = '11px -apple-system, "Segoe UI", "Malgun Gothic", sans-serif'
     ctx.strokeStyle = '#232733'
     ctx.fillStyle = '#9aa0ab'
-    // 확대할수록(구간이 좁을수록) 1시간 간격, 축소할수록(구간이 넓을수록) 라벨이 겹치지 않게 2시간 간격
-    const hourStep = windowSize / 60 > 12 ? 2 : 1
-    const firstHour = Math.ceil(windowStart / 60 / hourStep) * hourStep
-    const lastHour = Math.floor(windowEnd / 60)
-    for (let h = firstHour; h <= lastHour; h += hourStep) {
-      const x = px(h * 60)
+    // 확대할수록(구간이 좁을수록) 눈금 간격을 촘촘하게(분 단위까지) 줄이고, 축소할수록 라벨이 안
+    // 겹치게 늘린다(사용자 요청 - "분 표시가 안 되어서 못 알아보겠다"). 라벨도 항상 HH:MM으로 찍어서
+    // 정시가 아닌 지점(예: 07:14)도 축에서 바로 읽을 수 있게 한다.
+    const stepMinutes =
+      windowSize > 720 ? 120 :
+      windowSize > 360 ? 60 :
+      windowSize > 180 ? 30 :
+      windowSize > 90 ? 15 :
+      windowSize > 45 ? 10 :
+      windowSize > 20 ? 5 : 1
+    const firstTick = Math.ceil(windowStart / stepMinutes) * stepMinutes
+    const lastTick = Math.floor(windowEnd / stepMinutes) * stepMinutes
+    for (let mnt = firstTick; mnt <= lastTick; mnt += stepMinutes) {
+      const x = px(mnt)
       ctx.beginPath(); ctx.moveTo(x, 16); ctx.lineTo(x, H - 34); ctx.stroke()
       ctx.textAlign = 'center'
-      ctx.fillText(`${String(h % 24).padStart(2, '0')}:00`, x, H - 16)
+      const hh = Math.floor(mnt / 60) % 24, mm = mnt % 60
+      ctx.fillText(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, x, H - 16)
     }
     for (let i = 0; i <= 5; i++) {
       const v = yLo + (yHi - yLo) * (i / 5)
