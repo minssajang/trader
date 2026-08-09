@@ -5,11 +5,15 @@ import { createChart, CrosshairMode, CandlestickSeries, LineSeries, HistogramSer
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
-import { BOLLINGER_BANDS, rollingBollinger, MOVING_AVERAGES, MADRID_RIBBON, computeMA, rollingRSI, rollingMACD } from '../lib/indicators'
+import { BOLLINGER_BANDS, rollingBollinger, DONCHIAN_CHANNELS, rollingDonchian, MOVING_AVERAGES, MADRID_RIBBON, computeMA, rollingRSI, rollingMACD } from '../lib/indicators'
 
 // 이평선 데이터 계산/토글 파이프라인(maDataRef/maSeriesRef/enabledMA 등)은 id로만 구분하므로
 // 리본도 같은 파이프라인을 공유한다 - 화면에서만 "리본" 카드로 따로 묶어서 보여준다(사용자 요청).
 const ALL_MA = [...MOVING_AVERAGES, ...MADRID_RIBBON]
+
+// 볼린저와 도치안 채널은 상/중/하 3선 구조(bandDataRef/bandSeriesRef/enabledBands 등)를 그대로 공유한다
+// - 화면에서만 "볼린저"/"도치안 채널" 카드로 따로 묶어서 보여준다(ALL_MA와 같은 방식, replay.js와 동일).
+const ALL_BANDS = [...BOLLINGER_BANDS, ...DONCHIAN_CHANNELS]
 
 // 리본 가장 바깥선(M5-M90) 폭이 "지금까지 관측된 것 중" 가장 크게 벌어진/좁아진 지점에 세로선(사용자
 // 요청). lightweight-charts엔 세로선 기본 기능이 없어서 캔버스에 직접 그리는 프리미티브를 새로 만든다
@@ -968,7 +972,7 @@ export default function BacktestChart() {
     // 기본으로 켜둔 볼린저/이평선은 toggleBand/toggleMA(클릭했을 때만 시리즈를 만듦)를 거치지 않으므로,
     // 마운트 시점에 켜져 있는 것들의 실제 차트 시리즈를 여기서 직접 만들어둔다.
     // (마커 시리즈는 항상 "가장 나중에 추가된 것 = 맨 위"여야 하므로 이 시리즈들보다 뒤에 만든다)
-    for (const band of BOLLINGER_BANDS) {
+    for (const band of ALL_BANDS) {
       if (!enabledBands[band.id]) continue
       const color = bandColors[band.id] || band.color
       bandSeriesRef.current[band.id] = {
@@ -1512,8 +1516,8 @@ export default function BacktestChart() {
       if (dayRows.length > 0) {
         const closes = fullRows.map(r => r.close)
         const newBandData = {}
-        for (const band of BOLLINGER_BANDS) {
-          const { mids, ups, lows } = rollingBollinger(closes, band.period)
+        for (const band of ALL_BANDS) {
+          const { mids, ups, lows } = band.type === 'donchian' ? rollingDonchian(fullRows, band.period) : rollingBollinger(closes, band.period)
           const upper = [], middle = [], lower = []
           for (let i = startIdx; i < endIdx; i++) {
             const t = fullRows[i].time
@@ -1885,7 +1889,7 @@ export default function BacktestChart() {
 
     if (turningOn) {
       if (!bandSeriesRef.current[bandId] && chartRef.current) {
-        const band = BOLLINGER_BANDS.find(b => b.id === bandId)
+        const band = ALL_BANDS.find(b => b.id === bandId)
         const color = getBandColor(band)
         bandSeriesRef.current[bandId] = {
           // 위/중심/아래 모두 실선
@@ -2544,7 +2548,7 @@ export default function BacktestChart() {
   const buildChartDataPayload = () => {
     const idx = rowsRef.current.length
     const bands = {}
-    for (const band of BOLLINGER_BANDS) {
+    for (const band of ALL_BANDS) {
       const d = bandDataRef.current[band.id]
       if (!d) continue
       bands[band.id] = {
@@ -3075,6 +3079,70 @@ export default function BacktestChart() {
                       </label>
 
                       {/* 체크한 밴드에 한해 위/중심/아래를 따로 켜고 끌 수 있게 + 색상 기본값 복원 */}
+                      {on && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3 }}>
+                          {[['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
+                            const vis = isLineVisible(band.id, which)
+                            return (
+                              <button
+                                key={which}
+                                type="button"
+                                onClick={() => toggleLine(band.id, which)}
+                                style={{
+                                  fontSize: 10, padding: '2px 6px', borderRadius: 5,
+                                  border: `1px solid ${vis ? color : '#2a2e38'}`,
+                                  background: vis ? `${color}22` : 'none',
+                                  color: vis ? color : '#5a5f6a',
+                                  cursor: 'pointer',
+                                }}
+                              >{wlabel}</button>
+                            )
+                          })}
+                          {isCustom && (
+                            <button
+                              type="button"
+                              onClick={() => resetBandColor(band)}
+                              title="기본 색상으로"
+                              style={{ fontSize: 10, color: '#5a5f6a', background: 'none', border: 'none', cursor: 'pointer', marginLeft: 2 }}
+                            >↺</button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </CollapsibleCard>
+
+              {/* 도치안 채널(Donchian Channel) - 볼린저는 매 순간 표준편차로 출렁여서 판단 기준으로 쓰기
+                  어렵다는 사용자 피드백으로 추가(replay.js와 동일). 상/중/하 3선 구조와 토글/색상 파이프라인
+                  (enabledBands, bandColors, toggleBand, isLineVisible, toggleLine, getBandColor, resetBandColor)을
+                  볼린저와 완전히 공유한다(둘 다 ALL_BANDS 소속, bandId만 다름) - 카드만 따로 분리. */}
+              <CollapsibleCard title="도치안 채널" maxWidth={170}>
+                {DONCHIAN_CHANNELS.map(band => {
+                  const on = !!enabledBands[band.id]
+                  const color = getBandColor(band)
+                  const isCustom = !!bandColors[band.id]
+                  return (
+                    <div key={band.id} style={{ padding: '3px 0' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() => toggleBand(band.id)}
+                          style={{ width: 13, height: 13, margin: 0, accentColor: color, flexShrink: 0 }}
+                        />
+                        <span style={{ flex: 1 }}>{band.label}</span>
+                        {/* 네모를 누르면 브라우저 기본 색상선택기가 뜬다 - 기본값은 DONCHIAN_CHANNELS의 원래 색(볼린저와 동일) */}
+                        <input
+                          type="color"
+                          value={color}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => setBandColor(band.id, e.target.value)}
+                          title="색상변경 가능"
+                          style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}
+                        />
+                      </label>
+
                       {on && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3 }}>
                           {[['upper', '상'], ['middle', '중'], ['lower', '하']].map(([which, wlabel]) => {
