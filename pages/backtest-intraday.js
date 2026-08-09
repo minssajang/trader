@@ -7,15 +7,6 @@ import { MonthCalendar, buildAvailableDates, CollapsibleCard } from '../componen
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
 import { BOLLINGER_BANDS, rollingBollinger, DONCHIAN_CHANNELS, rollingDonchian } from '../lib/indicators'
 
-// 오버레이 차트에서 "가격(시가 대비 편차)" 대신 볼린저/도치안 밴드 "폭"을 날짜별로 겹쳐볼 수 있게
-// 하는 선택지(사용자 요청) - points 배열이 [분, 값] 구조로 동일해서 draw()를 포함한 기존 오버레이
-// 파이프라인(달력 선택/팬·줌/평균선/호버)을 그대로 재사용한다. 값만 "시가 대비 편차"에서 "그 순간
-// 밴드 폭"으로 바뀔 뿐, 그래서 시가(0) 기준선처럼 편차 전용 표시만 모드에 따라 조건부로 뺀다.
-const SERIES_MODE_OPTIONS = [
-  { id: 'price', label: '가격(시가 대비 편차)' },
-  ...BOLLINGER_BANDS.map(b => ({ id: b.id, label: b.label + ' 폭' })),
-  ...DONCHIAN_CHANNELS.map(b => ({ id: b.id, label: b.label + ' 폭' })),
-]
 const ALL_BAND_DEFS = [...BOLLINGER_BANDS, ...DONCHIAN_CHANNELS]
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ztrdgcebsxbhtckstlhn.supabase.co'
@@ -126,14 +117,18 @@ export default function BacktestIntraday() {
   // 평균선은 기본으로 자동으로 안 그리고, 이 버튼을 켜야만 그린다(사용자 요청 - 시키지 않은 걸
   // 자동으로 하지 말고 옵션 버튼으로 빼둘 것)
   const [showAverage, setShowAverage] = useState(rs.showAverage ?? false)
-  // 오버레이 차트에 뭘 그릴지 - 'price'(기본, 시가 대비 편차) 또는 볼린저/도치안 밴드 id(그 밴드의 폭)
-  const [seriesMode, setSeriesMode] = useState(rs.seriesMode ?? 'price')
-  // price 모드일 때, 각 날짜의 가격선 위에 그 날의 볼린저/도치안 밴드(상단·하단)도 "시가(0선) 기준"
-  // 같은 스케일로 겹쳐 그린다(사용자 요청 - "중심선을 기준으로 밴드를 보여줘야 할 거 아니냐"). 왼쪽
-  // 체크박스로 여러 개를 동시에 켤 수 있어야 서로 겹쳐볼 수 있다(사용자 요청) - bandId -> boolean.
-  // 위 seriesMode(밴드 폭 자체 보기)와는 별개 기능 - 둘 다 유지.
+  // 각 날짜의 가격선 위에 그 날의 볼린저/도치안 밴드(상단·중심·하단)도 "시가(0선) 기준" 같은 스케일로
+  // 겹쳐 그린다(사용자 요청 - "중심선을 기준으로 밴드를 보여줘야 할 거 아니냐"). 왼쪽 체크박스로 여러
+  // 개를 동시에 켤 수 있어야 서로 겹쳐볼 수 있다(사용자 요청) - bandId -> boolean.
   const [enabledOverlay, setEnabledOverlay] = useState(rs.enabledOverlay ?? {})
   const toggleOverlay = (bandId) => setEnabledOverlay(prev => ({ ...prev, [bandId]: !prev[bandId] }))
+  // 위/중심/아래 각 줄을 따로 숨길 수도 있게 - replay.js/backtest-chart.js와 완전히 동일한 기능(사용자
+  // 요청 - "리플레이와 똑같이 만들어두라니까" 체크박스만 있고 이게 빠져있었음). 기본은 다 보임(true).
+  const [overlayLineVisibility, setOverlayLineVisibility] = useState(rs.overlayLineVisibility ?? {})
+  const isOverlayLineVisible = (bandId, which) => overlayLineVisibility[`${bandId}:${which}`] !== false
+  const toggleOverlayLine = (bandId, which) => {
+    setOverlayLineVisibility(prev => ({ ...prev, [`${bandId}:${which}`]: !isOverlayLineVisible(bandId, which) }))
+  }
   // 지금 보고 있는 구간 - 드래그(팬)로 시작 위치를, 휠(줌)로 폭을 바꾼다
   const [windowStart, setWindowStart] = useState(0)
   const [windowSize, setWindowSize] = useState(DEFAULT_WINDOW_MIN)
@@ -146,8 +141,7 @@ export default function BacktestIntraday() {
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
-  // `${symbol}:${y}-${m}` - seriesMode만 바뀌어 재계산될 땐 날짜 선택을 유지하기 위한 비교용.
-  // localStorage에서 selectedDates를 복원했을 때, 데이터 로딩 effect가 "새 달로 바뀜"으로 오판해서
+  // `${symbol}:${y}-${m}` - localStorage에서 selectedDates를 복원했을 때, 데이터 로딩 effect가 "새 달로 바뀜"으로 오판해서
   // 복원된 날짜 선택을 곧바로 지워버리지 않도록 복원된 심볼/달로 미리 채워둔다.
   const lastMonthKeyRef = useRef(rs.selectedDates?.length ? `${rs.symbol ?? 'NASDAQ'}:${viewMonth.getFullYear()}-${viewMonth.getMonth()}` : null)
   const lastLoadedSymbolRef = useRef(null) // days/dayRowsRef를 심볼이 바뀔 때만 통째로 새로 시작하기 위한 비교용
@@ -163,10 +157,10 @@ export default function BacktestIntraday() {
       window.localStorage.setItem(INTRADAY_SETTINGS_KEY, JSON.stringify({
         symbol,
         viewMonth: { y: viewMonth.getFullYear(), m: viewMonth.getMonth() },
-        selectedDates, showAverage, seriesMode, enabledOverlay,
+        selectedDates, showAverage, enabledOverlay, overlayLineVisibility,
       }))
     } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 */ }
-  }, [symbol, viewMonth, selectedDates, showAverage, seriesMode, enabledOverlay])
+  }, [symbol, viewMonth, selectedDates, showAverage, enabledOverlay, overlayLineVisibility])
 
   useEffect(() => {
     let ignore = false
@@ -217,22 +211,15 @@ export default function BacktestIntraday() {
         }
         if (ignore) return
 
-        // seriesMode가 볼린저/도치안 폭일 때, 그리고/또는 오버레이용 밴드를 골랐을 때만 계산한다
-        // ("가격만" 보는 기본 상태에선 불필요한 비용을 안 씀).
+        // 체크박스로 켠 오버레이 밴드만 계산한다("아무것도 안 켠" 기본 상태에선 불필요한 비용을 안 씀).
         // fullRows(이 파일 전체, 이번 달보다 앞선 날짜도 포함)를 그대로 기준으로 계산해야 월초 며칠도
         // 워밍업(예: 1시간B/1시간D = 1200분 = 20시간치 이전 데이터)이 채워진다 - replay.js와 같은 방식.
-        const activeBand = ALL_BAND_DEFS.find(b => b.id === seriesMode)
         const overlayBands = ALL_BAND_DEFS.filter(b => enabledOverlay[b.id]) // 체크박스로 여러 개 동시 선택 가능
-        let bandWidth = null, timeToIdx = null
+        let timeToIdx = null
         const overlayUpsLowsById = {} // bandId -> {ups, lows} (fullRows 인덱스 기준)
-        if (activeBand || overlayBands.length > 0) {
+        if (overlayBands.length > 0) {
           timeToIdx = new Map(fullRows.map((r, i) => [r.time, i]))
           const closes = fullRows.map(r => r.close)
-          if (activeBand) {
-            // 지금 고른 밴드 하나만 계산(비용 절감) - 볼린저는 종가 기준, 도치안은 고가/저가 기준
-            const { ups, lows } = activeBand.type === 'donchian' ? rollingDonchian(fullRows, activeBand.period) : rollingBollinger(closes, activeBand.period)
-            bandWidth = ups.map((u, i) => (u != null ? u - lows[i] : null))
-          }
           for (const band of overlayBands) {
             overlayUpsLowsById[band.id] = band.type === 'donchian' ? rollingDonchian(fullRows, band.period) : rollingBollinger(closes, band.period)
           }
@@ -283,45 +270,51 @@ export default function BacktestIntraday() {
           // 07:00 캔들 자기 자신의 점도 정확히 0이 된다(그래야 겹쳐 그린 모든 날짜가 07:00에서 전부
           // 같은 점(0)에서 만난다 - 사용자 확인).
           const dayOpen = (refRow || rows[0]).close
-          let points
-          if (activeBand) {
-            // 밴드 폭 모드 - 시가 대비 편차가 아니라 그 순간의 실제 폭 값 그대로. 워밍업이 아직 안
-            // 채워진(월초 극초반) 캔들은 폭이 null이라 건너뛴다.
-            points = rows
-              .map(r => {
-                const idx = timeToIdx.get(r.time)
-                const w = bandWidth[idx]
-                if (w == null) return null
-                return [rowOffset(r), Math.round(w * 100) / 100]
-              })
-              .filter(Boolean)
-          } else {
-            points = rows.map(r => [rowOffset(r), Math.round((r.close - dayOpen) * 100) / 100])
-          }
+          const points = rows.map(r => [rowOffset(r), Math.round((r.close - dayOpen) * 100) / 100])
 
-          // price 모드 전용 오버레이 - 밴드 상단/중심선/하단을 "시가(0) 기준" 같은 스케일(값 - dayOpen)로
-          // 바꿔서 그 날 가격선과 나란히 겹쳐 그릴 수 있게 한다(사용자 요청 - "중심선을 기준으로" 보여달라는
+          // 볼린저/도치안 밴드 상단/중심선/하단을 "시가(0) 기준" 같은 스케일(값 - dayOpen)로 바꿔서
+          // 그 날 가격선과 나란히 겹쳐 그릴 수 있게 한다(사용자 요청 - "중심선을 기준으로" 보여달라는
           // 것 + 중심선 자체도 빠져있었다는 지적). 왼쪽 체크박스로 여러 밴드를 동시에 켤 수 있으니
           // bandId -> {upper,mid,lower}로 전부 담아둔다.
           const overlays = {}
-          if (!activeBand) {
-            for (const band of overlayBands) {
-              const upsLows = overlayUpsLowsById[band.id]
-              const upper = [], mid = [], lower = []
-              for (const r of rows) {
-                const idx = timeToIdx.get(r.time)
-                const u = upsLows.ups[idx], l = upsLows.lows[idx], m = upsLows.mids[idx]
-                if (u == null || l == null || m == null) continue
-                const off = rowOffset(r)
-                upper.push([off, Math.round((u - dayOpen) * 100) / 100])
-                mid.push([off, Math.round((m - dayOpen) * 100) / 100])
-                lower.push([off, Math.round((l - dayOpen) * 100) / 100])
-              }
-              overlays[band.id] = { upper, mid, lower }
+          for (const band of overlayBands) {
+            const upsLows = overlayUpsLowsById[band.id]
+            const upper = [], mid = [], lower = []
+            for (const r of rows) {
+              const idx = timeToIdx.get(r.time)
+              const u = upsLows.ups[idx], l = upsLows.lows[idx], m = upsLows.mids[idx]
+              if (u == null || l == null || m == null) continue
+              const off = rowOffset(r)
+              upper.push([off, Math.round((u - dayOpen) * 100) / 100])
+              mid.push([off, Math.round((m - dayOpen) * 100) / 100])
+              lower.push([off, Math.round((l - dayOpen) * 100) / 100])
             }
+            overlays[band.id] = { upper, mid, lower }
           }
 
-          nextDays.push({ date, points, overlays })
+          // 교집합(사용자 요청) - 체크한 밴드가 2개 이상이면, 그 밴드들이 전부 공통으로 겹치는 가장
+          // 좁은 구간(상단=체크한 밴드들 중 제일 낮은 상단, 하단=제일 높은 하단)을 따로 계산한다.
+          // "밴드는 교집합, 이평선(중심선)은 그 교집합의 한가운데"라는 사용자 설명대로 mid도 같이 둔다.
+          let intersection = null
+          const activeBandIds = Object.keys(overlays)
+          if (activeBandIds.length >= 2) {
+            const upperMaps = activeBandIds.map(id => new Map(overlays[id].upper))
+            const lowerMaps = activeBandIds.map(id => new Map(overlays[id].lower))
+            const commonOffsets = [...upperMaps[0].keys()]
+              .filter(off => upperMaps.every(m => m.has(off)) && lowerMaps.every(m => m.has(off)))
+              .sort((a, b) => a - b)
+            const upper = [], mid = [], lower = []
+            for (const off of commonOffsets) {
+              const u = Math.min(...upperMaps.map(m => m.get(off)))
+              const l = Math.max(...lowerMaps.map(m => m.get(off)))
+              upper.push([off, u])
+              lower.push([off, l])
+              mid.push([off, Math.round((u + l) / 2 * 100) / 100])
+            }
+            intersection = { upper, mid, lower }
+          }
+
+          nextDays.push({ date, points, overlays, intersection })
           nextDayRows[date] = rows // "시간대별 변동성 분석"은 편차가 아니라 원본 high/low/close가 필요해서 따로 보관
         }
         if (!ignore) {
@@ -341,8 +334,8 @@ export default function BacktestIntraday() {
             })
             dayRowsRef.current = { ...dayRowsRef.current, ...nextDayRows }
           }
-          // 달/심볼이 바뀔 때만 날짜 선택을 초기화한다 - seriesMode(가격↔밴드폭)만 바꿨을 때는
-          // 고른 날짜를 그대로 유지해야 방금 겹쳐보던 날짜들의 폭을 바로 이어서 볼 수 있다(사용자 편의).
+          // 달/심볼이 바뀔 때만 날짜 선택을 초기화한다 - 오버레이 밴드 체크만 바꿨을 때는 고른 날짜를
+          // 그대로 유지해야 방금 겹쳐보던 날짜들을 바로 이어서 볼 수 있다(사용자 편의).
           const monthKey = `${symbol}:${y}-${m}`
           if (lastMonthKeyRef.current !== monthKey) {
             lastMonthKeyRef.current = monthKey
@@ -359,7 +352,7 @@ export default function BacktestIntraday() {
     })()
 
     return () => { ignore = true }
-  }, [viewMonth, datasets, seriesMode, enabledOverlay])
+  }, [viewMonth, datasets, enabledOverlay])
 
   // 실제로 그릴 대상 = 달력에서 고른 날짜들만(days 전체가 아니라)
   const selectedSeries = useMemo(
@@ -389,8 +382,9 @@ export default function BacktestIntraday() {
       // 겹쳐 그리는 밴드가 가격선보다 위/아래로 더 벌어질 수 있으니 y축 자동범위에도 포함시킨다
       // (안 그러면 밴드 선이 차트 위/아래로 잘려서 안 보임).
       if (d.overlays) {
-        for (const ov of Object.values(d.overlays)) {
-          for (const line of [ov.upper, ov.lower]) {
+        for (const [bandId, ov] of Object.entries(d.overlays)) {
+          for (const [which, line] of [['upper', ov.upper], ['lower', ov.lower]]) {
+            if (!isOverlayLineVisible(bandId, which)) continue
             for (const [, v] of line) {
               if (v < lo) lo = v
               if (v > hi) hi = v
@@ -402,7 +396,7 @@ export default function BacktestIntraday() {
     if (!Number.isFinite(lo)) return { yLo: -1, yHi: 1 }
     const pad = (hi - lo) * 0.08 || 1
     return { yLo: lo - pad, yHi: hi + pad }
-  }, [selectedSeries])
+  }, [selectedSeries, overlayLineVisibility])
   // 차트 본문을 위아래로 끌면 세로 위치(0점 포함) 자체가 그만큼 옮겨진다(사용자 요청) - value 단위 오프셋.
   const [yPan, setYPan] = useState(0)
   const { yLo, yHi } = useMemo(() => {
@@ -483,16 +477,13 @@ export default function BacktestIntraday() {
       ctx.fillText(v.toFixed(0), 48, y + 4)
     }
 
-    // "시가(0)" 기준선은 가격 편차 모드에서만 의미가 있다(밴드 폭은 0 기준이 아니라 그 자체가 값).
-    if (seriesMode === 'price') {
-      const zeroY = py(0)
-      ctx.strokeStyle = '#9aa0ab'
-      ctx.setLineDash([4, 4])
-      ctx.beginPath(); ctx.moveTo(56, zeroY); ctx.lineTo(W - 20, zeroY); ctx.stroke()
-      ctx.setLineDash([])
-      ctx.textAlign = 'left'
-      ctx.fillText('시가(07:00, 0)', 58, zeroY - 5)
-    }
+    const zeroY = py(0)
+    ctx.strokeStyle = '#9aa0ab'
+    ctx.setLineDash([4, 4])
+    ctx.beginPath(); ctx.moveTo(56, zeroY); ctx.lineTo(W - 20, zeroY); ctx.stroke()
+    ctx.setLineDash([])
+    ctx.textAlign = 'left'
+    ctx.fillText('시가(07:00, 0)', 58, zeroY - 5)
 
     // 세계 주요 시장 개장 시각 - 지금 보이는 구간 안에 있을 때만 세로 점선 + 라벨로 표시.
     // SESSION_OPENS.minute은 실제 시각(0~1439) 그대로 두고(시간대별 분석 쪽 막대그래프도 실제 시(hour)
@@ -536,7 +527,8 @@ export default function BacktestIntraday() {
           ctx.strokeStyle = band.color
           ctx.globalAlpha = 0.55
           ctx.lineWidth = 1.2
-          for (const line of [ov.upper, ov.mid, ov.lower]) {
+          for (const [which, line] of [['upper', ov.upper], ['mid', ov.mid], ['lower', ov.lower]]) {
+            if (!isOverlayLineVisible(band.id, which)) continue
             ctx.beginPath()
             let started2 = false
             line.forEach(([mnt, v]) => {
@@ -548,6 +540,26 @@ export default function BacktestIntraday() {
           }
           ctx.globalAlpha = 1
         }
+      }
+
+      // 교집합(사용자 요청) - 체크한 밴드 2개 이상이 전부 겹치는 가장 좁은 구간을 흰색 굵은 선으로
+      // 도드라지게 그린다. 개별 밴드 색상과 안 겹치게 흰색 고정, 상/중/하 전부 표시(개별 상/중/하
+      // 토글과는 무관 - 교집합은 파생값이라 항상 다 보여줌).
+      if (d.intersection) {
+        ctx.strokeStyle = '#FFFFFF'
+        ctx.globalAlpha = 0.9
+        ctx.lineWidth = 1.8
+        for (const line of [d.intersection.upper, d.intersection.mid, d.intersection.lower]) {
+          ctx.beginPath()
+          let started3 = false
+          line.forEach(([mnt, v]) => {
+            if (!inWindow(mnt)) return
+            const x = px(mnt), y = py(v)
+            if (!started3) { ctx.moveTo(x, y); started3 = true } else ctx.lineTo(x, y)
+          })
+          ctx.stroke()
+        }
+        ctx.globalAlpha = 1
       }
     })
 
@@ -573,7 +585,7 @@ export default function BacktestIntraday() {
       ctx.beginPath(); ctx.moveTo(hx, 16); ctx.lineTo(hx, H - 34); ctx.stroke()
       ctx.globalAlpha = 1
     }
-  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd, windowSize, seriesMode])
+  }, [selectedSeries, yLo, yHi, avgSeries, showAverage, hoverInfo, windowStart, windowEnd, windowSize, overlayLineVisibility])
 
   useEffect(() => {
     draw()
@@ -719,7 +731,7 @@ export default function BacktestIntraday() {
         symbol,
         viewMonth: { y: viewMonth.getFullYear(), m: viewMonth.getMonth() },
         selectedDates,
-        showAverage: false, seriesMode: 'price', enabledOverlay: {},
+        showAverage: false, enabledOverlay: {}, overlayLineVisibility: {},
       }))
     } catch { /* ignore */ }
     window.location.reload()
@@ -1128,26 +1140,50 @@ export default function BacktestIntraday() {
               >↺ 설정 초기화</button>
               {/* 가격선 위에 그 날의 볼린저/도치안 밴드를 겹쳐 그리는 체크박스 - 드롭다운(하나만 고름)이
                   아니라 체크박스로 해야 여러 개를 동시에 켜서 서로 겹쳐볼 수 있다(사용자 요청).
-                  "밴드 폭 자체 보기"(위 오른쪽 표시 드롭다운, seriesMode)와는 별개 기능 - price 모드일 때만
-                  의미있음. 볼린저/도치안 각각 접었다 펼 수 있는 별도 카드로 분리(사용자 요청, replay.js와 같은 방식). */}
+                  볼린저/도치안 각각 접었다 펼 수 있는 별도 카드로 분리(사용자 요청, replay.js와 같은 방식). */}
               {/* localStorage에서 복원된 체크 상태가 있는데 카드가 기본 접힘이면 체크 표시가 안 보여서
                   "새로고침하니 체크한 게 사라졌다"로 오해할 수 있다(사용자 지적) - 복원 시점에 이미
                   켜진 밴드가 있는 그룹은 처음부터 펼쳐서 보여준다. */}
-              {seriesMode === 'price' && [['볼린저', BOLLINGER_BANDS], ['도치안', DONCHIAN_CHANNELS]].map(([groupLabel, bands]) => (
+              {[['볼린저', BOLLINGER_BANDS], ['도치안', DONCHIAN_CHANNELS]].map(([groupLabel, bands]) => (
                 <CollapsibleCard key={groupLabel} title={groupLabel} maxWidth={220} defaultOpen={bands.some(b => enabledOverlay[b.id])}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {bands.map(b => (
-                      <label key={b.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={!!enabledOverlay[b.id]}
-                          onChange={() => toggleOverlay(b.id)}
-                          style={{ width: 12, height: 12, margin: 0, accentColor: b.color }}
-                        />
-                        <span style={{ color: enabledOverlay[b.id] ? b.color : '#e8eaed' }}>{b.label}</span>
-                      </label>
-                    ))}
-                  </div>
+                  {bands.map(b => {
+                    const on = !!enabledOverlay[b.id]
+                    return (
+                      <div key={b.id} style={{ padding: '3px 0' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => toggleOverlay(b.id)}
+                            style={{ width: 12, height: 12, margin: 0, accentColor: b.color, flexShrink: 0 }}
+                          />
+                          <span style={{ color: on ? b.color : '#e8eaed' }}>{b.label}</span>
+                        </label>
+                        {/* replay.js/backtest-chart.js와 동일 - 체크한 밴드에 한해 위/중심/아래를 따로 켜고 끌 수 있게(사용자 요청) */}
+                        {on && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 16, marginTop: 3 }}>
+                            {[['upper', '상'], ['mid', '중'], ['lower', '하']].map(([which, wlabel]) => {
+                              const vis = isOverlayLineVisible(b.id, which)
+                              return (
+                                <button
+                                  key={which}
+                                  type="button"
+                                  onClick={() => toggleOverlayLine(b.id, which)}
+                                  style={{
+                                    fontSize: 10, padding: '2px 6px', borderRadius: 5,
+                                    border: `1px solid ${vis ? b.color : '#2a2e38'}`,
+                                    background: vis ? `${b.color}22` : 'none',
+                                    color: vis ? b.color : '#5a5f6a',
+                                    cursor: 'pointer',
+                                  }}
+                                >{wlabel}</button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </CollapsibleCard>
               ))}
               <MonthCalendar
@@ -1189,24 +1225,6 @@ export default function BacktestIntraday() {
             <div style={{ flex: 1, minWidth: 280, position: 'sticky', top: 20 }}>
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20, position: 'relative' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14, flexWrap: 'wrap', fontSize: 12.5, color: '#9aa0ab' }}>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <span>표시</span>
-                    <select
-                      value={seriesMode}
-                      onChange={e => setSeriesMode(e.target.value)}
-                      style={{ background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}
-                    >
-                      <optgroup label="가격">
-                        <option value="price">시가 대비 편차</option>
-                      </optgroup>
-                      <optgroup label="볼린저 폭">
-                        {BOLLINGER_BANDS.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
-                      </optgroup>
-                      <optgroup label="도치안 폭">
-                        {DONCHIAN_CHANNELS.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
-                      </optgroup>
-                    </select>
-                  </label>
                   <span>고른 날짜별로 색이 다릅니다(왼쪽 목록 참고)</span>
                   {selectedSeries.length >= 2 && (
                     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -1248,19 +1266,15 @@ export default function BacktestIntraday() {
                       <div style={{ color: '#9aa0ab', fontSize: 11, marginBottom: 4 }}>{fmtHM(hoverInfo.minute)}</div>
                       {showAverage && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                          <span>{seriesMode === 'price' ? '평균 편차' : '평균 폭'}</span><b>{hoverInfo.avg != null ? hoverInfo.avg.toFixed(1) + 'pt' : '-'}</b>
+                          <span>평균 편차</span><b>{hoverInfo.avg != null ? hoverInfo.avg.toFixed(1) + 'pt' : '-'}</b>
                         </div>
                       )}
-                      {seriesMode === 'price' && (
-                        <>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                            <span>시가 위</span><b>{hoverInfo.up}일</b>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                            <span>시가 아래</span><b>{hoverInfo.down}일</b>
-                          </div>
-                        </>
-                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span>시가 위</span><b>{hoverInfo.up}일</b>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span>시가 아래</span><b>{hoverInfo.down}일</b>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1283,16 +1297,12 @@ export default function BacktestIntraday() {
 
               {selectedSeries.length > 0 && (
                 <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-                  {(seriesMode === 'price' ? [
+                  {[
                     ['고른 거래일 수', `${selectedSeries.length}일`],
                     ['마감이 시가보다 높은 날', `${upDays} / ${selectedSeries.length}일`],
                     ['평균 마감 편차(시가 대비)', `${avgFinal.toFixed(1)}pt`],
                     ['일중 최대 편차폭', `${maxAbs.toFixed(0)}pt`],
-                  ] : [
-                    ['고른 거래일 수', `${selectedSeries.length}일`],
-                    ['평균 마감 폭', `${avgFinal.toFixed(1)}pt`],
-                    ['일중 최대 폭', `${maxAbs.toFixed(0)}pt`],
-                  ]).map(([k, v]) => (
+                  ].map(([k, v]) => (
                     <div key={k} style={{ flex: '1 1 140px', background: '#171a21', border: '1px solid #2a2e38', borderRadius: 10, padding: '12px 14px' }}>
                       <div style={{ color: '#9aa0ab', fontSize: 11.5, marginBottom: 4 }}>{k}</div>
                       <div style={{ fontSize: 17, fontWeight: 700 }}>{v}</div>
