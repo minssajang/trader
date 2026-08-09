@@ -315,9 +315,9 @@ const RIBBON_RED = '#FF0000'
 // 구조만 dual"이라는 요청이라 상승/하락 둘 다 원래 단색 그대로 넣어둠.
 const DUAL_DEFAULT_UP_COLOR = { hma60: '#00D5FF', hma100: '#FF9800', wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
 const DUAL_DEFAULT_DOWN_COLOR = { wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
-// 리본 18개 + "3분/5분/15분 H"(hma60/hma100/hma300, 사용자 요청) - 이 id들은 단색 대신
+// 리본 18개 + "3분/5분/15분/1시간 H"(hma60/hma100/hma300/hma1200, 사용자 요청) - 이 id들은 단색 대신
 // 상승/하락 두 색으로 동적 렌더링한다.
-const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60', 'hma100', 'hma300', 'wma17_1m', 'wma17_5m', 'wma4_1h'])
+const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60', 'hma100', 'hma300', 'hma1200', 'wma17_1m', 'wma17_5m', 'wma4_1h'])
 const isDualColor = (maId) => DUAL_COLOR_IDS.has(maId)
 const RIBBON_IDS = new Set(MADRID_RIBBON.map(m => m.id))
 const isRibbonId = (maId) => RIBBON_IDS.has(maId)
