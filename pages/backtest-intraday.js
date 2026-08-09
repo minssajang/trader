@@ -124,6 +124,7 @@ export default function BacktestIntraday() {
   // 복원된 날짜 선택을 곧바로 지워버리지 않도록 복원된 심볼/달로 미리 채워둔다.
   const lastMonthKeyRef = useRef(rs.selectedDates?.length ? `${rs.symbol ?? 'NASDAQ'}:${viewMonth.getFullYear()}-${viewMonth.getMonth()}` : null)
   const dragRef = useRef(null) // {startClientX, startWindowStart} - 드래그 중일 때만 값이 있음
+  const rangeAnchorRef = useRef('') // 마지막으로 클릭한 날짜 - Shift+클릭으로 범위 선택할 때 시작점(replay.js와 같은 방식)
   const datasetCacheRef = useRef({}) // dataset.id -> parsed rows(전체) 캐시
   const dayRowsRef = useRef({}) // date -> 그 날의 원본 캔들 행(open/high/low/close/time) - "시간대별 변동성 분석"에서 씀
   const pdfContainerRef = useRef(null) // PDF로 캡처할 숨겨진(화면 밖) 리포트 DOM
@@ -658,15 +659,45 @@ export default function BacktestIntraday() {
     return `${fmtKoreanDate(dates[0])}~${fmtKoreanDate(dates[dates.length - 1])}`
   }
 
+  // 설정 초기화 버튼 - backtest-chart.js(학습페이지)와 같은 기능(사용자 요청). 다만 이 페이지는
+  // 심볼/달/고른 날짜까지 같은 저장키에 같이 담아두므로(학습페이지는 별도 키로 분리돼있음), 초기화해도
+  // 지금 보고 있던 심볼/달/날짜 선택은 그대로 유지하고 표시설정(평균선/표시모드/오버레이 밴드)만 되돌린다.
+  const resetChartSettings = () => {
+    if (typeof window === 'undefined') return
+    if (!window.confirm('차트 설정을 전부 기본값으로 초기화할까요? (심볼/날짜는 유지됩니다)')) return
+    try {
+      window.localStorage.setItem(INTRADAY_SETTINGS_KEY, JSON.stringify({
+        symbol,
+        viewMonth: { y: viewMonth.getFullYear(), m: viewMonth.getMonth() },
+        selectedDates,
+        showAverage: false, seriesMode: 'price', enabledOverlay: {},
+      }))
+    } catch { /* ignore */ }
+    window.location.reload()
+  }
+
   // 달력 클릭 = 그 날짜를 선택 목록에 넣거나 뺀다(토글). availableDates는 데이터셋 범위 전체 기준이라
   // 주말이나 (경계에 걸려 잘려서) 오버레이에서 빠진 날도 "데이터 있음"으로 클릭 가능하게 나올 수 있어서,
   // 실제로 days 안에 있는(완전한 거래일인) 날짜만 선택 가능하게 막는다.
-  const handleDayClick = (dateStr) => {
+  // Shift+클릭하면 직전 클릭 날짜(anchor)부터 지금 클릭한 날짜까지 구간 안의 거래일을 한번에 전부
+  // 선택목록에 추가한다(replay.js의 범위선택을 이식 - 사용자 요청). 이 페이지는 원래도 클릭할 때마다
+  // 목록에 "추가"되는 방식이라 replay.js처럼 별도 "여러 날 선택 모드" 스위치 없이 Shift+클릭만으로 충분.
+  const handleDayClick = (dateStr, shiftKey) => {
     if (!days.some(d => d.date === dateStr)) {
       setError('이 날짜는 완전한 거래일이 아니라 겹쳐볼 수 없습니다(주말이거나 캔들 수 부족)')
       return
     }
     setError('')
+    if (shiftKey && rangeAnchorRef.current) {
+      const anchor = rangeAnchorRef.current
+      const from = anchor <= dateStr ? anchor : dateStr
+      const to = anchor <= dateStr ? dateStr : anchor
+      const rangeDates = days.map(d => d.date).filter(d => d >= from && d <= to)
+      setSelectedDates(prev => [...new Set([...prev, ...rangeDates])].sort())
+      rangeAnchorRef.current = dateStr
+      return
+    }
+    rangeAnchorRef.current = dateStr
     setSelectedDates(prev => prev.includes(dateStr) ? prev.filter(d => d !== dateStr) : [...prev, dateStr].sort())
   }
 
@@ -1213,12 +1244,23 @@ export default function BacktestIntraday() {
                   }}>{label}</button>
                 ))}
               </div>
+              <button
+                onClick={resetChartSettings}
+                title="평균선 표시/표시모드/오버레이 밴드 등 표시 설정을 기본값으로 되돌립니다(심볼/날짜는 유지)"
+                style={{
+                  width: '100%', background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
+                  padding: '7px 0', fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                }}
+              >↺ 설정 초기화</button>
               {/* 가격선 위에 그 날의 볼린저/도치안 밴드를 겹쳐 그리는 체크박스 - 드롭다운(하나만 고름)이
                   아니라 체크박스로 해야 여러 개를 동시에 켜서 서로 겹쳐볼 수 있다(사용자 요청).
                   "밴드 폭 자체 보기"(위 오른쪽 표시 드롭다운, seriesMode)와는 별개 기능 - price 모드일 때만
                   의미있음. 볼린저/도치안 각각 접었다 펼 수 있는 별도 카드로 분리(사용자 요청, replay.js와 같은 방식). */}
+              {/* localStorage에서 복원된 체크 상태가 있는데 카드가 기본 접힘이면 체크 표시가 안 보여서
+                  "새로고침하니 체크한 게 사라졌다"로 오해할 수 있다(사용자 지적) - 복원 시점에 이미
+                  켜진 밴드가 있는 그룹은 처음부터 펼쳐서 보여준다. */}
               {seriesMode === 'price' && [['볼린저', BOLLINGER_BANDS], ['도치안', DONCHIAN_CHANNELS]].map(([groupLabel, bands]) => (
-                <CollapsibleCard key={groupLabel} title={groupLabel} maxWidth={220} defaultOpen={false}>
+                <CollapsibleCard key={groupLabel} title={groupLabel} maxWidth={220} defaultOpen={bands.some(b => enabledOverlay[b.id])}>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     {bands.map(b => (
                       <label key={b.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
@@ -1242,6 +1284,9 @@ export default function BacktestIntraday() {
                 onSelect={handleDayClick}
                 maxWidth={220}
               />
+              <div style={{ fontSize: 11, color: '#FFB74D', lineHeight: 1.5 }}>
+                ⚠ 한 번에 너무 긴 기간을 불러오면 느려질 수 있어요 — 1주일 단위로 나눠서 보는 걸 추천해요.
+              </div>
               {selectedDates.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
