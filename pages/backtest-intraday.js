@@ -423,7 +423,7 @@ export default function BacktestIntraday() {
       ctx.stroke()
 
       // 체크박스로 켠 밴드가 있으면 그 날 가격선 위에 상/하단을 겹쳐 그린다 - 날짜색이 아니라
-      // 밴드 고유색(대시선)으로 그려서, 여러 날짜를 겹쳐봐도 "이건 몇 분B/D인지"가 항상 같은 색으로 보인다.
+      // 밴드 고유색(실선)으로 그려서, 여러 날짜를 겹쳐봐도 "이건 몇 분B/D인지"가 항상 같은 색으로 보인다.
       if (d.overlays) {
         for (const band of ALL_BAND_DEFS) {
           const ov = d.overlays[band.id]
@@ -431,7 +431,6 @@ export default function BacktestIntraday() {
           ctx.strokeStyle = band.color
           ctx.globalAlpha = 0.55
           ctx.lineWidth = 1.2
-          ctx.setLineDash([3, 3])
           for (const line of [ov.upper, ov.lower]) {
             ctx.beginPath()
             let started2 = false
@@ -442,7 +441,6 @@ export default function BacktestIntraday() {
             })
             ctx.stroke()
           }
-          ctx.setLineDash([])
           ctx.globalAlpha = 1
         }
       }
@@ -1216,7 +1214,9 @@ export default function BacktestIntraday() {
             </div>
 
             {/* 오른쪽: 오버레이 차트 */}
-            <div style={{ flex: 1, minWidth: 280 }}>
+            {/* 왼쪽 사이드바(체크박스/달력/고른 날짜 목록)를 스크롤해서 내려도 이 컬럼이 화면 밖으로
+                사라지지 않게 뷰포트 높이에 sticky로 고정한다 - replay.js/backtest-chart.js와 동일한 방식(사용자 요청). */}
+            <div style={{ flex: 1, minWidth: 280, position: 'sticky', top: 20, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto', overflowX: 'hidden' }}>
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 20, position: 'relative' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14, flexWrap: 'wrap', fontSize: 12.5, color: '#9aa0ab' }}>
                   <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
