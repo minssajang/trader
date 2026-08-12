@@ -2295,6 +2295,21 @@ export default function ReplayChart() {
           const boundary = dayRows.playStartIdx ?? 0
           const ts = chart.timeScale()
           ts.setVisibleLogicalRange({ from: boundary - INITIAL_VISIBLE_CANDLES / 2, to: boundary + INITIAL_VISIBLE_CANDLES / 2 })
+          // 세로(가격) 중앙 정렬 - 가로 중앙 정렬과 같은 이유(사용자 요청, "처음 로드 순간만"으로 확정).
+          // autoScale은 "지금 보이는 데이터" 기준으로 매 순간 다시 계산되므로, 여기서 맞춰놔도 autoScale을
+          // 다시 켜두면 다음 재계산 때 바로 원래대로 돌아가 버려 사실상 적용 안 한 것과 같다 - 그래서
+          // autoScale을 끄고 지금 자동계산된 범위의 폭(span)은 그대로 유지한 채, 중심만 마지막으로
+          // 그려진 캔들(재생 위치 바로 앞) 종가로 옮긴다. 대신 이후 재생 중 가격이 이 범위를 크게
+          // 벗어나면 캔들이 위/아래로 잘려 안 보일 수 있음(사용자 확인 후 진행) - 새 날짜를 불러오면
+          // 여기서 다시 중앙으로 재조정된다.
+          const ps = seriesRef.current?.priceScale()
+          const priceRange = ps?.getVisibleRange()
+          if (ps && priceRange) {
+            const span = priceRange.to - priceRange.from
+            const centerPrice = dayRows[boundary - 1]?.close ?? (priceRange.from + priceRange.to) / 2
+            ps.applyOptions({ autoScale: false })
+            ps.setVisibleRange({ from: centerPrice - span / 2, to: centerPrice + span / 2 })
+          }
         }
       }
     } catch (e) {
@@ -4827,12 +4842,11 @@ export default function ReplayChart() {
                 {/* 캔들 타이머 - 차트 구석에 고정된 배지가 아니라, 재생 위치(마지막으로 그려진 캔들)를
                     거리를 두고 계속 따라다녀야 한다는 지적(사용자) - updateTimerAnchor가 그 캔들의
                     시각/종가를 실제 화면 좌표로 변환해서 timerAnchor에 넣어두면 그 좌표 기준으로 뜬다.
-                    컨테이너 padding(16px)만큼 보정하고, 캔들 오른쪽으로 40px 떨어뜨린다(사용자 요청 -
-                    캔들에 너무 붙어 있어서 간격을 더 벌림).
+                    컨테이너 padding(16px)만큼 보정하고, 캔들 오른쪽으로 60px 떨어뜨린다(사용자 요청).
                     pointerEvents:none이라 차트 드래그/줌 조작은 그대로 통과한다. */}
                 {timerAnchor && (
                   <span title="다음 캔들이 그려질 때까지 남은 시간" style={{
-                    position: 'absolute', left: timerAnchor.x + 16 + 40, top: timerAnchor.y + 16 - 15,
+                    position: 'absolute', left: timerAnchor.x + 16 + 60, top: timerAnchor.y + 16 - 15,
                     zIndex: 5, pointerEvents: 'none', whiteSpace: 'nowrap',
                     display: 'inline-flex', alignItems: 'center', gap: 6,
                     background: 'rgba(23,26,33,0.92)', border: '1px solid #2a2e38', borderRadius: 9,
