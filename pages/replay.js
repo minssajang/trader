@@ -1145,6 +1145,8 @@ export default function ReplayChart() {
     setError('')
     rowsRef.current = []
     indexRef.current = 0
+    drawnUpToRef.current = 0 // 새 데이터 로드 시 "실제로 그려진 지점"도 반드시 같이 리셋 - 안 하면 이전
+    // 날짜에서 남은 값이 새 날짜의 캔들 인덱스와 안 맞아서 update() 크래시로 이어졌다(실사용 중 재현됨).
     setPlayIndex(0)
     setTotal(0)
     setBluePos(0)
@@ -2202,6 +2204,8 @@ export default function ReplayChart() {
     uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
+    drawnUpToRef.current = 0 // 새 데이터 로드 시 "실제로 그려진 지점"도 반드시 같이 리셋 - 안 하면 이전
+    // 날짜에서 남은 값이 새 날짜의 캔들 인덱스와 안 맞아서 update() 크래시로 이어졌다(실사용 중 재현됨).
     setPlayIndex(0)
     try {
       // 아직 캐시 안 된 파일만 병렬로 받아온다 (캐시된 건 재요청 안 함)
@@ -2339,6 +2343,8 @@ export default function ReplayChart() {
     setError('')
     rowsRef.current = []
     indexRef.current = 0
+    drawnUpToRef.current = 0 // 새 데이터 로드 시 "실제로 그려진 지점"도 반드시 같이 리셋 - 안 하면 이전
+    // 날짜에서 남은 값이 새 날짜의 캔들 인덱스와 안 맞아서 update() 크래시로 이어졌다(실사용 중 재현됨).
     setPlayIndex(0)
     setTotal(0)
     setBluePos(0)
