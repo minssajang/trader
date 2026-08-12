@@ -597,6 +597,16 @@ const SPEEDS = [0.25, 0.5, 1, 2, 3, 5, 20, 60, 100, 200, 300]
 // x1 = 1분봉 1개당 실제 60초(실제 시세 속도) - 사용자 확정. 되돌림(1000으로 바꿨던 건 잘못된 추측이었음).
 const REALTIME_MS = 60000
 const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
+// 캔들 타이머 표시용 - ms를 "1:05" 또는 "48.2초" 형태로 포맷. 1분 이상이면 분:초, 아니면 소수점 1자리 초.
+const formatCandleTimer = (ms) => {
+  const totalSec = Math.max(0, ms / 1000)
+  if (totalSec >= 60) {
+    const m = Math.floor(totalSec / 60)
+    const s = Math.floor(totalSec % 60)
+    return `${m}:${String(s).padStart(2, '0')}`
+  }
+  return `${totalSec.toFixed(1)}초`
+}
 const MA_WIDTHS = [1, 2, 3, 4]
 const RSI_PERIOD = 14
 const MACD_FAST = 12
@@ -909,6 +919,9 @@ export default function ReplayChart() {
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
+  // 다음 캔들이 그려질 때까지 남은 시간(ms) - 재생 중엔 REALTIME_MS/speed에서 0으로 카운트다운하다가
+  // 실제로 캔들이 그려지는 순간 다시 꽉 채워진다. 재생을 멈추거나 배속을 바꾸면 그 배속 기준 풀타임으로 리셋.
+  const [candleTimerMs, setCandleTimerMs] = useState(REALTIME_MS / speed)
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
   // 기본 셋팅(사용자 요청) - 1분 볼린저는 중간선만, 5분/15분/1시간 볼린저는 전체 표시
@@ -1068,6 +1081,8 @@ export default function ReplayChart() {
   const sessionSegmentsRef = useRef({})      // sessionId -> [{startIdx,endIdx,startTime,endTime}]
   const rowsRef = useRef([])
   const intervalRef = useRef(null)
+  const nextCandleAtRef = useRef(0)   // 다음 캔들이 그려질 예정 시각(Date.now() 기준 ms) - 캔들 타이머 표시용
+  const timerTickRef = useRef(null)   // 캔들 타이머 숫자를 화면에 부드럽게 카운트다운시키는 별도의 짧은 인터벌
   const indexRef = useRef(0)
   // 캔들 시리즈(seriesRef)에 실제로 .update()가 호출된 가장 앞선(마지막) 인덱스 - indexRef/playIndex와는
   // 다르다. playIndex는 "지금 빨간 바가 가리키는 위치"(뒤로 돌려볼 수도 있음)인 반면, 이건 "실제로
@@ -1364,7 +1379,8 @@ export default function ReplayChart() {
   const stopPlayback = useCallback(() => {
     setPlaying(false)
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
-  }, [])
+    setCandleTimerMs(REALTIME_MS / speed) // 멈추면 캔들 타이머도 그 배속 기준 풀타임으로 리셋
+  }, [speed])
 
   // 지표 라인은 봉 재생 위치(idx)를 절대 앞서가면 안 된다 - 아직 안 지난 미래 구간의
   // 볼린저 값이 미리 보이면 "다시보기 하면서 판단 연습"이라는 이 페이지의 목적이 깨진다.
@@ -3211,14 +3227,38 @@ export default function ReplayChart() {
     const idealMs = REALTIME_MS / speed
     const tickMs = Math.max(MIN_TICK_MS, idealMs)
     const candlesPerTick = Math.max(1, Math.round(speed * tickMs / REALTIME_MS))
+    // 캔들 타이머(화면 표시용) - 이 배속에서 캔들 1개당 걸리는 시간(idealMs) 기준으로 리셋해두고,
+    // 매 틱마다 "다음 캔들 예정 시각"도 같이 다시 잡는다. 배속을 바꾸면 이 effect가 통째로 재시작되니
+    // (의존성 배열에 speed 포함) 재생 중 배속 버튼을 눌러도 타이머가 곧바로 새 배속 기준으로 맞춰진다.
+    nextCandleAtRef.current = Date.now() + tickMs
+    setCandleTimerMs(idealMs)
     intervalRef.current = setInterval(() => {
       const from = indexRef.current
       const to = Math.min(from + candlesPerTick, rowsRef.current.length)
       applyIncrement(from, to)
+      nextCandleAtRef.current = Date.now() + tickMs
+      setCandleTimerMs(idealMs)
       if (to >= rowsRef.current.length) stopPlayback()
     }, tickMs)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [playing, speed, stopPlayback])
+
+  // 캔들 타이머 화면 숫자를 부드럽게 카운트다운시키는 전용 인터벌 - 위 재생 인터벌(tickMs)은 배속이
+  // 낮으면 몇십 초 단위라 그 주기로만 갱신하면 숫자가 안 움직이는 것처럼 보인다. 100ms마다
+  // nextCandleAtRef(다음 캔들 예정 시각)까지 남은 시간을 다시 계산해서 화면만 갱신한다.
+  useEffect(() => {
+    if (!playing) return
+    timerTickRef.current = setInterval(() => {
+      setCandleTimerMs(Math.max(0, nextCandleAtRef.current - Date.now()))
+    }, 100)
+    return () => { if (timerTickRef.current) clearInterval(timerTickRef.current) }
+  }, [playing])
+
+  // 멈춰있는 동안(재생 전/일시정지 중) 배속 버튼을 누르면 캔들 타이머 표시도 그 배속 기준 풀타임으로
+  // 바로 바뀐다 - 재생 중엔 위 재생 인터벌 effect가 speed 변경 시 통째로 재시작되며 이미 처리한다.
+  useEffect(() => {
+    if (!playing) setCandleTimerMs(REALTIME_MS / speed)
+  }, [speed, playing])
 
   const reset = () => {
     stopPlayback()
@@ -4799,6 +4839,16 @@ export default function ReplayChart() {
                   background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 9,
                   padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
                 }}>{playing ? '⏸ 일시정지' : '▶ 재생'}</button>
+
+                {/* 캔들 타이머 - 다음 캔들이 그려질 때까지 남은 시간. 배속(x1=60초/x2=30초/x60=1초...)에
+                    맞춰 카운트다운하다가 캔들이 그려지는 순간 다시 꽉 찬다. 배속 버튼을 누르면(재생 중이든
+                    멈춰있든) 곧바로 그 배속 기준 시간으로 갱신된다. */}
+                <span title="다음 캔들이 그려질 때까지 남은 시간" style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: '#1b1e26', border: '1px solid #2a2e38', borderRadius: 9,
+                  padding: '8px 14px', fontSize: 14, fontWeight: 700,
+                  color: playing ? '#4CAF50' : '#9aa0ab', fontVariantNumeric: 'tabular-nums',
+                }}>⏱ {formatCandleTimer(candleTimerMs)}</span>
 
                 <button onClick={reset} disabled={!total} style={{
                   background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
