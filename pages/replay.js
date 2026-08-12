@@ -1005,8 +1005,12 @@ export default function ReplayChart() {
   const [twUseTp, setTwUseTp] = useState(true)
   const [twTpExitCross, setTwTpExitCross] = useState(true) // "✅ 익절: H1×H3 크로스 청산" 기본 체크(원본과 동일 - 체크 시 포인트익절은 자동 꺼짐)
   const [twSkipPopup, setTwSkipPopup] = useState(true)
-  const [twGoldArmed, setTwGoldArmed] = useState(null)   // { row: 1~6, side: 'buy'|'sell' } | null
-  const [twNasdaqArmed, setTwNasdaqArmed] = useState(null)
+  // 원본은 체크박스(무장)와 SELL/BUY 방향버튼이 서로 다른 두 개의 토글이다 - 체크박스만 켜도(방향 아직
+  // 안 골라도) 설명 박스는 바로 뜨고(_update_desc_label), 실제 발동엔 방향버튼까지 같이 눌려있어야 한다.
+  const [twGoldChecked, setTwGoldChecked] = useState(null) // 체크된 행 번호(1~6) | null - 1~6 중 하나만
+  const [twGoldDir, setTwGoldDir] = useState(null)         // { row, side } | null - 눌린 방향버튼
+  const [twNasdaqChecked, setTwNasdaqChecked] = useState(null)
+  const [twNasdaqDir, setTwNasdaqDir] = useState(null)
   const [twBlinkPhase, setTwBlinkPhase] = useState(false) // 600ms 점멸 - _blink_timer 그대로
   const [twPopupEl, setTwPopupEl] = useState(null) // 새 창으로 뺐을 때 그 창 안에 만든 portal 대상 div (없으면 페이지 안 모달로 렌더)
   const twWinRef = useRef(null) // 새 창의 window 객체
@@ -1836,15 +1840,16 @@ export default function ReplayChart() {
           openModalPositionAt(side, rows[idx].close, rows[idx].time,
             { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: `row${row}` })
         }
-        if (isGold && twGoldArmed) {
-          const { row, side } = twGoldArmed
+        // 발동 조건 = 체크박스(twXChecked)와 방향버튼(twXDir)이 "같은 행"으로 둘 다 켜져 있을 때만
+        if (isGold && twGoldChecked != null && twGoldDir?.row === twGoldChecked) {
+          const { row, side } = twGoldDir
           const hit = eventListFor(row).find(e => e.idx >= from && e.idx < to && e.side === side)
-          if (hit) { fireRow(row, side, hit.idx); setTwGoldArmed(null) }
+          if (hit) { fireRow(row, side, hit.idx); setTwGoldChecked(null); setTwGoldDir(null) }
         }
-        if (isNasdaq && twNasdaqArmed) {
-          const { row, side } = twNasdaqArmed
+        if (isNasdaq && twNasdaqChecked != null && twNasdaqDir?.row === twNasdaqChecked) {
+          const { row, side } = twNasdaqDir
           const hit = eventListFor(row).find(e => e.idx >= from && e.idx < to && e.side === side)
-          if (hit) { fireRow(row, side, hit.idx); setTwNasdaqArmed(null) }
+          if (hit) { fireRow(row, side, hit.idx); setTwNasdaqChecked(null); setTwNasdaqDir(null) }
         }
         // 5/6번 청산 + 익절(H1×H3) - 무장/체크 여부와 무관하게 항상 감시(원본과 동일)
         if (isGold || isNasdaq) {
@@ -3485,8 +3490,11 @@ export default function ReplayChart() {
   const renderTwReservationTab = (which) => {
     const targetSymbol = which === 'gold' ? 'GOLD' : 'NASDAQ'
     const live = symbol === targetSymbol
-    const armed = which === 'gold' ? twGoldArmed : twNasdaqArmed
-    const setArmed = which === 'gold' ? setTwGoldArmed : setTwNasdaqArmed
+    // checked = 체크박스(무장) 상태(설명 박스는 이것만으로 뜬다), dir = 눌린 방향버튼. 발동엔 둘 다 필요.
+    const checked = which === 'gold' ? twGoldChecked : twNasdaqChecked
+    const setChecked = which === 'gold' ? setTwGoldChecked : setTwNasdaqChecked
+    const dir = which === 'gold' ? twGoldDir : twNasdaqDir
+    const setDir = which === 'gold' ? setTwGoldDir : setTwNasdaqDir
     const title = which === 'gold' ? '🥇 XAUUSD+ 전용' : '📈 NAS100 전용'
     const titleBg = which === 'gold' ? '#B8860B' : '#1565C0'
     const bulkLabel = which === 'gold' ? '🚨 벌크 청산 (XAUUSD+)' : '🚨 벌크 청산 (NAS100)'
@@ -3555,7 +3563,14 @@ export default function ReplayChart() {
       }}>{text}</button>
     )
 
-    const arm = (row, side) => setArmed(a => (a && a.row === row && a.side === side) ? null : { row, side })
+    // 체크박스(무장) - 1~6번 상호배타. 다른 행으로 바뀌거나 해제되면 그 행에 눌려있던 방향버튼도 원복(원본 _reset_row_buttons와 동일).
+    const toggleCheck = (n) => {
+      const next = checked === n ? null : n
+      setChecked(next)
+      if (dir && dir.row !== next) setDir(null)
+    }
+    // 방향버튼(SELL/BUY) - 체크박스와 별개의 토글. 다시 누르면 원복.
+    const pressDir = (row, side) => setDir(d => (d && d.row === row && d.side === side) ? null : { row, side })
 
     return (
       <div>
@@ -3581,36 +3596,36 @@ export default function ReplayChart() {
         </div>
 
         <CollapsibleCard title="🎯 반자동 예약" maxWidth="none" defaultOpen={false}>
-          {rowDef(1, { text: `1번: H1×H3\n${fmtTopBottom(h1, h3)}`, color: row1Color }, armed?.row === 1, () => { if (armed?.row === 1) setArmed(null) },
+          {rowDef(1, { text: `1번: H1×H3\n${fmtTopBottom(h1, h3)}`, color: row1Color }, checked === 1, () => toggleCheck(1),
             <TwStatusDot active={row1Outside || !!row1Armed} colorA={row1Outside ? TW_STATUS_YELLOW : TW_STATUS_ORANGE} />,
-            <>{dirBtn('SELL 🔴 매도', armed?.row === 1 && armed.side === 'sell', () => arm(1, 'sell'), false)}{dirBtn('BUY 🟢 매수', armed?.row === 1 && armed.side === 'buy', () => arm(1, 'buy'), true)}</>)}
-          {rowDef(2, { text: `2번: H3×S5\n${fmtTopBottom(h3, sma100)}`, color: row2Color }, armed?.row === 2, () => { if (armed?.row === 2) setArmed(null) },
+            <>{dirBtn('SELL 🔴 매도', dir?.row === 1 && dir.side === 'sell', () => pressDir(1, 'sell'), false)}{dirBtn('BUY 🟢 매수', dir?.row === 1 && dir.side === 'buy', () => pressDir(1, 'buy'), true)}</>)}
+          {rowDef(2, { text: `2번: H3×S5\n${fmtTopBottom(h3, sma100)}`, color: row2Color }, checked === 2, () => toggleCheck(2),
             <TwStatusDot active={h3 != null && sma100 != null} colorA={row2Golden ? TW_STATUS_BLUE_A : TW_STATUS_PINK_A} colorB={row2Golden ? TW_STATUS_BLUE_B : TW_STATUS_PINK_B} />,
-            <>{dirBtn('SELL 🔴 매도', armed?.row === 2 && armed.side === 'sell', () => arm(2, 'sell'), false)}{dirBtn('BUY 🟢 매수', armed?.row === 2 && armed.side === 'buy', () => arm(2, 'buy'), true)}</>)}
-          {rowDef(3, { text: `3번: 상승추세\n-`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, armed?.row === 3, () => arm(3, 'buy'),
+            <>{dirBtn('SELL 🔴 매도', dir?.row === 2 && dir.side === 'sell', () => pressDir(2, 'sell'), false)}{dirBtn('BUY 🟢 매수', dir?.row === 2 && dir.side === 'buy', () => pressDir(2, 'buy'), true)}</>)}
+          {rowDef(3, { text: `3번: 상승추세\n-`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 3, () => toggleCheck(3),
             <TwStatusDot active={row3Buy} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
-            dirBtn('BUY 🟢 매수', armed?.row === 3, () => arm(3, 'buy'), true))}
-          {rowDef(4, { text: `4번: 하락추세\n-`, color: row4Sell ? TW_TEXT_PINK : TW_TEXT_GRAY }, armed?.row === 4, () => arm(4, 'sell'),
+            dirBtn('BUY 🟢 매수', dir?.row === 3, () => pressDir(3, 'buy'), true))}
+          {rowDef(4, { text: `4번: 하락추세\n-`, color: row4Sell ? TW_TEXT_PINK : TW_TEXT_GRAY }, checked === 4, () => toggleCheck(4),
             <TwStatusDot active={row4Sell} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
-            dirBtn('SELL 🔴 매도', armed?.row === 4, () => arm(4, 'sell'), false))}
-          {rowDef(5, { text: `5번: H60/H100\n${fmtTopBottom(h3, h100)}`, color: row5Golden ? TW_TEXT_BLUE : TW_TEXT_GRAY }, armed?.row === 5, () => arm(5, 'buy'),
+            dirBtn('SELL 🔴 매도', dir?.row === 4, () => pressDir(4, 'sell'), false))}
+          {rowDef(5, { text: `5번: H60/H100\n${fmtTopBottom(h3, h100)}`, color: row5Golden ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 5, () => toggleCheck(5),
             <TwStatusDot readyOff active={h1 != null && sma20 != null && h1 > sma20} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
-            dirBtn('BUY 🟢 매수', armed?.row === 5, () => arm(5, 'buy'), true))}
-          {rowDef(6, { text: `6번: H20/H60\n${fmtTopBottom(h3, h1)}`, color: row6Dead ? TW_TEXT_PINK : TW_TEXT_GRAY }, armed?.row === 6, () => arm(6, 'sell'),
+            dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true))}
+          {rowDef(6, { text: `6번: H20/H60\n${fmtTopBottom(h3, h1)}`, color: row6Dead ? TW_TEXT_PINK : TW_TEXT_GRAY }, checked === 6, () => toggleCheck(6),
             <TwStatusDot readyOff active={h1 != null && sma20 != null && h1 < sma20} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
-            dirBtn('SELL 🔴 매도', armed?.row === 6, () => arm(6, 'sell'), false))}
+            dirBtn('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false))}
         </CollapsibleCard>
 
         <div style={{ marginTop: 8 }}>
           <CollapsibleCard title="📋 신호 설명" maxWidth="none" defaultOpen={false}>
             <div style={{ fontSize: 11.5, color: '#c8ccd4', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
               {[
-                armed?.row === 1 && '1번: H1×H3\n   SMA100 밴드 바깥→안쪽 재진입으로 무장된 뒤, 그 방향과 맞는\n   H1×H3 크로스가 나오면 진입 (재진입·크로스는 동시일 필요 없음)',
-                armed?.row === 2 && '2번: H3(HMA60) × S5(SMA100) 크로스',
-                armed?.row === 3 && '3번: 상승추세 (매수 전용)\n   WMA85>SMA100, 1분스토 골든, 가격>HMA20, HMA20 상승중, HMA300 상승중',
-                armed?.row === 4 && '4번: 하락추세 (매도 전용)\n   WMA85<SMA100, 1분스토 데드, 가격<HMA20, HMA20 하락중, HMA300 하락중',
-                armed?.row === 5 && '5번: HMA20/SMA20 (매수 전용)\n   진입 - HMA60>HMA100, HMA20×SMA20 골든크로스\n   청산 - HMA20×HMA100 데드크로스 (항상 감시)',
-                armed?.row === 6 && '6번: HMA60×HMA100 (매도 전용)\n   진입 - HMA20<SMA20, HMA60×HMA100 데드크로스\n   청산 - HMA20×HMA60 골든크로스 (항상 감시)',
+                checked === 1 && '1번: H1×H3\n   SMA100 밴드 바깥→안쪽 재진입으로 무장된 뒤, 그 방향과 맞는\n   H1×H3 크로스가 나오면 진입 (재진입·크로스는 동시일 필요 없음)',
+                checked === 2 && '2번: H3(HMA60) × S5(SMA100) 크로스',
+                checked === 3 && '3번: 상승추세 (매수 전용)\n   WMA85>SMA100, 1분스토 골든, 가격>HMA20, HMA20 상승중, HMA300 상승중',
+                checked === 4 && '4번: 하락추세 (매도 전용)\n   WMA85<SMA100, 1분스토 데드, 가격<HMA20, HMA20 하락중, HMA300 하락중',
+                checked === 5 && '5번: HMA20/SMA20 (매수 전용)\n   진입 - HMA60>HMA100, HMA20×SMA20 골든크로스\n   청산 - HMA20×HMA100 데드크로스 (항상 감시)',
+                checked === 6 && '6번: HMA60×HMA100 (매도 전용)\n   진입 - HMA20<SMA20, HMA60×HMA100 데드크로스\n   청산 - HMA20×HMA60 골든크로스 (항상 감시)',
               ].filter(Boolean).join('\n\n') || '체크된 신호가 없습니다'}
             </div>
           </CollapsibleCard>
