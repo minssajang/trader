@@ -1777,7 +1777,13 @@ export default function ReplayChart() {
     applySessionBands(to)
     applyShooting5MinIndex(to)
     const rows = rowsRef.current
-    for (let i = from; i < to; i++) seriesRef.current?.update(rows[i])
+    // 캔들 update()가 실패해도(라이브러리 내부 시간순서 오류 등) 재생 위치(indexRef/playIndex)는 반드시
+    // 앞으로 진행돼야 한다 - 여기서 막혀버리면 빨간 바가 그 자리에 영원히 멈추는 버그가 된다.
+    try {
+      for (let i = from; i < to; i++) seriesRef.current?.update(rows[i])
+    } catch (e) {
+      console.error('[재생] 캔들 update 실패, 위치는 계속 진행함:', e)
+    }
     // markerSeriesRef는 applyIndex()가 이미 구간 전체(rowsRef.current 전부)를 앵커로 setData해뒀으므로
     // 여기서 다시 update()할 필요가 없다 - 오히려 재생 위치를 0으로 되돌린 뒤(파란 바 시작점 변경 등)
     // 다시 재생하면 이미 markerSeriesRef에 들어있는 "이후 시각"보다 과거인 rows[i]를 update()하게 되어
@@ -1918,6 +1924,12 @@ export default function ReplayChart() {
     // dayRows 안에서 "선택한 날짜"가 시작되는 idx - loadRange가 재생 위치 초기값으로 씀(전날 끝까지는
     // 이미 그려진 채로 시작, 그 뒤부터 캔들이 하나씩 나타남).
     dayRows.playStartIdx = selectedEmpty ? 0 : selectedStartIdx - startIdx
+    console.log('[전날연결 디버그]', {
+      fromStr, toStr, selectedStartIdx, endIdx, startIdx,
+      selectedDate: fullRows[selectedStartIdx] ? toLocalDateStr(fullRows[selectedStartIdx].time) : null,
+      startRowDate: fullRows[startIdx] ? toLocalDateStr(fullRows[startIdx].time) : null,
+      playStartIdx: dayRows.playStartIdx, dayRowsLength: dayRows.length,
+    })
     rowsRef.current = dayRows
     setTotal(dayRows.length)
     setBluePos(dayRows.length) // 파란 바는 데이터 로드 즉시 맨 끝(전부 로드됨)에 위치
@@ -2191,6 +2203,8 @@ export default function ReplayChart() {
         // 재생 위치(빨간 바)는 전날 끝(=선택한 날짜가 시작되는 지점)에서 출발한다 - 전날 차트는 이미
         // 다 그려진 채로 있고, 거기서부터 선택한 날짜 캔들이 하나씩 새로 나타난다(사용자 요청).
         applyIndex(dayRows.playStartIdx ?? 0)
+        // 전날분이 화면(뷰포트)에 실제로 보이도록 - setData만으로는 예전 줌 상태가 남아있을 수 있어서 명시적으로 맞춰준다
+        chartRef.current?.timeScale().fitContent()
       }
     } catch (e) {
       setError(e.message)
