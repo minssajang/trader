@@ -1892,13 +1892,32 @@ export default function ReplayChart() {
   const computeIndicatorsForRange = (fullRows, fromStr, toStr) => {
     // fromStr 그 날짜에 캔들이 하나도 없어도(주말/휴장일) 통째로 실패시키지 않고, 그 날짜 이후
     // 첫 캔들부터 시작한다 - 범위 중간의 주말은 원래도 그냥 건너뛰어지므로, 시작일도 같은 방식으로 맞춤.
-    let startIdx = fullRows.findIndex(r => toLocalDateStr(r.time) >= fromStr)
-    let endIdx = startIdx
-    if (startIdx >= 0) {
-      endIdx = startIdx
+    let selectedStartIdx = fullRows.findIndex(r => toLocalDateStr(r.time) >= fromStr)
+    let endIdx = selectedStartIdx
+    if (selectedStartIdx >= 0) {
+      endIdx = selectedStartIdx
       while (endIdx < fullRows.length && toLocalDateStr(fullRows[endIdx].time) <= toStr) endIdx++
     }
-    const dayRows = startIdx >= 0 ? fullRows.slice(startIdx, endIdx) : []
+    // 선택한 날짜에 캔들이 하나도 없으면(주말/휴장일) 전날을 찾을 것도 없이 그냥 빈 배열 - loadRange가
+    // "이 날짜엔 캔들이 없어요" 에러를 그대로 띄운다(원래 동작 그대로 유지).
+    const selectedEmpty = selectedStartIdx < 0 || endIdx <= selectedStartIdx
+    // 선택한 날짜 바로 전 거래일(주말/휴장일 건너뛰고 실제 캔들이 있는 그 전날)도 화면에 같이 불러와서
+    // 이어붙인다 - 재생 시작 위치(빨간 바)를 전날 끝(=선택한 날짜 시작)에 두면, 전날 차트는 이미 다
+    // 그려진 채로 있고 선택한 날짜 캔들만 하나씩 새로 나타나는 것처럼 보인다(사용자 요청).
+    let startIdx = selectedStartIdx
+    if (!selectedEmpty && selectedStartIdx > 0) {
+      const selectedDayStr = toLocalDateStr(fullRows[selectedStartIdx].time)
+      let j = selectedStartIdx - 1
+      const prevDayStr = toLocalDateStr(fullRows[j].time)
+      if (prevDayStr < selectedDayStr) {
+        while (j > 0 && toLocalDateStr(fullRows[j - 1].time) === prevDayStr) j--
+        startIdx = j
+      }
+    }
+    const dayRows = selectedEmpty ? [] : fullRows.slice(startIdx, endIdx)
+    // dayRows 안에서 "선택한 날짜"가 시작되는 idx - loadRange가 재생 위치 초기값으로 씀(전날 끝까지는
+    // 이미 그려진 채로 시작, 그 뒤부터 캔들이 하나씩 나타남).
+    dayRows.playStartIdx = selectedEmpty ? 0 : selectedStartIdx - startIdx
     rowsRef.current = dayRows
     setTotal(dayRows.length)
     setBluePos(dayRows.length) // 파란 바는 데이터 로드 즉시 맨 끝(전부 로드됨)에 위치
@@ -2169,9 +2188,9 @@ export default function ReplayChart() {
       if (dayRows.length === 0) {
         setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
       } else {
-        // 날짜를 불러오면 재생 위치(빨간 바)는 항상 맨 처음(캔들 0개, 빈 차트)부터 시작한다 - ▶재생을
-        // 누르거나 파란 바를 드래그해야 캔들이 보이기 시작함. 파란 바는 이와 별개로 total(맨 끝)에 위치.
-        applyIndex(0)
+        // 재생 위치(빨간 바)는 전날 끝(=선택한 날짜가 시작되는 지점)에서 출발한다 - 전날 차트는 이미
+        // 다 그려진 채로 있고, 거기서부터 선택한 날짜 캔들이 하나씩 새로 나타난다(사용자 요청).
+        applyIndex(dayRows.playStartIdx ?? 0)
       }
     } catch (e) {
       setError(e.message)
@@ -3119,7 +3138,8 @@ export default function ReplayChart() {
 
   const play = () => {
     if (!rowsRef.current.length) return
-    if (indexRef.current >= rowsRef.current.length) applyIndex(0)
+    // 끝까지 다 본 뒤 다시 재생하면 절대 0(전날 시작점)이 아니라 선택한 날짜가 시작되는 지점으로 되돌아간다
+    if (indexRef.current >= rowsRef.current.length) applyIndex(rowsRef.current.playStartIdx ?? 0)
     // 재생 위치를 찾기 힘들다는 피드백 - 재생 시작할 때 차트를 지금 캔들이 보이는 오른쪽 끝으로 이동시킨다.
     // 여기서 한 번만 옮겨두면, 그 뒤로 재생되면서 새 캔들이 추가될 때도 lightweight-charts가
     // 오른쪽 끝에 붙어있는 상태를 기본적으로 계속 따라가 준다.
@@ -3145,7 +3165,8 @@ export default function ReplayChart() {
 
   const reset = () => {
     stopPlayback()
-    applyIndex(0)
+    // "처음부터" = 선택한 날짜가 시작되는 지점(전날 끝) - 전날 차트는 계속 그려진 채로 유지됨
+    applyIndex(rowsRef.current.playStartIdx ?? 0)
   }
 
   const scrub = (idx) => {
