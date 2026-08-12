@@ -315,12 +315,17 @@ const RIBBON_RED = '#FF0000'
 // 커스텀 값이 없을 때 RIBBON_LIME/RIBBON_RED 대신 여기서 먼저 찾는다(getDualUpColor/getDualDownColor).
 // 3분H(#00D5FF)/5분H(#FF9800, 원래 단색이던 오렌지)는 사용자 지정, W(wma) 3개는 "색은 원래대로,
 // 구조만 dual"이라는 요청이라 상승/하락 둘 다 원래 단색 그대로 넣어둠.
-const DUAL_DEFAULT_UP_COLOR = { hma60: '#00D5FF', hma100: '#FF9800', wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
-const DUAL_DEFAULT_DOWN_COLOR = { wma17_1m: '#2196F3', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
-// 리본 18개 + "3분/5분/15분/1시간 H"(hma60/hma100/hma300/hma1200, 사용자 요청) - 이 id들은 단색 대신
-// 상승/하락 두 색으로 동적 렌더링한다.
-const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma60', 'hma100', 'hma300', 'hma1200', 'wma17_1m', 'wma17_5m', 'wma4_1h'])
+// hma20(1분 H)도 3분/5분 H처럼 상/하 듀얼로 전환(사용자 요청) - 상승은 원래 단색(#F44336) 그대로,
+// 하락은 화이트로. wma17_1m(1분 W17)은 상/하 둘 다 rgb(41,0,245)로 지정(사용자 요청).
+const DUAL_DEFAULT_UP_COLOR = { hma20: '#F44336', hma60: '#00D5FF', hma100: '#FF9800', wma17_1m: '#2900F5', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
+const DUAL_DEFAULT_DOWN_COLOR = { hma20: '#FFFFFF', wma17_1m: '#2900F5', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
+// 리본 18개 + "1분/3분/5분/15분/1시간 H"(hma20/hma60/hma100/hma300/hma1200, 사용자 요청) - 이 id들은
+// 단색 대신 상승/하락 두 색으로 동적 렌더링한다.
+const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma20', 'hma60', 'hma100', 'hma300', 'hma1200', 'wma17_1m', 'wma17_5m', 'wma4_1h'])
 const isDualColor = (maId) => DUAL_COLOR_IDS.has(maId)
+// 볼린저 중심선만 위/아래(upper/lower)와 다른 고정 색을 쓰는 경우(사용자 요청 - "1분 볼린저 중심선"만
+// rgb(250,17,0)). upper/lower는 그대로 bandColors(공용 색상 피커) 대상이고, 이 override는 middle에만 적용된다.
+const BOLLINGER_MIDDLE_COLOR_OVERRIDE = { sma20: '#FA1100' }
 const RIBBON_IDS = new Set(MADRID_RIBBON.map(m => m.id))
 const isRibbonId = (maId) => RIBBON_IDS.has(maId)
 // hex(#RRGGBB) -> rgba(r,g,b,alpha) 문자열
@@ -1299,7 +1304,7 @@ export default function ReplayChart() {
       const color = bandColors[band.id] || band.color
       bandSeriesRef.current[band.id] = {
         upper: chart.addSeries(LineSeries, { color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:upper`] !== false }),
-        middle: chart.addSeries(LineSeries, { color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:middle`] !== false }),
+        middle: chart.addSeries(LineSeries, { color: BOLLINGER_MIDDLE_COLOR_OVERRIDE[band.id] || color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:middle`] !== false }),
         lower: chart.addSeries(LineSeries, { color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: lineVisibility[`${band.id}:lower`] !== false }),
       }
     }
@@ -1961,6 +1966,10 @@ export default function ReplayChart() {
     } finally {
       indexRef.current = to
       setPlayIndex(to)
+      // 캔들이 새로 그려질 때마다 화면(카메라)도 같이 따라가야 한다(사용자 지적) - play()가 재생 시작
+      // 순간에만 카메라를 한 번 맞추고 그 뒤로는 안 움직여서, 캔들이 계속 오른쪽으로만 쌓이고 화면
+      // 밖으로 넘어가는 문제가 있었다. 매 틱마다 scrubView로 지금 위치를 다시 중앙에 맞춘다.
+      scrubView(to)
       updateTimerAnchor()
     }
   }
@@ -2562,7 +2571,7 @@ export default function ReplayChart() {
     const s = bandSeriesRef.current[bandId]
     if (s) {
       s.upper.applyOptions({ color })
-      s.middle.applyOptions({ color })
+      s.middle.applyOptions({ color: BOLLINGER_MIDDLE_COLOR_OVERRIDE[bandId] || color })
       s.lower.applyOptions({ color })
     }
   }
@@ -2576,7 +2585,7 @@ export default function ReplayChart() {
     const s = bandSeriesRef.current[band.id]
     if (s) {
       s.upper.applyOptions({ color: band.color })
-      s.middle.applyOptions({ color: band.color })
+      s.middle.applyOptions({ color: BOLLINGER_MIDDLE_COLOR_OVERRIDE[band.id] || band.color })
       s.lower.applyOptions({ color: band.color })
     }
   }
@@ -2607,7 +2616,7 @@ export default function ReplayChart() {
         bandSeriesRef.current[bandId] = {
           // 위/중심/아래 모두 실선
           upper: chartRef.current.addSeries(LineSeries, { color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'upper') }),
-          middle: chartRef.current.addSeries(LineSeries, { color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'middle') }),
+          middle: chartRef.current.addSeries(LineSeries, { color: BOLLINGER_MIDDLE_COLOR_OVERRIDE[bandId] || color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'middle') }),
           lower: chartRef.current.addSeries(LineSeries, { color, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, visible: isLineVisible(bandId, 'lower') }),
         }
         bumpMarkerLayer()
