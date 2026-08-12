@@ -3196,10 +3196,11 @@ export default function ReplayChart() {
     if (!rowsRef.current.length) return
     // 끝까지 다 본 뒤 다시 재생하면 절대 0(전날 시작점)이 아니라 선택한 날짜가 시작되는 지점으로 되돌아간다
     if (indexRef.current >= rowsRef.current.length) applyIndex(rowsRef.current.playStartIdx ?? 0)
-    // 재생 위치를 찾기 힘들다는 피드백 - 재생 시작할 때 차트를 지금 캔들이 보이는 오른쪽 끝으로 이동시킨다.
-    // 여기서 한 번만 옮겨두면, 그 뒤로 재생되면서 새 캔들이 추가될 때도 lightweight-charts가
-    // 오른쪽 끝에 붙어있는 상태를 기본적으로 계속 따라가 준다.
-    chartRef.current?.timeScale().scrollToPosition(0, true)
+    // 재생 위치를 찾기 힘들다는 피드백 - 재생 시작할 때 차트를 "지금 재생 위치(indexRef)"가 보이는
+    // 곳으로 이동시킨다. 예전엔 무조건 scrollToPosition(0, true)(차트 전체 데이터 기준 맨 끝)를 썼는데,
+    // 빨간 바를 과거로 드래그해둔 뒤 재생을 누르면 그 위치가 아니라 엉뚱한 오른쪽 끝으로 화면이 순식간에
+    // 튀는 버그였다(사용자 지적) - scrubView는 항상 indexRef 기준으로 카메라를 옮기므로 이 문제가 없다.
+    scrubView(indexRef.current)
     setPlaying(true)
   }
 
@@ -3222,43 +3223,21 @@ export default function ReplayChart() {
   const reset = () => {
     stopPlayback()
     // "처음부터" = 선택한 날짜가 시작되는 지점(전날 끝) - 전날 차트는 계속 그려진 채로 유지됨
-    applyIndex(rowsRef.current.playStartIdx ?? 0)
+    const startIdx = rowsRef.current.playStartIdx ?? 0
+    applyIndex(startIdx)
+    // applyIndex는 데이터/빨간 바 위치만 옮기고 카메라(화면)는 안 건드린다 - 재생을 한참 진행해서
+    // 화면이 오른쪽 끝을 보고 있는 상태에서 처음부터를 누르면 데이터는 리셋돼도 화면은 그대로라
+    // "처음으로 안 간 것처럼" 보이는 버그였다(사용자 지적). scrubView로 카메라도 같이 되돌린다.
+    scrubView(startIdx)
   }
 
-  const scrub = (idx) => {
-    stopPlayback()
-    applyIndex(idx)
-  }
-
-  // 빨간 바를 앞으로 드래그할 때 - 아직 한 번도 안 그려진 구간(drawnUpToRef 이후)이면 캔들을
-  // 실제로 그려준다(applyIncrement와 같은 안전한 방식: 이미 그려진 곳은 건너뛰고 항상 앞으로만).
-  // 뒤로 드래그할 땐 이미 다 그려져 있으니 아무것도 새로 그릴 필요가 없다 - indexRef/playIndex만 옮긴다.
-  const revealTo = (idx) => {
-    const rows = rowsRef.current
-    if (idx > drawnUpToRef.current) {
-      for (let i = drawnUpToRef.current; i < idx; i++) seriesRef.current?.update(rows[i])
-      drawnUpToRef.current = idx
-      syncBands(idx)
-      syncMA(idx)
-      syncRSI(idx)
-      syncMACD(idx)
-      syncMACD5(idx)
-      syncStoch1(idx)
-      syncStoch2(idx)
-      syncStoch3(idx)
-      applyAllMarkers(idx)
-      if (ribbonEnabled) recomputeSpreadExtremes(idx)
-      if (sidewaysEnabled) applySidewaysBands(idx)
-      applySessionBands(idx)
-      applyShooting5MinIndex(idx)
-    }
-    indexRef.current = idx
-    setPlayIndex(idx)
-  }
-
-  // 빨간 바 - 드래그하면 화면만 그 시점으로 옮기고(scrubView, 캔들은 안 지워짐) + 아직 안 그려진 구간이면
-  // revealTo로 실제로 그려준다. 재생 위치(playIndex)도 같이 그 자리로 옮겨둔다. 손을 떼도 그대로 그
-  // 자리에 있고, 다음 ▶재생은 거기서부터 이어진다.
+  // 빨간 바 - 드래그하면 화면(카메라)을 그 시점으로 옮기고(scrubView), 차트도 항상 그 지점까지로
+  // 다시 그린다(applyIndex) - 과거로 드래그하면 그 뒤 캔들은 사라지고(진짜 되감기), 미래로 드래그하면
+  // 그 지점까지 새로 그려진다. 재생 위치(playIndex)도 같이 그 자리로 옮겨진다. 손을 떼도 그대로 그
+  // 자리에 있고, 다음 ▶재생은 거기서부터 이어진다(drawnUpToRef도 idx로 맞춰지므로 다시 재생해도
+  // applyIncrement가 즉시 새 캔들을 그린다 - 예전엔 revealTo가 뒤로 드래그할 때 화면을 안 지워서
+  // drawnUpToRef가 앞서 있는 채로 남았고, 그 상태로 재생하면 drawnUpToRef를 따라잡을 때까지 화면이
+  // 하나도 안 움직이는 버그가 있었다).
   const scrubBarRef = useRef(null)
   const onScrubBarMouseDown = (e) => {
     if (!total) return
@@ -3270,7 +3249,7 @@ export default function ReplayChart() {
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
       const idx = Math.round(ratio * total)
       scrubView(idx)
-      revealTo(idx)
+      applyIndex(idx)
     }
     moveTo(e.clientX)
     const onMove = (ev) => moveTo(ev.clientX)
