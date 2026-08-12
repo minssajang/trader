@@ -4122,6 +4122,15 @@ export default function ReplayChart() {
                   ? `${totalDollars >= 0 ? '+' : ''}$${totalDollars.toFixed(2)}`
                   : `${totalPoints >= 0 ? '+' : ''}${totalPoints.toFixed(2)}pt`}
               </span>
+              {/* 합계 옆에도 벌크 청산 바로가기(사용자 요청) - 아래 목록 끝에 있는 것과 완전히 같은 함수 */}
+              <button
+                type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
+                style={{
+                  width: 'auto', flexShrink: 0, fontSize: 11, padding: '5px 10px', borderRadius: 6, border: 'none',
+                  background: '#FF5722', color: '#fff', fontWeight: 700,
+                  cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
+                }}
+              >🚨 벌크 청산</button>
             </div>
           )
         })()}
@@ -5249,6 +5258,14 @@ export default function ReplayChart() {
                             ? `${totalDollars >= 0 ? '+' : ''}$${totalDollars.toFixed(2)}`
                             : `${totalPoints >= 0 ? '+' : ''}${totalPoints.toFixed(2)}pt`}
                         </span>
+                        <button
+                          type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
+                          style={{
+                            fontSize: 11, padding: '5px 10px', borderRadius: 6, border: 'none',
+                            background: '#FF5722', color: '#fff', fontWeight: 700,
+                            cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
+                          }}
+                        >🚨 벌크 청산</button>
                       </div>
                     )
                   })()}
