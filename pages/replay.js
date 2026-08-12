@@ -4595,30 +4595,28 @@ export default function ReplayChart() {
                   </span>
                 )}
               </div>
-              {/* 재생 진행률 바(빨강) - ▶재생을 처음부터 눌러온 진행 상황을 파란 바(캔들 위치 스크럽) 위에
-                  항상 표시. 파란 바는 드래그로 아무 위치나 스크럽 가능하지만, 빨간 바는 순수 진행률
-                  표시용이라 입력을 받지 않는다(재생/스크럽 둘 다 playIndex를 그대로 따라간다). */}
-              <div style={{ position: 'relative', width: '100%', height: 6, marginTop: 8, background: '#2a2e38', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, height: '100%',
-                  width: `${total ? Math.min(100, (playIndex / total) * 100) : 0}%`,
-                  background: '#F44336', transition: playing ? 'width 0.15s linear' : 'none',
-                }} />
+              {/* 파란 바 - 선택한 날짜의 데이터가 이미 끝까지 다 불러와져 있다는 표시. rowsRef.current(=total)는
+                  날짜를 고르는 즉시 그날 전체가 로드되므로(캔들이 화면에 하나씩 그려지는 것과는 별개), 재생/스크럽과
+                  무관하게 데이터가 있으면 항상 꽉 차 있다 - 빨간 바와 완전히 독립적으로 움직인다(입력 없음). */}
+              <div style={{ width: '100%', height: 6, marginTop: 8, background: '#2a2e38', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: total ? '100%' : '0%', background: '#4FC3F7' }} />
               </div>
               {uploadedTradeFile && (
                 <input
                   type="range" min={0} max={total || 0} value={viewScrubPos}
                   onChange={e => scrubView(Number(e.target.value))}
                   disabled={!total}
-                  title="화면만 그 위치로 이동(재생 위치·아래 파란 바는 그대로 유지됨)"
+                  title="화면만 그 위치로 이동(재생 위치·아래 빨간 바는 그대로 유지됨)"
                   style={{ width: '100%', marginTop: 6, accentColor: '#F44336' }}
                 />
               )}
+              {/* 빨간 바 - 실제 재생/스크럽 위치. 처음엔 0에서 시작하고, ▶재생을 누르면 여기가 차오르면서
+                  진행되며, 클릭·드래그로 직접 위치를 바꿀 수도 있다(원래 파란 바가 하던 역할을 그대로 옮김). */}
               <input
                 type="range" min={0} max={total || 0} value={playIndex}
                 onChange={e => scrub(Number(e.target.value))}
                 disabled={!total}
-                style={{ width: '100%', marginTop: 6 }}
+                style={{ width: '100%', marginTop: 6, accentColor: '#F44336' }}
               />
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
