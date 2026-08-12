@@ -782,7 +782,11 @@ const DEFAULT_DEAD_COLOR = '#FF1744'
 // 나스닥은 MonetaMarkets 공식 사이트(monetamarkets.com/trading/products/indices)에서 직접 확인함
 // - NAS100(Cash): 계약크기 1, 틱당 가치 USD $1. 수수료/스프레드는 계산하지 않음.
 const POINT_VALUE_PER_LOT = { GOLD: 100, NASDAQ: 1 }
-const DEFAULT_STARTING_BALANCE = 10000
+const DEFAULT_STARTING_BALANCE = 100 // 골드/나스닥 모두 시작 잔고 $100(사용자 요청)
+// 분리매매창 골드/나스닥 탭을 전환할 때 랏수/손절/익절 기본값도 같이 바뀐다(사용자 요청) - 매매1 탭은 해당 없음.
+const DEFAULT_TW_LOTS = { gold: 0.02, nasdaq: 0.1 }
+const DEFAULT_TW_SL = { gold: 200, nasdaq: 2000 }
+const DEFAULT_TW_TP = { gold: 500, nasdaq: 5000 }
 const EMPTY_PAIR_SLOTS = [{ a: '', b: '' }, { a: '', b: '' }, { a: '', b: '' }]
 // 세계 3대 시장 개장 시각 - 전부 이 차트/일중패턴 차트의 시간 라벨(브로커 서버+서머타임 오프셋,
 // candleCsv.js 기준 한국시간과 동일) 기준 분(minute-of-day)이다. 유럽(런던)은 서머타임(BST) 기준
@@ -918,7 +922,7 @@ export default function ReplayChart() {
   const rs = settingsRestoreRef.current || {}
   const hasAutoRestoredRef = useRef(false)
 
-  const [symbol, setSymbol] = useState('NASDAQ') // 기본값을 항상 나스닥으로 - 이전 세션에서 골드를 보고 있었어도 새로 열면 나스닥부터 시작(사용자 요청)
+  const [symbol, setSymbol] = useState('GOLD') // 기본값을 항상 골드로 - 이전 세션에서 나스닥을 보고 있었어도 새로 열면 골드부터 시작(사용자 요청)
   // 브로커 서머타임 여부 - 겨울엔 서버시간이 1시간 밀려서(EEST→EET) 한국시간 환산 오프셋이 6→7시간으로 바뀐다.
   // 자동판별할 방법이 없어서 버튼으로 직접 전환하게 함(기본값: 서머타임 켜짐)
   const [summerTime, setSummerTime] = useState(true)
@@ -1025,15 +1029,29 @@ export default function ReplayChart() {
   // 심볼만 로드하므로 다른 심볼 탭은 대기 상태로 표시만 됨).
   const [showTradingWindow, setShowTradingWindow] = useState(false)
   const [twPos, setTwPos] = useState({ x: 80, y: 80 })
-  const [twTab, setTwTab] = useState('strategy1') // 'strategy1' | 'gold' | 'nasdaq'
+  const [twTab, setTwTab] = useState('gold') // 'strategy1' | 'gold' | 'nasdaq' - symbol 기본값(골드)과 맞춤(사용자 지적)
   const [twSwapped, setTwSwapped] = useState(false)
-  const [twLots, setTwLots] = useState(0.01)
-  const [twSl, setTwSl] = useState(100)
-  const [twTp, setTwTp] = useState(200)
+  const [twLots, setTwLots] = useState(DEFAULT_TW_LOTS.gold)
+  const [twSl, setTwSl] = useState(DEFAULT_TW_SL.gold)
+  const [twTp, setTwTp] = useState(DEFAULT_TW_TP.gold)
   const [twUseSl, setTwUseSl] = useState(true)
   const [twUseTp, setTwUseTp] = useState(true)
   const [twTpExitCross, setTwTpExitCross] = useState(true) // "✅ 익절: H1×H3 크로스 청산" 기본 체크(원본과 동일 - 체크 시 포인트익절은 자동 꺼짐)
   const [twSkipPopup, setTwSkipPopup] = useState(true)
+  // symbol(메인 차트 🥇골드/💻나스닥 버튼)이 바뀌면 분리매매창 탭/랏수/손절/익절도 그 심볼 기준으로 같이
+  // 맞춘다(사용자 지적 - "기본값만 나스닥이어야지 나스닥으로 고정해두라는 게 아니다". 분리매매창 탭을
+  // 직접 누르는 방향(id==='gold'/'nasdaq'일 때 setSymbol 호출)은 이미 반영돼 있었는데, 반대로 메인
+  // 심볼 버튼을 눌렀을 때 분리매매창이 안 따라가는 게 실제 빠진 부분이었다. 매매1 탭은 특정 심볼
+  // 전용이 아니라 건드리지 않는다(원치 않게 매매1에서 쫓겨나지 않도록).
+  useEffect(() => {
+    if (twTab === 'strategy1') return
+    const twId = symbol === 'GOLD' ? 'gold' : symbol === 'NASDAQ' ? 'nasdaq' : null
+    if (!twId || twId === twTab) return
+    setTwTab(twId)
+    setTwLots(DEFAULT_TW_LOTS[twId])
+    setTwSl(DEFAULT_TW_SL[twId])
+    setTwTp(DEFAULT_TW_TP[twId])
+  }, [symbol])
   // 원본은 체크박스(무장)와 SELL/BUY 방향버튼이 서로 다른 두 개의 토글이다 - 체크박스만 켜도(방향 아직
   // 안 골라도) 설명 박스는 바로 뜨고(_update_desc_label), 실제 발동엔 방향버튼까지 같이 눌려있어야 한다.
   const [twGoldChecked, setTwGoldChecked] = useState(null) // 체크된 행 번호(1~6) | null - 1~6 중 하나만
@@ -3888,6 +3906,9 @@ export default function ReplayChart() {
             dirBtn('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false))}
         </CollapsibleCard>
 
+        <button type="button" onClick={closeAllPositionsModal} style={{ width: '100%', marginTop: 10, background: '#FF5722', color: 'white', border: 'none', borderRadius: 5, padding: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>{bulkLabel}</button>
+
+        {/* 벌크 청산 버튼 아래로 이동(사용자 요청) - 원래는 반자동 예약 카드 바로 아래에 있었음 */}
         <div style={{ marginTop: 8 }}>
           <CollapsibleCard title="📋 신호 설명" maxWidth="none" defaultOpen={false}>
             <div style={{ fontSize: 11.5, color: '#c8ccd4', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
@@ -3902,8 +3923,6 @@ export default function ReplayChart() {
             </div>
           </CollapsibleCard>
         </div>
-
-        <button type="button" onClick={closeAllPositionsModal} style={{ width: '100%', marginTop: 10, background: '#FF5722', color: 'white', border: 'none', borderRadius: 5, padding: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>{bulkLabel}</button>
 
         {renderTwMoveSlSlots()}
       </div>
@@ -3954,7 +3973,7 @@ export default function ReplayChart() {
             <input type="number" min={1} value={twTp} disabled={!twUseTp} onChange={e => setTwTp(Math.max(1, Number(e.target.value) || 1))}
               style={{ width: 80, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '4px 6px', fontSize: 12.5, opacity: twUseTp ? 1 : 0.5 }} />
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#4CAF50', fontWeight: 700, fontSize: 11.5 }}>
-              <input type="checkbox" checked={twUseTp} onChange={e => setTwUseTp(e.target.checked)} /> 사용
+              <input type="checkbox" checked={twUseTp} onChange={e => { setTwUseTp(e.target.checked); if (e.target.checked) setTwTpExitCross(false) }} /> 사용
             </label>
           </div>
         </div>
@@ -3969,7 +3988,19 @@ export default function ReplayChart() {
 
         <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
           {[['strategy1', '매매1'], ['gold', '골드'], ['nasdaq', '나스닥']].map(([id, label]) => (
-            <button key={id} type="button" onClick={() => setTwTab(id)} style={{
+            <button key={id} type="button" onClick={() => {
+              setTwTab(id)
+              // 골드/나스닥 탭을 선택하면 랏수/손절/익절도 그 심볼 기본값으로 바뀐다(사용자 요청 - "탭을
+              // 나스닥 선택했을 때만 나스닥, 골드를 선택했을 때는 골드 셋팅으로 바뀌어야 함"). 매매1 탭은 해당 없음.
+              if (DEFAULT_TW_LOTS[id] != null) setTwLots(DEFAULT_TW_LOTS[id])
+              if (DEFAULT_TW_SL[id] != null) setTwSl(DEFAULT_TW_SL[id])
+              if (DEFAULT_TW_TP[id] != null) setTwTp(DEFAULT_TW_TP[id])
+              // 탭이 대상으로 하는 심볼과 실제 로드된 차트 데이터(symbol)가 다르면 live가 false가 되어
+              // 수동 SELL/BUY 버튼이 비활성화됐다(가격 기준이 없어서) - 탭을 누르면 차트도 그 심볼로
+              // 같이 전환해서 항상 활성화되게 한다(사용자 요청). 매매1 탭은 심볼 전용이 아니라 해당 없음.
+              if (id === 'gold') setSymbol('GOLD')
+              if (id === 'nasdaq') setSymbol('NASDAQ')
+            }} style={{
               flex: 1, padding: '8px 0', fontSize: 12.5, fontWeight: 700, borderRadius: 7, cursor: 'pointer',
               border: `1px solid ${twTab === id ? '#4CAF50' : '#2a2e38'}`,
               background: twTab === id ? 'rgba(76,175,80,0.15)' : 'none',
@@ -5156,7 +5187,10 @@ export default function ReplayChart() {
           </div>
         </main>
 
-        {showTradingWindow && !twPopupEl && renderTwEmbedded()}
+        {/* document.body에 포탈로 그린다(사용자 지적 - "항상 제일 위" 요청) - 이전엔 페이지 트리 안에
+            그대로 그려서, 조상 요소 중 하나가 stacking context를 만들면(transform/opacity 등) zIndex:1000이
+            그 안에 갇혀서 다른 요소 뒤로 숨을 수 있었다. body에 바로 붙이면 그런 조상 영향을 아예 안 받는다. */}
+        {showTradingWindow && !twPopupEl && createPortal(renderTwEmbedded(), document.body)}
         {showTradingWindow && twPopupEl && createPortal(renderTwPopupContent(), twPopupEl)}
       </div>
     </>
