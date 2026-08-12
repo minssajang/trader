@@ -594,6 +594,7 @@ const BUCKET = 'backtest-data'
 const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 // x1 = 실제 1분봉 그대로(캔들 1개 = 60초). 다른 배속은 전부 이 기준의 배수.
 const SPEEDS = [0.25, 0.5, 1, 2, 3, 5, 20, 60, 100, 200, 300]
+// x1 = 1분봉 1개당 실제 60초(실제 시세 속도) - 사용자 확정. 되돌림(1000으로 바꿨던 건 잘못된 추측이었음).
 const REALTIME_MS = 60000
 const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
 const MA_WIDTHS = [1, 2, 3, 4]
@@ -2167,9 +2168,9 @@ export default function ReplayChart() {
       if (dayRows.length === 0) {
         setError('이 날짜엔 캔들이 없어요 (주말/휴장일일 수 있어요)')
       } else {
-        // 날짜를 불러오면 바로 전체를 다 펼쳐서 보여준다(학습과 동일, 사용자 요청) - 재생은
-        // '⏮ 처음부터'를 눌러 0으로 되돌린 뒤 쓰면 됨.
-        applyIndex(dayRows.length)
+        // 날짜를 불러오면 재생 위치(빨간 바)는 항상 맨 처음(캔들 0개, 빈 차트)부터 시작한다 - ▶재생을
+        // 누르거나 파란 바를 드래그해야 캔들이 보이기 시작함. 파란 바는 이와 별개로 total(맨 끝)에 위치.
+        applyIndex(0)
       }
     } catch (e) {
       setError(e.message)
@@ -3132,9 +3133,13 @@ export default function ReplayChart() {
     const idealMs = REALTIME_MS / speed
     const tickMs = Math.max(MIN_TICK_MS, idealMs)
     const candlesPerTick = Math.max(1, Math.round(speed * tickMs / REALTIME_MS))
+    // eslint-disable-next-line no-console
+    console.log('[재생 디버그] speed=', speed, 'tickMs=', tickMs, 'candlesPerTick=', candlesPerTick, 'total=', rowsRef.current.length)
     intervalRef.current = setInterval(() => {
       const from = indexRef.current
       const to = Math.min(from + candlesPerTick, rowsRef.current.length)
+      // eslint-disable-next-line no-console
+      console.log('[재생 디버그] tick', new Date().toLocaleTimeString(), 'from=', from, 'to=', to)
       applyIncrement(from, to)
       if (to >= rowsRef.current.length) stopPlayback()
     }, tickMs)
@@ -4734,7 +4739,7 @@ export default function ReplayChart() {
                 })}
               </div>
               <div style={{ fontSize: 12.5, color: '#c8ccd4', marginTop: 6, fontWeight: 500 }}>
-                x1 = 1분당 캔들 1개 (실제 시세 속도). 배속은 그 배수 — x2=30초/캔들, x60=1초/캔들
+                x1 = 1초당 캔들 1개. 배속은 그 배수 — x2=0.5초/캔들, x60=1/60초/캔들
               </div>
 
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16 }}>
