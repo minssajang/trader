@@ -1035,7 +1035,7 @@ export default function ReplayChart() {
   const [twSl, setTwSl] = useState(DEFAULT_TW_SL.gold)
   const [twTp, setTwTp] = useState(DEFAULT_TW_TP.gold)
   const [twUseSl, setTwUseSl] = useState(true)
-  const [twUseTp, setTwUseTp] = useState(true)
+  const [twUseTp, setTwUseTp] = useState(false) // twTpExitCross가 기본 켜져 있어서(둘은 상호배타) 포인트 익절은 기본 꺼둔다 - 둘 다 기본 true였던 게 "동시 체크" 버그의 진짜 원인이었음
   const [twTpExitCross, setTwTpExitCross] = useState(true) // "✅ 익절: H1×H3 크로스 청산" 기본 체크(원본과 동일 - 체크 시 포인트익절은 자동 꺼짐)
   const [twSkipPopup, setTwSkipPopup] = useState(true)
   // symbol(메인 차트 🥇골드/💻나스닥 버튼)이 바뀌면 분리매매창 탭/랏수/손절/익절도 그 심볼 기준으로 같이
@@ -3808,11 +3808,12 @@ export default function ReplayChart() {
     const row1Color = row1Outside ? TW_TEXT_ORANGE : TW_TEXT_GRAY
     const row2Golden = h3 != null && sma100 != null && h3 > sma100
     const row2Color = (h3 == null || sma100 == null) ? TW_TEXT_GRAY : (row2Golden ? TW_TEXT_BLUE : TW_TEXT_PINK)
+    // 두 줄(\n)로 나눠 보여주던 걸 "4051.58 X 4048.15" 한 줄로(사용자 요청)
     const fmtTopBottom = (fast, slow) => {
       if (fast == null || slow == null) return '-'
       const golden = fast > slow
       const top = golden ? fast : slow, bottom = golden ? slow : fast
-      return `${top.toFixed(2)}\n${bottom.toFixed(2)}`
+      return `${top.toFixed(2)} X ${bottom.toFixed(2)}`
     }
 
     // 3/4번 라벨 색 - "상승/하락중"(prev 비교) 2개 조건만 빼고 나머지는 그대로 반영한 근사치.
@@ -3892,10 +3893,10 @@ export default function ReplayChart() {
           {rowDef(2, { text: `2번: H3×S5\n${fmtTopBottom(h3, sma100)}`, color: row2Color }, checked === 2, () => toggleCheck(2),
             <TwStatusDot active={h3 != null && sma100 != null} colorA={row2Golden ? TW_STATUS_BLUE_A : TW_STATUS_PINK_A} colorB={row2Golden ? TW_STATUS_BLUE_B : TW_STATUS_PINK_B} />,
             dirPair(2))}
-          {rowDef(3, { text: `3번: 상승추세\n-`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 3, () => toggleCheck(3),
+          {rowDef(3, { text: `3번: 상승추세\n${fmtTopBottom(wma85, sma100)}`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 3, () => toggleCheck(3),
             <TwStatusDot active={row3Buy} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
             dirBtn('BUY 🟢 매수', dir?.row === 3, () => pressDir(3, 'buy'), true))}
-          {rowDef(4, { text: `4번: 하락추세\n-`, color: row4Sell ? TW_TEXT_PINK : TW_TEXT_GRAY }, checked === 4, () => toggleCheck(4),
+          {rowDef(4, { text: `4번: 하락추세\n${fmtTopBottom(wma85, sma100)}`, color: row4Sell ? TW_TEXT_PINK : TW_TEXT_GRAY }, checked === 4, () => toggleCheck(4),
             <TwStatusDot active={row4Sell} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
             dirBtn('SELL 🔴 매도', dir?.row === 4, () => pressDir(4, 'sell'), false))}
           {rowDef(5, { text: `5번: H60/H100\n${fmtTopBottom(h3, h100)}`, color: row5Golden ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 5, () => toggleCheck(5),
