@@ -1246,7 +1246,7 @@ export default function ReplayChart() {
     if (!containerRef.current) return
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 750,
+      height: 700, // 전체 차트 높이(사용자 요청 - 기존 750에서 50px 축소)
       layout: {
         background: { color: '#0f1115' }, textColor: '#9aa0ab',
         panes: { separatorColor: '#2a2e38', separatorHoverColor: 'rgba(76,175,80,0.15)', enableResize: true },
@@ -1368,7 +1368,7 @@ export default function ReplayChart() {
     // 보이는 크기)는 986px로 맞게 바뀌어도 내부 버퍼는 라이브러리 기본값(300x150)에 그대로 남아있어서,
     // 브라우저가 300px짜리 그림을 986px로 늘려 그리는 바람에 실제로 그려지는 캔들 개수가 확 줄어
     // "차트가 중간에서 끊긴 것처럼" 보이는 문제가 있었다(실측으로 확인).
-    const onResize = () => chart.resize(containerRef.current.clientWidth, 750, true)
+    const onResize = () => chart.resize(containerRef.current.clientWidth, 700, true)
     window.addEventListener('resize', onResize)
     // 브라우저 창 자체를 resize할 때만 반응하는 위 리스너로는 부족했다 - 왼쪽 사이드바(달력/체크박스
     // 카드들)의 레이아웃이 차트 생성 시점 이후에 자리잡으면서 컨테이너 폭이 나중에 바뀌는 경우
@@ -1377,7 +1377,7 @@ export default function ReplayChart() {
     // 컨테이너 자체의 크기 변화를 직접 감시해서 항상 실제 폭에 맞춘다.
     const ro = new ResizeObserver(entries => {
       const w = entries[0]?.contentRect?.width
-      if (w) { chart.resize(w, 750, true); updateTimerAnchor() }
+      if (w) { chart.resize(w, 700, true); updateTimerAnchor() }
     })
     ro.observe(containerRef.current)
 
@@ -4838,7 +4838,7 @@ export default function ReplayChart() {
               </div>
 
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, position: 'relative' }}>
-                <div ref={containerRef} style={{ width: '100%', height: 750 }} />
+                <div ref={containerRef} style={{ width: '100%', height: 700 }} />
                 {/* 캔들 타이머 - 차트 구석에 고정된 배지가 아니라, 재생 위치(마지막으로 그려진 캔들)를
                     거리를 두고 계속 따라다녀야 한다는 지적(사용자) - updateTimerAnchor가 그 캔들의
                     시각/종가를 실제 화면 좌표로 변환해서 timerAnchor에 넣어두면 그 좌표 기준으로 뜬다.

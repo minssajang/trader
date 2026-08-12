@@ -883,7 +883,7 @@ export default function BacktestChart() {
     if (!containerRef.current) return
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 750,
+      height: 700, // 전체 차트 높이(사용자 요청 - 기존 750에서 50px 축소, replay.js와 동일)
       layout: {
         background: { color: '#0f1115' }, textColor: '#9aa0ab',
         panes: { separatorColor: '#2a2e38', separatorHoverColor: 'rgba(76,175,80,0.15)', enableResize: true },
@@ -3185,7 +3185,7 @@ export default function BacktestChart() {
               </div>
 
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, position: 'relative' }}>
-                <div ref={containerRef} style={{ width: '100%', height: 750 }} />
+                <div ref={containerRef} style={{ width: '100%', height: 700 }} />
 
                 {clickPopup && (
                   <>
