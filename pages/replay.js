@@ -3472,16 +3472,18 @@ export default function ReplayChart() {
   }
 
   // [상태] 표시등 - 44px 고정폭, 체크박스와 SELL/BUY 버튼 "사이"(원본 QHBoxLayout 순서 그대로: 체크박스→상태→방향버튼).
-  // active=false면 꺼짐. colorB를 주면 twBlinkPhase에 따라 colorA/colorB를 번갈아 점멸, colorB 없이 colorA만
-  // 주면 점멸 없이 고정색(1번 신호). readyOff=true면 꺼짐 스타일이 5/6번처럼 투명 배경+테두리만(READY_OFF).
-  const TwStatusDot = ({ active, colorA, colorB, readyOff }) => {
-    if (!active) {
-      return readyOff
-        ? <span style={{ display: 'inline-block', width: 44, textAlign: 'center', fontSize: 9, fontWeight: 700, padding: '2px 4px', borderRadius: 4, color: TW_READY_OFF.color, background: 'transparent', border: `2px solid ${TW_READY_OFF.border}` }}>상태</span>
-        : <span style={{ display: 'inline-block', width: 44, textAlign: 'center', fontSize: 9, fontWeight: 700, padding: '2px 4px', borderRadius: 4, color: 'white', background: TW_STATUS_OFF.bg, border: `2px solid ${TW_STATUS_OFF.border}` }}>상태</span>
-    }
-    const c = colorB ? (twBlinkPhase ? colorA : colorB) : colorA
-    return <span style={{ display: 'inline-block', width: 44, textAlign: 'center', fontSize: 9, fontWeight: 700, padding: '2px 4px', borderRadius: 4, color: 'white', background: c.bg, border: `2px solid ${c.border}` }}>상태</span>
+  // 항상 배경은 투명(테두리만) - active=false면 회색 테두리로 꺼짐, active=true면 테두리·글자색이 해당 상태색.
+  // colorB를 주면 twBlinkPhase에 따라 colorA/colorB를 번갈아 점멸, colorB 없이 colorA만 주면 점멸 없이 고정색(1번 신호).
+  const TwStatusDot = ({ active, colorA, colorB }) => {
+    const c = active ? (colorB ? (twBlinkPhase ? colorA : colorB) : colorA) : null
+    const borderColor = c ? c.border : TW_STATUS_OFF.border
+    return (
+      <span style={{
+        display: 'inline-block', width: 44, textAlign: 'center', fontSize: 9, fontWeight: 700,
+        padding: '2px 4px', borderRadius: 4, background: 'transparent',
+        color: c ? borderColor : TW_READY_OFF.color, border: `2px solid ${borderColor}`,
+      }}>상태</span>
+    )
   }
 
   // 골드/나스닥 탭 - hma_reservation_tab.py / nas100_tab.py와 완전히 동일한 로직·색상.
@@ -3571,6 +3573,13 @@ export default function ReplayChart() {
     }
     // 방향버튼(SELL/BUY) - 체크박스와 별개의 토글. 다시 누르면 원복.
     const pressDir = (row, side) => setDir(d => (d && d.row === row && d.side === side) ? null : { row, side })
+    // 1/2번처럼 SELL+BUY가 한 쌍인 행 - "버튼 위치 변경"(twSwapped)에 따라 좌우 순서가 같이 바뀐다
+    // (원본 swap_buttons가 상단 수동버튼뿐 아니라 1~2번 행의 short/long_btn도 같이 좌우를 바꿔치기함).
+    const dirPair = (row) => {
+      const sell = dirBtn('SELL 🔴 매도', dir?.row === row && dir.side === 'sell', () => pressDir(row, 'sell'), false)
+      const buy = dirBtn('BUY 🟢 매수', dir?.row === row && dir.side === 'buy', () => pressDir(row, 'buy'), true)
+      return twSwapped ? <>{buy}{sell}</> : <>{sell}{buy}</>
+    }
 
     return (
       <div>
@@ -3598,10 +3607,10 @@ export default function ReplayChart() {
         <CollapsibleCard title="🎯 반자동 예약" maxWidth="none" defaultOpen={false}>
           {rowDef(1, { text: `1번: H1×H3\n${fmtTopBottom(h1, h3)}`, color: row1Color }, checked === 1, () => toggleCheck(1),
             <TwStatusDot active={row1Outside || !!row1Armed} colorA={row1Outside ? TW_STATUS_YELLOW : TW_STATUS_ORANGE} />,
-            <>{dirBtn('SELL 🔴 매도', dir?.row === 1 && dir.side === 'sell', () => pressDir(1, 'sell'), false)}{dirBtn('BUY 🟢 매수', dir?.row === 1 && dir.side === 'buy', () => pressDir(1, 'buy'), true)}</>)}
+            dirPair(1))}
           {rowDef(2, { text: `2번: H3×S5\n${fmtTopBottom(h3, sma100)}`, color: row2Color }, checked === 2, () => toggleCheck(2),
             <TwStatusDot active={h3 != null && sma100 != null} colorA={row2Golden ? TW_STATUS_BLUE_A : TW_STATUS_PINK_A} colorB={row2Golden ? TW_STATUS_BLUE_B : TW_STATUS_PINK_B} />,
-            <>{dirBtn('SELL 🔴 매도', dir?.row === 2 && dir.side === 'sell', () => pressDir(2, 'sell'), false)}{dirBtn('BUY 🟢 매수', dir?.row === 2 && dir.side === 'buy', () => pressDir(2, 'buy'), true)}</>)}
+            dirPair(2))}
           {rowDef(3, { text: `3번: 상승추세\n-`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 3, () => toggleCheck(3),
             <TwStatusDot active={row3Buy} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
             dirBtn('BUY 🟢 매수', dir?.row === 3, () => pressDir(3, 'buy'), true))}
@@ -3609,10 +3618,10 @@ export default function ReplayChart() {
             <TwStatusDot active={row4Sell} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
             dirBtn('SELL 🔴 매도', dir?.row === 4, () => pressDir(4, 'sell'), false))}
           {rowDef(5, { text: `5번: H60/H100\n${fmtTopBottom(h3, h100)}`, color: row5Golden ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 5, () => toggleCheck(5),
-            <TwStatusDot readyOff active={h1 != null && sma20 != null && h1 > sma20} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
+            <TwStatusDot active={h1 != null && sma20 != null && h1 > sma20} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
             dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true))}
           {rowDef(6, { text: `6번: H20/H60\n${fmtTopBottom(h3, h1)}`, color: row6Dead ? TW_TEXT_PINK : TW_TEXT_GRAY }, checked === 6, () => toggleCheck(6),
-            <TwStatusDot readyOff active={h1 != null && sma20 != null && h1 < sma20} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
+            <TwStatusDot active={h1 != null && sma20 != null && h1 < sma20} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
             dirBtn('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false))}
         </CollapsibleCard>
 
