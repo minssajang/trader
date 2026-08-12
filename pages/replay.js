@@ -1039,6 +1039,13 @@ export default function ReplayChart() {
   const [tradeDragOver, setTradeDragOver] = useState(false)
   const [uploadedTradeRows, setUploadedTradeRows] = useState([]) // 현재 불러온 구간 안에 있는 거래 목록(캔들번호 포함) - 마커 찾기 힘들다는 지적으로 추가
   const [viewScrubPos, setViewScrubPos] = useState(0) // 빨간 바 위치 - 재생 위치(파란 바)와 독립적으로 화면만 이동시킬 때 씀
+  // 파란 바 - 재생 버튼과는 완전히 무관, 사용자가 직접 드래그할 때만 움직인다. 데이터를 불러오면
+  // 항상 맨 끝(total)에 가 있는 상태로 시작(사용자 요청) - setTotal이 바뀌는 4곳에서 같이 맞춰준다.
+  const [bluePos, setBluePos] = useState(0)
+  // 빨간 바 - 드래그하면 화면(카메라)만 그 시점으로 옮기면서(scrubView, 이미 그려진 캔들은 안 지움)
+  // 재생 위치(playIndex) 자체도 그 자리로 옮겨둔다. 손을 떼면 그 자리에 그대로 있고, 그 다음
+  // ▶재생을 누르면 거기서부터 이어서 재생된다(재생 버튼을 누르기 전까진 이 값이 곧 재생 위치).
+  const redPos = playIndex
 
   const containerRef = useRef(null)
   const chartRef = useRef(null)
@@ -1130,6 +1137,7 @@ export default function ReplayChart() {
     indexRef.current = 0
     setPlayIndex(0)
     setTotal(0)
+    setBluePos(0)
     seriesRef.current?.setData([])
     markerSeriesRef.current?.setData([])
     bandDataRef.current = {}
@@ -1891,6 +1899,7 @@ export default function ReplayChart() {
     const dayRows = startIdx >= 0 ? fullRows.slice(startIdx, endIdx) : []
     rowsRef.current = dayRows
     setTotal(dayRows.length)
+    setBluePos(dayRows.length) // 파란 바는 데이터 로드 즉시 맨 끝(전부 로드됨)에 위치
     if (dayRows.length === 0) return dayRows
 
     // 볼린저는 그 구간 데이터만으론 워밍업이 부족하니(예: 1시간봉 SMA1200 = 20시간 분량)
@@ -2166,6 +2175,7 @@ export default function ReplayChart() {
       setError(e.message)
       rowsRef.current = []
       setTotal(0)
+    setBluePos(0)
     }
     setLoadingCsv(false)
   }
@@ -2260,6 +2270,7 @@ export default function ReplayChart() {
     indexRef.current = 0
     setPlayIndex(0)
     setTotal(0)
+    setBluePos(0)
     seriesRef.current?.setData([])
     markerSeriesRef.current?.setData([])
     bandDataRef.current = {}
@@ -3140,17 +3151,45 @@ export default function ReplayChart() {
     applyIndex(idx)
   }
 
-  // 시간이동 커스텀 바(빨강) - 막대 안 클릭한 지점으로 바로 이동 + 누른 채로 끌면 계속 따라간다.
-  // scrubView만 호출한다 - scrub(재생 위치 자체를 옮기는 함수)는 절대 안 쓴다(파란 바 전용으로 남겨둠).
+  // 빨간 바 - 드래그하면 화면만 그 시점으로 옮기고(scrubView, 캔들은 안 지워짐) 재생 위치(playIndex)도
+  // 같이 그 자리로 옮겨둔다. 손을 떼도 그대로 그 자리에 있고, 다음 ▶재생은 거기서부터 이어진다.
   const scrubBarRef = useRef(null)
   const onScrubBarMouseDown = (e) => {
     if (!total) return
     const bar = scrubBarRef.current
     if (!bar) return
+    stopPlayback()
     const moveTo = (clientX) => {
       const rect = bar.getBoundingClientRect()
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-      scrubView(Math.round(ratio * total))
+      const idx = Math.round(ratio * total)
+      scrubView(idx)
+      indexRef.current = idx
+      setPlayIndex(idx)
+    }
+    moveTo(e.clientX)
+    const onMove = (ev) => moveTo(ev.clientX)
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  // 파란 바 - 원래 슬라이더가 하던 일(재생 위치 자체를 그 캔들로 점프, 그 뒤는 아직 재생 안 된 상태로
+  // 화면에서 사라짐)을 그대로 하되, 재생 버튼과는 무관하게 사용자가 드래그할 때만 움직인다.
+  const blueBarRef = useRef(null)
+  const onBlueBarMouseDown = (e) => {
+    if (!total) return
+    const bar = blueBarRef.current
+    if (!bar) return
+    const moveTo = (clientX) => {
+      const rect = bar.getBoundingClientRect()
+      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+      const idx = Math.round(ratio * total)
+      setBluePos(idx)
+      scrub(idx)
     }
     moveTo(e.clientX)
     const onMove = (ev) => moveTo(ev.clientX)
@@ -4617,23 +4656,13 @@ export default function ReplayChart() {
                   </span>
                 )}
               </div>
-              {/* 파란 바 - 원래 있던 그대로, 손대지 않음. 재생 위치(playIndex) 자체를 옮기는 슬라이더라
-                  여길 뒤로 당기면 그 뒤 캔들은 다시 "아직 재생 안 된" 상태로 화면에서 사라진다(원래 동작). */}
-              <input
-                type="range" min={0} max={total || 0} value={playIndex}
-                onChange={e => scrub(Number(e.target.value))}
-                disabled={!total}
-                style={{ width: '100%', marginTop: 6 }}
-              />
-
-              {/* 빨간 바 - 시간이동 전용(재생 위치는 절대 안 건드림). 지금까지 재생으로 드러난 캔들은 그대로
-                  다 남아있는 채로, 화면(카메라)만 원하는 시점으로 옮겨서 과거를 훑어볼 때 쓴다.
-                  예전엔 매매내역 CSV를 올렸을 때만 떴는데, 늘 켜져 있게 바꾸고 클릭/드래그로 직접
-                  잡아끌 수 있는 막대+손잡이로 새로 만들었다(scrubView만 호출 - scrub은 절대 안 씀). */}
+              {/* 파란 바 - 재생 버튼과는 완전히 무관, 사용자가 직접 드래그할 때만 움직인다(그 외엔 항상 맨 끝).
+                  드래그하면 원래 슬라이더가 하던 일 그대로(재생 위치 자체를 그 캔들로 점프, 그 뒤는 아직
+                  재생 안 된 상태로 화면에서 사라짐) 수행한다. */}
               <div
-                ref={scrubBarRef}
-                onMouseDown={onScrubBarMouseDown}
-                title="차트 화면만 그 시점으로 이동 - 재생 위치·이미 드러난 캔들은 그대로 유지됩니다"
+                ref={blueBarRef}
+                onMouseDown={onBlueBarMouseDown}
+                title="드래그하면 그 캔들로 재생 위치 자체가 이동합니다(그 뒤 캔들은 다시 안 보이게 됨)"
                 style={{
                   position: 'relative', width: '100%', height: 16, marginTop: 8,
                   background: '#2a2e38', borderRadius: 8, overflow: 'visible',
@@ -4642,11 +4671,36 @@ export default function ReplayChart() {
               >
                 <div style={{
                   position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 8,
-                  width: `${total ? Math.min(100, (viewScrubPos / total) * 100) : 0}%`,
-                  background: '#F44336', pointerEvents: 'none',
+                  width: `${total ? Math.min(100, (bluePos / total) * 100) : 0}%`,
+                  background: '#4FC3F7', pointerEvents: 'none',
                 }} />
                 <div style={{
-                  position: 'absolute', top: '50%', left: `${total ? Math.min(100, (viewScrubPos / total) * 100) : 0}%`,
+                  position: 'absolute', top: '50%', left: `${total ? Math.min(100, (bluePos / total) * 100) : 0}%`,
+                  width: 18, height: 18, marginLeft: -9, marginTop: -9, borderRadius: '50%',
+                  background: '#4FC3F7', border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.5)', pointerEvents: 'none',
+                }} />
+              </div>
+
+              {/* 빨간 바 - 재생 버튼과만 연동(재생하면 자동으로 채워짐). 드래그하는 동안엔 화면(카메라)만
+                  그 시점으로 옮기고(scrubView, 이미 드러난 캔들은 안 사라짐) 손을 떼면 다시 실제 재생
+                  위치로 돌아온다. 예전엔 매매내역 CSV를 올렸을 때만 떴는데 이제 항상 켜져 있다. */}
+              <div
+                ref={scrubBarRef}
+                onMouseDown={onScrubBarMouseDown}
+                title="드래그하는 동안엔 화면만 이동(재생 위치는 그대로) - 손을 떼면 다시 재생 위치를 보여줍니다"
+                style={{
+                  position: 'relative', width: '100%', height: 16, marginTop: 8,
+                  background: '#2a2e38', borderRadius: 8, overflow: 'visible',
+                  cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
+                }}
+              >
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 8,
+                  width: `${total ? Math.min(100, (redPos / total) * 100) : 0}%`,
+                  background: '#F44336', pointerEvents: 'none', transition: playing ? 'width 0.15s linear' : 'none',
+                }} />
+                <div style={{
+                  position: 'absolute', top: '50%', left: `${total ? Math.min(100, (redPos / total) * 100) : 0}%`,
                   width: 18, height: 18, marginLeft: -9, marginTop: -9, borderRadius: '50%',
                   background: '#F44336', border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.5)', pointerEvents: 'none',
                 }} />
