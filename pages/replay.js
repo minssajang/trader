@@ -3140,6 +3140,28 @@ export default function ReplayChart() {
     applyIndex(idx)
   }
 
+  // 시간이동 커스텀 바(빨강) - 막대 안 클릭한 지점으로 바로 이동 + 누른 채로 끌면 계속 따라간다.
+  // scrubView만 호출한다 - scrub(재생 위치 자체를 옮기는 함수)는 절대 안 쓴다(파란 바 전용으로 남겨둠).
+  const scrubBarRef = useRef(null)
+  const onScrubBarMouseDown = (e) => {
+    if (!total) return
+    const bar = scrubBarRef.current
+    if (!bar) return
+    const moveTo = (clientX) => {
+      const rect = bar.getBoundingClientRect()
+      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+      scrubView(Math.round(ratio * total))
+    }
+    moveTo(e.clientX)
+    const onMove = (ev) => moveTo(ev.clientX)
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   // 빨간 바 전용 - 재생 위치(indexRef/playIndex, 파란 바)는 절대 건드리지 않고 차트 "화면"만 그 캔들로 이동시킨다.
   // 지금 보이는 창 너비(logical range)는 유지한 채 중심만 옮긴다.
   const scrubView = (idx) => {
@@ -4595,29 +4617,40 @@ export default function ReplayChart() {
                   </span>
                 )}
               </div>
-              {/* 파란 바 - 선택한 날짜의 데이터가 이미 끝까지 다 불러와져 있다는 표시. rowsRef.current(=total)는
-                  날짜를 고르는 즉시 그날 전체가 로드되므로(캔들이 화면에 하나씩 그려지는 것과는 별개), 재생/스크럽과
-                  무관하게 데이터가 있으면 항상 꽉 차 있다 - 빨간 바와 완전히 독립적으로 움직인다(입력 없음). */}
-              <div style={{ width: '100%', height: 6, marginTop: 8, background: '#2a2e38', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: total ? '100%' : '0%', background: '#4FC3F7' }} />
-              </div>
-              {uploadedTradeFile && (
-                <input
-                  type="range" min={0} max={total || 0} value={viewScrubPos}
-                  onChange={e => scrubView(Number(e.target.value))}
-                  disabled={!total}
-                  title="화면만 그 위치로 이동(재생 위치·아래 빨간 바는 그대로 유지됨)"
-                  style={{ width: '100%', marginTop: 6, accentColor: '#F44336' }}
-                />
-              )}
-              {/* 빨간 바 - 실제 재생/스크럽 위치. 처음엔 0에서 시작하고, ▶재생을 누르면 여기가 차오르면서
-                  진행되며, 클릭·드래그로 직접 위치를 바꿀 수도 있다(원래 파란 바가 하던 역할을 그대로 옮김). */}
+              {/* 파란 바 - 원래 있던 그대로, 손대지 않음. 재생 위치(playIndex) 자체를 옮기는 슬라이더라
+                  여길 뒤로 당기면 그 뒤 캔들은 다시 "아직 재생 안 된" 상태로 화면에서 사라진다(원래 동작). */}
               <input
                 type="range" min={0} max={total || 0} value={playIndex}
                 onChange={e => scrub(Number(e.target.value))}
                 disabled={!total}
-                style={{ width: '100%', marginTop: 6, accentColor: '#F44336' }}
+                style={{ width: '100%', marginTop: 6 }}
               />
+
+              {/* 빨간 바 - 시간이동 전용(재생 위치는 절대 안 건드림). 지금까지 재생으로 드러난 캔들은 그대로
+                  다 남아있는 채로, 화면(카메라)만 원하는 시점으로 옮겨서 과거를 훑어볼 때 쓴다.
+                  예전엔 매매내역 CSV를 올렸을 때만 떴는데, 늘 켜져 있게 바꾸고 클릭/드래그로 직접
+                  잡아끌 수 있는 막대+손잡이로 새로 만들었다(scrubView만 호출 - scrub은 절대 안 씀). */}
+              <div
+                ref={scrubBarRef}
+                onMouseDown={onScrubBarMouseDown}
+                title="차트 화면만 그 시점으로 이동 - 재생 위치·이미 드러난 캔들은 그대로 유지됩니다"
+                style={{
+                  position: 'relative', width: '100%', height: 16, marginTop: 8,
+                  background: '#2a2e38', borderRadius: 8, overflow: 'visible',
+                  cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
+                }}
+              >
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 8,
+                  width: `${total ? Math.min(100, (viewScrubPos / total) * 100) : 0}%`,
+                  background: '#F44336', pointerEvents: 'none',
+                }} />
+                <div style={{
+                  position: 'absolute', top: '50%', left: `${total ? Math.min(100, (viewScrubPos / total) * 100) : 0}%`,
+                  width: 18, height: 18, marginLeft: -9, marginTop: -9, borderRadius: '50%',
+                  background: '#F44336', border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.5)', pointerEvents: 'none',
+                }} />
+              </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
                 <button onClick={playing ? stopPlayback : play} disabled={!total} style={{
