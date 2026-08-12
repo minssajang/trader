@@ -5338,7 +5338,10 @@ export default function ReplayChart() {
             그 안에 갇혀서 다른 요소 뒤로 숨을 수 있었다. body에 바로 붙이면 그런 조상 영향을 아예 안 받는다. */}
         {showTradingWindow && !twPopupEl && createPortal(renderTwEmbedded(), document.body)}
         {showTradingWindow && twPopupEl && createPortal(renderTwPopupContent(), twPopupEl)}
-        {showPositionPanel && createPortal(renderPositionPanel(), document.body)}
+        {/* showPositionPanel 기본값이 true라서 typeof document 체크 없이 바로 document.body를 참조하면
+            서버 프리렌더링(SSR, Node 환경엔 document가 없음)에서 빌드가 깨졌다(실제 배포 에러로 확인) -
+            분리매매창(showTradingWindow 기본 false)은 이 문제가 없어서 못 보고 지나쳤던 부분. */}
+        {showPositionPanel && typeof document !== 'undefined' && createPortal(renderPositionPanel(), document.body)}
       </div>
     </>
   )
