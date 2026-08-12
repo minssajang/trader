@@ -1033,7 +1033,7 @@ export default function ReplayChart() {
   const [twPos, setTwPos] = useState({ x: 80, y: 80 })
   // 매매진입 현황도 분리매매창처럼 떼어낼 수 있게(사용자 요청) - 페이지 안에 고정으로 박혀있던 걸
   // 분리매매창과 같은 방식(드래그 가능한 fixed 패널 + document.body 포탈로 항상 최상단)으로 바꾼다.
-  const [showPositionPanel, setShowPositionPanel] = useState(true)
+  const [showPositionPanel, setShowPositionPanel] = useState(false) // 분리매매창(showTradingWindow)처럼 버튼을 눌러야 뜨게(사용자 지적 - 안 눌렀는데 떠있었음)
   const [posPanelPos, setPosPanelPos] = useState({ x: 80, y: 160 })
   const [twTab, setTwTab] = useState('gold') // 'strategy1' | 'gold' | 'nasdaq' - symbol 기본값(골드)과 맞춤(사용자 지적)
   const [twSwapped, setTwSwapped] = useState(false)
