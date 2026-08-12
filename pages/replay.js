@@ -3282,8 +3282,9 @@ export default function ReplayChart() {
     window.addEventListener('mouseup', onUp)
   }
 
-  // 파란 바 - 원래 슬라이더가 하던 일(재생 위치 자체를 그 캔들로 점프, 그 뒤는 아직 재생 안 된 상태로
-  // 화면에서 사라짐)을 그대로 하되, 재생 버튼과는 무관하게 사용자가 드래그할 때만 움직인다.
+  // 파란 바 - 재생 버튼/재생 위치(빨간 바)와는 완전히 무관, 카메라(화면)만 그 지점으로 옮긴다.
+  // scrub(applyIndex)를 쓰면 재생 위치가 같이 끌려가고 차트가 setData로 통째로 다시 그려지는
+  // 버그가 있었다(사용자 지적) - scrubView로 바꿔서 재생 위치/데이터는 그대로 두고 화면만 이동한다.
   const blueBarRef = useRef(null)
   const onBlueBarMouseDown = (e) => {
     if (!total) return
@@ -3294,7 +3295,7 @@ export default function ReplayChart() {
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
       const idx = Math.round(ratio * total)
       setBluePos(idx)
-      scrub(idx)
+      scrubView(idx)
     }
     moveTo(e.clientX)
     const onMove = (ev) => moveTo(ev.clientX)
@@ -4763,13 +4764,13 @@ export default function ReplayChart() {
                   </span>
                 )}
               </div>
-              {/* 파란 바 - 재생 버튼과는 완전히 무관, 사용자가 직접 드래그할 때만 움직인다(그 외엔 항상 맨 끝).
-                  드래그하면 원래 슬라이더가 하던 일 그대로(재생 위치 자체를 그 캔들로 점프, 그 뒤는 아직
-                  재생 안 된 상태로 화면에서 사라짐) 수행한다. */}
+              {/* 파란 바 - 재생 버튼/재생 위치(빨간 바)와는 완전히 무관, 사용자가 직접 드래그할 때만
+                  움직인다(그 외엔 항상 맨 끝). 드래그하면 화면(카메라)만 그 지점으로 옮기고, 재생 위치나
+                  이미 그려진 캔들은 그대로 유지된다. */}
               <div
                 ref={blueBarRef}
                 onMouseDown={onBlueBarMouseDown}
-                title="드래그하면 그 캔들로 재생 위치 자체가 이동합니다(그 뒤 캔들은 다시 안 보이게 됨)"
+                title="드래그하면 화면만 그 캔들로 이동합니다 (재생 위치는 그대로 유지됩니다)"
                 style={{
                   position: 'relative', width: '100%', height: 16, marginTop: 8,
                   background: '#2a2e38', borderRadius: 8, overflow: 'visible',
