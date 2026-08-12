@@ -1033,8 +1033,16 @@ export default function ReplayChart() {
   const [twPos, setTwPos] = useState({ x: 80, y: 80 })
   // 매매진입 현황도 분리매매창처럼 떼어낼 수 있게(사용자 요청) - 페이지 안에 고정으로 박혀있던 걸
   // 분리매매창과 같은 방식(드래그 가능한 fixed 패널 + document.body 포탈로 항상 최상단)으로 바꾼다.
-  const [showPositionPanel, setShowPositionPanel] = useState(false) // 분리매매창(showTradingWindow)처럼 버튼을 눌러야 뜨게(사용자 지적 - 안 눌렀는데 떠있었음)
-  const [posPanelPos, setPosPanelPos] = useState({ x: 80, y: 160 })
+  // 매매진입 현황 - 기본은 원래 자리(메인 컨트롤 박스 오른쪽 컬럼)에 인라인으로 있고, "분리" 버튼을
+  // 눌렀을 때만 분리매매창처럼 떠다니는 패널이 된다(사용자 지적 - "원래 있던곳에 있고 분리하면 떠야지").
+  const [positionPanelFloating, setPositionPanelFloating] = useState(false)
+  // 처음 열릴 때 화면 오른쪽에 뜨도록(사용자 요청 - "오른쪽에 표시해달라"고 했는데 왼쪽 고정값(x:80)에
+  // 떠서 엉뚱한 자리에 있는 것처럼 보였다). 패널 폭(360)+여백만큼 오른쪽 끝에서 띄운다. SSR 환경엔
+  // window가 없으니 그때는 임시 기본값을 쓰고, 마운트 후엔 어차피 드래그로 옮길 수 있다.
+  const [posPanelPos, setPosPanelPos] = useState(() => ({
+    x: typeof window !== 'undefined' ? Math.max(20, window.innerWidth - 400) : 900,
+    y: 160,
+  }))
   const [twTab, setTwTab] = useState('gold') // 'strategy1' | 'gold' | 'nasdaq' - symbol 기본값(골드)과 맞춤(사용자 지적)
   const [twSwapped, setTwSwapped] = useState(false)
   const [twSl, setTwSl] = useState(DEFAULT_TW_SL.gold)
@@ -4089,7 +4097,8 @@ export default function ReplayChart() {
         background: '#171a21', borderBottom: '1px solid #2a2e38', cursor: 'move', userSelect: 'none', zIndex: 1,
       }}>
         <span style={{ fontWeight: 700, fontSize: 13.5 }}>매매진입 현황 {positions.length > 0 && `(${positions.length})`}</span>
-        <button type="button" onClick={() => setShowPositionPanel(false)} style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+        <button type="button" onClick={() => setPositionPanelFloating(false)} title="원래 자리로 다시 붙이기"
+          style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>🔗</button>
       </div>
       <div style={{ padding: 14 }}>
         {positions.length === 0 ? (
@@ -4118,6 +4127,13 @@ export default function ReplayChart() {
             )
           })
         )}
+        <button
+          type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
+          style={{
+            width: '100%', marginTop: 10, background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+            padding: '9px 16px', fontSize: 13, cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
+          }}
+        >🚨 벌크 청산</button>
       </div>
     </div>
   )
@@ -5102,9 +5118,11 @@ export default function ReplayChart() {
                 x1 = 1분당 캔들 1개(실제 시세 속도). 배속은 그 배수 — x2=30초/캔들, x60=1초/캔들
               </div>
 
-              {/* 매매 컨트롤(폭 절반, 사용자 요청) - 매매진입 현황은 더 이상 여기 오른쪽 컬럼이 아니라
-                  분리매매창처럼 떼어낼 수 있는 별도 떠다니는 패널로 뺐다(showPositionPanel/posPanelPos). */}
-              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16, maxWidth: 480 }}>
+              {/* 왼쪽: 매매 컨트롤(폭 절반) / 오른쪽: 매매진입 현황 - 기본은 원래 자리(인라인)에 있고,
+                  "🗗 분리" 버튼을 누르면 그때만 분리매매창처럼 떠다니는 패널(positionPanelFloating)이
+                  된다(사용자 지적 - "원래 있던곳에 있고 분리하면 떠야지"). */}
+              <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'stretch', flexWrap: 'wrap' }}>
+              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, flex: positionPanelFloating ? '0 1 560px' : '1 1 460px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa0ab' }}>
                     시작 자금
@@ -5169,16 +5187,6 @@ export default function ReplayChart() {
                     }}
                   >SELL</button>
 
-                  {/* 메인 차트에도 벌크 청산 추가(사용자 요청) - 분리매매창의 것과 완전히 같은 함수,
-                      보유 중인 포지션 전부(출처 무관) 지금 재생 위치 가격으로 일괄 청산한다. */}
-                  <button
-                    type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
-                    style={{
-                      background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
-                      padding: '9px 16px', fontSize: 13, cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
-                    }}
-                  >🚨 벌크 청산</button>
-
                   <button
                     type="button" onClick={() => setShowTradingWindow(v => !v)}
                     style={{
@@ -5189,22 +5197,57 @@ export default function ReplayChart() {
                     }}
                   >🖱 매매 실행 (분리매매창){showTradingWindow ? ' 닫기' : ''}</button>
 
-                  {/* 매매진입 현황 패널 토글(사용자 요청) - 패널을 닫았을 때 다시 열 방법이 필요해서
-                      분리매매창 토글과 같은 자리/스타일로 추가 */}
-                  <button
-                    type="button" onClick={() => setShowPositionPanel(v => !v)}
-                    style={{
-                      fontSize: 12, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', fontWeight: 700,
-                      border: `1px solid ${showPositionPanel ? '#4CAF50' : '#2a2e38'}`,
-                      background: showPositionPanel ? 'rgba(76,175,80,0.15)' : 'none',
-                      color: showPositionPanel ? '#4CAF50' : '#9aa0ab',
-                    }}
-                  >📋 매매진입 현황{showPositionPanel ? ' 닫기' : ''}</button>
-
                   <span style={{ fontSize: 11, color: '#5a5f6a', width: '100%' }}>
                     {symbol === 'GOLD' ? '골드 1랏 = 1.00pt당 $100' : '나스닥 1랏 = 1.00pt당 $1'} (수수료 미반영)
                   </span>
                 </div>
+              </div>
+
+              {/* 매매진입 현황 - 원래 있던 자리(인라인). 분리하면(positionPanelFloating=true) 여기선
+                  안 그리고 renderPositionPanel()이 떠다니는 패널로 대신 그린다. 벌크 청산 버튼도
+                  이 안에 포함한다(사용자 요청). */}
+              {!positionPanelFloating && (
+                <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, flex: '1 1 300px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>매매진입 현황 {positions.length > 0 && `(${positions.length})`}</div>
+                    <button type="button" onClick={() => setPositionPanelFloating(true)} title="떠다니는 패널로 분리"
+                      style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 14, cursor: 'pointer', lineHeight: 1 }}>🗗</button>
+                  </div>
+                  {positions.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: '#5a5f6a' }}>보유 중인 포지션이 없습니다</div>
+                  ) : (
+                    positions.map(pos => {
+                      const { points, dollars } = currentPrice != null ? calcPnl(pos, currentPrice) : { points: 0, dollars: 0 }
+                      const profit = dollars >= 0
+                      return (
+                        <div key={pos.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5, borderBottom: '1px solid #2a2e38' }}>
+                          <span style={{ color: pos.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36 }}>
+                            {pos.side === 'buy' ? 'BUY' : 'SELL'}
+                          </span>
+                          <span style={{ color: '#9aa0ab' }}>{pos.lot.toFixed(2)}랏</span>
+                          <span style={{ color: '#9aa0ab' }}>진입 {pos.entryPrice.toFixed(2)}</span>
+                          <span style={{ color: profit ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
+                            {currentPrice == null ? '—' : pnlDisplay === 'dollar'
+                              ? `${profit ? '+' : ''}$${dollars.toFixed(2)}`
+                              : `${points >= 0 ? '+' : ''}${points.toFixed(2)}pt`}
+                          </span>
+                          <button
+                            type="button" onClick={() => closePosition(pos.id)}
+                            style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
+                          >청산</button>
+                        </div>
+                      )
+                    })
+                  )}
+                  <button
+                    type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
+                    style={{
+                      width: '100%', marginTop: 10, background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+                      padding: '9px 16px', fontSize: 13, cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
+                    }}
+                  >🚨 벌크 청산</button>
+                </div>
+              )}
               </div>
 
               {/* 히스토리(사용자 요청) - closedTradesRef는 ref라 자체로는 리렌더를 안 일으키지만, 청산될
@@ -5338,10 +5381,9 @@ export default function ReplayChart() {
             그 안에 갇혀서 다른 요소 뒤로 숨을 수 있었다. body에 바로 붙이면 그런 조상 영향을 아예 안 받는다. */}
         {showTradingWindow && !twPopupEl && createPortal(renderTwEmbedded(), document.body)}
         {showTradingWindow && twPopupEl && createPortal(renderTwPopupContent(), twPopupEl)}
-        {/* showPositionPanel 기본값이 true라서 typeof document 체크 없이 바로 document.body를 참조하면
-            서버 프리렌더링(SSR, Node 환경엔 document가 없음)에서 빌드가 깨졌다(실제 배포 에러로 확인) -
-            분리매매창(showTradingWindow 기본 false)은 이 문제가 없어서 못 보고 지나쳤던 부분. */}
-        {showPositionPanel && typeof document !== 'undefined' && createPortal(renderPositionPanel(), document.body)}
+        {/* positionPanelFloating 기본값이 false라 SSR에서 document.body에 안 닿지만, 혹시를 대비해
+            (예전 showPositionPanel=true 기본값 때 실제로 배포 에러가 났던 전례) typeof 가드는 유지한다. */}
+        {positionPanelFloating && typeof document !== 'undefined' && createPortal(renderPositionPanel(), document.body)}
       </div>
     </>
   )
