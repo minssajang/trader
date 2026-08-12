@@ -5,7 +5,7 @@ import { createChart, CrosshairMode, CandlestickSeries, LineSeries, HistogramSer
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
-import { BOLLINGER_BANDS, rollingBollinger, DONCHIAN_CHANNELS, rollingDonchian, MOVING_AVERAGES, MADRID_RIBBON, computeMA, rollingRSI, rollingMACD, rollingStochastic } from '../lib/indicators'
+import { BOLLINGER_BANDS, rollingBollinger, DONCHIAN_CHANNELS, rollingDonchian, MOVING_AVERAGES, MADRID_RIBBON, computeMA, rollingRSI, rollingMACD, rollingStochastic, rollingHMA, rollingWMA, rollingSMA } from '../lib/indicators'
 
 // 이평선 데이터 계산/토글 파이프라인(maDataRef/maSeriesRef/enabledMA 등)은 id로만 구분하므로
 // 리본도 같은 파이프라인을 공유한다 - 화면에서만 "리본" 카드로 따로 묶어서 보여준다(사용자 요청).
@@ -608,6 +608,124 @@ const MACD5_SIGNAL = 45
 const STOCH1_PARAMS = [14, 3, 3]
 const STOCH2_PARAMS = [7, 2, 2]
 const STOCH3_PARAMS = [70, 15, 15]
+// EasyTrade_MT5 데스크톱 앱의 "분리매매창" 골드/나스닥 탭 반자동 예약(3/4번 신호)이 쓰는
+// 1분 스토캐스틱 - _MarketDataWorker의 _ta.stoch(k=5, d=3, smooth_k=3)와 동일 (kPeriod,kSmooth,dPeriod 순)
+const STOCH_RESERVE_PARAMS = [5, 3, 3]
+
+// 분리매매창(PyQt "매매 실행" 창) 색상 팔레트 - EasyTrade_MT5 1_1_trading_window.py /
+// trading_window_tabs/{strategy1_tab,hma_reservation_tab,nas100_tab}.py의 setStyleSheet 값 그대로.
+const TW_SHORT_OFF = '#F44336', TW_SHORT_OFF_HOVER = '#D32F2F'
+const TW_SHORT_ON = '#7F0000'
+const TW_LONG_OFF = '#4CAF50', TW_LONG_OFF_HOVER = '#388E3C'
+const TW_LONG_ON = '#1B5E20'
+const TW_STATUS_OFF = { bg: '#EEEEEE', border: '#BDBDBD' }
+const TW_STATUS_YELLOW = { bg: '#FBC02D', border: '#F57F17' }
+const TW_STATUS_ORANGE = { bg: '#FB8C00', border: '#E65100' }
+const TW_STATUS_BLUE_A = { bg: '#1976D2', border: '#0D47A1' }
+const TW_STATUS_BLUE_B = { bg: '#90CAF9', border: '#1976D2' }
+const TW_STATUS_PINK_A = { bg: '#D81B60', border: '#880E4F' }
+const TW_STATUS_PINK_B = { bg: '#F48FB1', border: '#D81B60' }
+const TW_READY_OFF = { color: '#757575', border: '#BDBDBD' }
+const TW_TEXT_GRAY = '#9E9E9E', TW_TEXT_ORANGE = '#FB8C00', TW_TEXT_BLUE = '#1976D2', TW_TEXT_PINK = '#D81B60'
+const TW_MOVE_SL_OFF = '#BDBDBD', TW_MOVE_SL_ON = '#FF9800', TW_MOVE_SL_ON_HOVER = '#F57C00'
+
+// 골드/나스닥 탭 "🎯 반자동 예약" 1~6번 신호 - hma_reservation_tab.py/nas100_tab.py와 동일한 로직을
+// 리플레이가 이미 로드해둔 fullRows(1분봉)로 재현한다. 실시간 MT5 조회 대신, 구간 전체를 한 번에
+// 훑어서 신호별 발생 지점을 미리 계산해두고(반자동/시뮬레이션 크로스와 같은 방식) 재생 중 그 구간에
+// 들어올 때 무장 여부를 확인해 발동시킨다.
+//   H1=1분HMA(20) H3=3분HMA(60) H100=5분HMA(100) H300=15분HMA(300)
+//   WMA17(1분)/SMA20(1분), WMA85(5분)/SMA100(5분), WMA255(15분)/SMA300(15분)
+//   1번은 5분 볼린저(SMA100 밴드) 바깥→안쪽 재진입으로 무장 후 H1×H3 크로스로 진입(무장 상태는
+//   가격 데이터만으로 결정되므로 전 구간을 한 번에 순차 계산 가능 - 아래 row1Armed 배열).
+function computeReservationSeries(fullRows) {
+  const closes = fullRows.map(r => r.close)
+  const h1 = rollingHMA(closes, 20)
+  const h3 = rollingHMA(closes, 60)
+  const h100 = rollingHMA(closes, 100)
+  const h300 = rollingHMA(closes, 300)
+  const wma17_1m = rollingWMA(closes, 17)
+  const sma20_1m = rollingSMA(closes, 20)
+  const wma85 = rollingWMA(closes, 85)
+  const sma100 = rollingSMA(closes, 100)
+  const wma255 = rollingWMA(closes, 255)
+  const sma300 = rollingSMA(closes, 300)
+  const { ups: bbUp, lows: bbLo } = rollingBollinger(closes, 100)
+  const stoch = rollingStochastic(fullRows, ...STOCH_RESERVE_PARAMS)
+  const stochGolden = closes.map((_, i) => (stoch.k[i] != null && stoch.d[i] != null) ? stoch.k[i] > stoch.d[i] : null)
+
+  // 1번 신호 무장 상태 - 가격이 5분 볼린저(SMA100) 바깥에서 안쪽으로 재진입하면 무장, 다시 벗어나면 해제.
+  // 순수하게 가격 이력만으로 정해지는 값이라 체크박스/재생 여부와 무관하게 구간 전체를 한 번에 계산해둔다.
+  const row1Armed = new Array(fullRows.length).fill(null)
+  let armed = null
+  for (let i = 0; i < fullRows.length; i++) {
+    const up = bbUp[i], lo = bbLo[i]
+    if (i > 0 && up != null && lo != null) {
+      const pPrice = closes[i - 1], price = closes[i]
+      if (pPrice < lo && price >= lo) armed = 'below'
+      else if (pPrice > up && price <= up) armed = 'above'
+      else if (price < lo || price > up) armed = null
+    }
+    row1Armed[i] = armed
+  }
+
+  return { closes, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, stochGolden, row1Armed }
+}
+
+// computeReservationSeries의 배열들을 훑어서 신호별 발생 이벤트를 dayRows 기준 idx(=i-startIdx)로
+// 뽑아둔다 - 반자동/시뮬레이션 크로스(autoEventsRef 등)와 완전히 같은 "미리 계산해두고 재생 구간만
+// 필터링" 방식. row3/4(상태 조건)는 조건이 참인 매 캔들마다 이벤트를 만들어서, 무장 후 첫 캔들에
+// 바로 발동하게 한다(PyQt 쪽도 매초 조건을 그대로 검사하므로 동일).
+function computeReservationEvents(S, startIdx, endIdx) {
+  const row1 = [], row2 = [], row3 = [], row4 = []
+  const row5Entry = [], row5Exit = [], row6Entry = [], row6Exit = [], tp = []
+  const { h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, bbUp, bbLo, stochGolden, row1Armed, closes } = S
+  for (let i = Math.max(1, startIdx); i < endIdx; i++) {
+    const idx = i - startIdx
+    // 1번 + 익절용 순수 H1×H3 크로스
+    if (h1[i - 1] != null && h3[i - 1] != null && h1[i] != null && h3[i] != null) {
+      const golden = h1[i - 1] <= h3[i - 1] && h1[i] > h3[i]
+      const dead = h1[i - 1] >= h3[i - 1] && h1[i] < h3[i]
+      if (golden && row1Armed[i] === 'below') row1.push({ idx, side: 'buy' })
+      if (dead && row1Armed[i] === 'above') row1.push({ idx, side: 'sell' })
+      if (golden) tp.push({ idx, closeSide: 'sell' })  // 골든크로스 → 숏 포지션 청산
+      if (dead) tp.push({ idx, closeSide: 'buy' })     // 데드크로스 → 롱 포지션 청산
+    }
+    // 2번: H3(HMA60) × S5(SMA100)
+    if (h3[i - 1] != null && sma100[i - 1] != null && h3[i] != null && sma100[i] != null) {
+      if (h3[i - 1] <= sma100[i - 1] && h3[i] > sma100[i]) row2.push({ idx, side: 'buy' })
+      if (h3[i - 1] >= sma100[i - 1] && h3[i] < sma100[i]) row2.push({ idx, side: 'sell' })
+    }
+    // 3/4번: 상태 조건(WMA85 vs SMA100, 1분스토, 가격/HMA20, HMA300 방향)
+    if (wma85[i] != null && sma100[i] != null && h1[i] != null && h1[i - 1] != null &&
+        h300[i] != null && h300[i - 1] != null && stochGolden[i] != null) {
+      const buyOk = wma85[i] > sma100[i] && stochGolden[i] === true && closes[i] > h1[i] &&
+        h1[i] > h1[i - 1] && h300[i] > h300[i - 1]
+      const sellOk = wma85[i] < sma100[i] && stochGolden[i] === false && closes[i] < h1[i] &&
+        h1[i] < h1[i - 1] && h300[i] < h300[i - 1]
+      if (buyOk) row3.push({ idx, side: 'buy' })
+      if (sellOk) row4.push({ idx, side: 'sell' })
+    }
+    // 5번 진입: HMA60>HMA100(상태) & HMA20×SMA20 골든크로스(이벤트)
+    if (h1[i - 1] != null && sma20_1m[i - 1] != null && h1[i] != null && sma20_1m[i] != null) {
+      const goldenCross = h1[i - 1] <= sma20_1m[i - 1] && h1[i] > sma20_1m[i]
+      if (goldenCross && h3[i] != null && h100[i] != null && h3[i] > h100[i]) row5Entry.push({ idx, side: 'buy' })
+    }
+    // 5번 청산: HMA20×HMA100 데드크로스 (항상 감시)
+    if (h1[i - 1] != null && h100[i - 1] != null && h1[i] != null && h100[i] != null) {
+      if (h1[i - 1] >= h100[i - 1] && h1[i] < h100[i]) row5Exit.push({ idx })
+    }
+    // 6번 진입: HMA20<SMA20(상태) & HMA60×HMA100 데드크로스(이벤트)
+    if (h3[i - 1] != null && h100[i - 1] != null && h3[i] != null && h100[i] != null) {
+      const deadCross = h3[i - 1] >= h100[i - 1] && h3[i] < h100[i]
+      if (deadCross && h1[i] != null && sma20_1m[i] != null && h1[i] < sma20_1m[i]) row6Entry.push({ idx, side: 'sell' })
+    }
+    // 6번 청산: HMA20×HMA60 골든크로스 (항상 감시)
+    if (h1[i - 1] != null && h3[i - 1] != null && h1[i] != null && h3[i] != null) {
+      if (h1[i - 1] <= h3[i - 1] && h1[i] > h3[i]) row6Exit.push({ idx })
+    }
+  }
+  return { row1, row2, row3, row4, row5Entry, row5Exit, row6Entry, row6Exit, tp }
+}
 const DEFAULT_RSI_COLOR = '#FFB74D'
 const DEFAULT_MACD_LINE_COLOR = '#42A5F5'
 const DEFAULT_MACD_SIGNAL_COLOR = '#FF7043'
@@ -870,6 +988,25 @@ export default function ReplayChart() {
   const [lotSize, setLotSize] = useState(rs.lotSize ?? 0.01)
   const [positions, setPositions] = useState([]) // { id, side:'buy'|'sell', symbol, lot, entryPrice, entryTime }
   const [pnlDisplay, setPnlDisplay] = useState(rs.pnlDisplay ?? 'dollar') // 'dollar' | 'point'
+
+  // 분리매매창(EasyTrade_MT5 데스크톱 앱의 "매매 실행" 팝업 그대로 재현) - 공통 입력부 + 매매1/골드/나스닥 탭.
+  // 골드/나스닥 탭의 반자동 예약 신호는 리플레이가 지금 로드해둔 심볼(symbol)의 데이터로만 실제 동작한다
+  // (데스크톱 앱은 두 탭이 각자 독립적으로 MT5에서 실시간 데이터를 받아오지만, 리플레이는 한 번에 한
+  // 심볼만 로드하므로 다른 심볼 탭은 대기 상태로 표시만 됨).
+  const [showTradingWindow, setShowTradingWindow] = useState(false)
+  const [twPos, setTwPos] = useState({ x: 80, y: 80 })
+  const [twTab, setTwTab] = useState('strategy1') // 'strategy1' | 'gold' | 'nasdaq'
+  const [twSwapped, setTwSwapped] = useState(false)
+  const [twLots, setTwLots] = useState(0.01)
+  const [twSl, setTwSl] = useState(100)
+  const [twTp, setTwTp] = useState(200)
+  const [twUseSl, setTwUseSl] = useState(true)
+  const [twUseTp, setTwUseTp] = useState(true)
+  const [twTpExitCross, setTwTpExitCross] = useState(true) // "✅ 익절: H1×H3 크로스 청산" 기본 체크(원본과 동일 - 체크 시 포인트익절은 자동 꺼짐)
+  const [twSkipPopup, setTwSkipPopup] = useState(true)
+  const [twGoldArmed, setTwGoldArmed] = useState(null)   // { row: 1~6, side: 'buy'|'sell' } | null
+  const [twNasdaqArmed, setTwNasdaqArmed] = useState(null)
+  const [twBlinkPhase, setTwBlinkPhase] = useState(false) // 600ms 점멸 - _blink_timer 그대로
   // 반자동진입 - 왼쪽 표시(crossPairs 슬롯)와 켜고 끄는 슬롯 상태는 따로 관리한다(화면엔 여러 개
   // 띄워두고 그중 일부만 실전 진입 조건으로 쓸 수 있게). 계산 로직(findMACrossForPair)은 공유하므로,
   // 왼쪽과 여기에 같은 조합을 골라두면 마커 표시 캔들 = 실제 진입 캔들이 항상 일치한다.
@@ -937,6 +1074,18 @@ export default function ReplayChart() {
   // 셋 중 아무거나 처음 켜질 때 생겼다 전부 꺼지면 사라지므로, 이 primitive도 그때그때 새로 만들고 null로 되돌린다.
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
+  const reservationSeriesRef = useRef(null) // computeReservationSeries(fullRows) 결과 - 분리매매창 골드/나스닥 탭 라벨 표시용
+  const reservationEventsRef = useRef(null) // computeReservationEvents(...) 결과 - idx는 dayRows 기준
+  const reservationSymbolRef = useRef(null) // 위 두 값이 어느 심볼 데이터로 계산됐는지(symbol과 다르면 그 탭은 대기 상태)
+  const positionsRef = useRef([]) // applyIncrement가 재생 인터벌의 오래된 클로저에서도 최신 포지션 목록을 읽을 수 있게 미러링
+  useEffect(() => { positionsRef.current = positions }, [positions])
+  const twDragRef = useRef(null) // 분리매매창 드래그용
+  // 분리매매창 [상태] 표시등 점멸 - _blink_timer(600ms)와 동일, 모달이 열려 있을 때만 돈다
+  useEffect(() => {
+    if (!showTradingWindow) return
+    const t = setInterval(() => setTwBlinkPhase(v => !v), 600)
+    return () => clearInterval(t)
+  }, [showTradingWindow])
   const simEventsRef = useRef([])    // 시뮬레이션 트리거 전체 (반자동과 동일한 구조, 별도 타임라인)
   const sessionPointsRef = useRef([]) // 세계 3대 시장 개장 시각 표시용 [{idx, time, label, color}] - 매매 신호가 아니라 항상 표시하는 고정 참고선
   const shooting5MinPointsRef = useRef([]) // "5분 슈팅" 지점 전체 [{idx, time, price}] - 고가/저가가 5분 볼린저를 뚫은 정확한 가격
@@ -995,6 +1144,8 @@ export default function ReplayChart() {
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
+    reservationSeriesRef.current = null
+    reservationEventsRef.current = null
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
@@ -1649,6 +1800,70 @@ export default function ReplayChart() {
         ])
       }
     }
+    // 분리매매창: SL/TP 자동청산(캔들 high/low로 돌파 판정) + 골드/나스닥 탭 반자동 예약(1~6번) 발동/청산.
+    // 모달이 열려 있을 때만 동작한다(원본의 stop_timers와 대응 - 창을 닫으면 타이머가 멈추는 것과 같은 취지).
+    if (showTradingWindow) {
+      const closedIds = new Set()
+      // 같은 캔들에서 SL/TP가 둘 다 걸리면 보수적으로 SL을 우선한다(OHLC만으로는 어느 쪽이 먼저 닿았는지 알 수 없음)
+      for (let i = from; i < to; i++) {
+        const bar = rows[i]
+        for (const pos of positionsRef.current) {
+          if (closedIds.has(pos.id)) continue
+          if (pos.sl != null) {
+            const hitSl = pos.side === 'buy' ? bar.low <= pos.sl : bar.high >= pos.sl
+            if (hitSl) { closePositionAt(pos.id, pos.sl, bar.time, pos); closedIds.add(pos.id); continue }
+          }
+          if (pos.tp != null) {
+            const hitTp = pos.side === 'buy' ? bar.high >= pos.tp : bar.low <= pos.tp
+            if (hitTp) { closePositionAt(pos.id, pos.tp, bar.time, pos); closedIds.add(pos.id) }
+          }
+        }
+      }
+
+      const rEvents = reservationEventsRef.current
+      if (rEvents && reservationSymbolRef.current === symbol) {
+        const isGold = symbol === 'GOLD'
+        const isNasdaq = symbol === 'NASDAQ'
+        const eventListFor = (row) => (
+          row === 1 ? rEvents.row1 : row === 2 ? rEvents.row2 : row === 3 ? rEvents.row3 :
+          row === 4 ? rEvents.row4 : row === 5 ? rEvents.row5Entry : rEvents.row6Entry
+        )
+        const fireRow = (row, side, idx) => {
+          openModalPositionAt(side, rows[idx].close, rows[idx].time,
+            { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: `row${row}` })
+        }
+        if (isGold && twGoldArmed) {
+          const { row, side } = twGoldArmed
+          const hit = eventListFor(row).find(e => e.idx >= from && e.idx < to && e.side === side)
+          if (hit) { fireRow(row, side, hit.idx); setTwGoldArmed(null) }
+        }
+        if (isNasdaq && twNasdaqArmed) {
+          const { row, side } = twNasdaqArmed
+          const hit = eventListFor(row).find(e => e.idx >= from && e.idx < to && e.side === side)
+          if (hit) { fireRow(row, side, hit.idx); setTwNasdaqArmed(null) }
+        }
+        // 5/6번 청산 + 익절(H1×H3) - 무장/체크 여부와 무관하게 항상 감시(원본과 동일)
+        if (isGold || isNasdaq) {
+          const exitHit = rEvents.row5Exit.find(e => e.idx >= from && e.idx < to) || rEvents.row6Exit.find(e => e.idx >= from && e.idx < to)
+          if (exitHit) {
+            positionsRef.current.forEach(p => {
+              if (!closedIds.has(p.id)) { closePositionAt(p.id, rows[exitHit.idx].close, rows[exitHit.idx].time, p); closedIds.add(p.id) }
+            })
+          }
+          if (twTpExitCross) {
+            const tpHit = rEvents.tp.find(e => e.idx >= from && e.idx < to)
+            if (tpHit) {
+              positionsRef.current.forEach(p => {
+                if (!closedIds.has(p.id) && p.side === tpHit.closeSide) {
+                  closePositionAt(p.id, rows[tpHit.idx].close, rows[tpHit.idx].time, p); closedIds.add(p.id)
+                }
+              })
+            }
+          }
+        }
+      }
+    }
+
     indexRef.current = to
     setPlayIndex(to)
   }
@@ -1821,6 +2036,16 @@ export default function ReplayChart() {
       stoch3CrossTimesRef.current = crossTimes
     }
 
+    // 분리매매창 골드/나스닥 탭 반자동 예약(1~6번) - 지금 로드한 심볼 데이터 기준으로 미리 계산해둔다.
+    // fullRows 전체로 계산해야 HMA300(15분) 등 워밍업이 채워지고, 이벤트 idx는 dayRows 기준(-startIdx)으로 저장.
+    {
+      const rSeries = computeReservationSeries(fullRows)
+      rSeries.offset = startIdx // dayRows idx → 이 값을 더하면 rSeries 배열들의 절대(fullRows) idx
+      reservationSeriesRef.current = rSeries
+      reservationEventsRef.current = computeReservationEvents(rSeries, startIdx, endIdx)
+      reservationSymbolRef.current = symbol
+    }
+
     refreshCross()
     refreshAutoEvents()
     refreshSimEvents()
@@ -1891,6 +2116,8 @@ export default function ReplayChart() {
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
+    reservationSeriesRef.current = null
+    reservationEventsRef.current = null
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
@@ -2046,6 +2273,8 @@ export default function ReplayChart() {
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
+    reservationSeriesRef.current = null
+    reservationEventsRef.current = null
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
@@ -2948,29 +3177,67 @@ export default function ReplayChart() {
     }])
   }
 
+  // 분리매매창 전용 진입 - 손절/익절을 "포인트"로 받아 절대가격(sl/tp)으로 미리 계산해 포지션에 저장해둔다
+  // (PyQt의 sl_spin/tp_spin과 같은 단위). 반자동 예약(1~6번)이 쏜 진입도 이 함수를 그대로 쓴다.
+  const openModalPositionAt = (side, price, time, { lot, slPoints, tpPoints, tag }) => {
+    const sl = slPoints > 0 ? (side === 'buy' ? price - slPoints : price + slPoints) : null
+    const tp = tpPoints > 0 ? (side === 'buy' ? price + tpPoints : price - tpPoints) : null
+    setPositions(prev => [...prev, {
+      id: `tw${tag ? '_' + tag : ''}_${Date.now()}_${Math.random()}`,
+      side, symbol, lot, entryPrice: price, entryTime: time, sl, tp,
+    }])
+  }
+  const openModalPosition = (side, opts) => {
+    if (currentPrice == null) return
+    openModalPositionAt(side, currentPrice, rowsRef.current[playIndex - 1].time, opts)
+  }
+
   // 포지션 id의 접두어로 어디서 생긴 거래인지 구분한다 - 반자동/시뮬레이션은 applyIncrement에서
   // `auto_...`/`sim_...`로 접두어를 붙여서 만들고, 수동 BUY/SELL(openPosition)은 접두어가 없다.
+  // 분리매매창(모달)에서 낸 거래는 `tw...`로 시작한다.
   const tradeSource = (id) => {
     if (id.startsWith('sim_')) return 'sim'
     if (id.startsWith('auto_')) return 'auto'
+    if (id.startsWith('tw')) return 'modal'
     return 'manual'
   }
 
-  const closePosition = (id) => {
-    const pos = positions.find(p => p.id === id)
-    if (!pos) return
-    if (currentPrice != null) {
-      const { points, dollars } = calcPnl(pos, currentPrice)
+  // 특정 가격/시각으로 청산 - SL/TP 자동청산·반자동 예약 청산처럼 "지금 재생 위치"가 아니라
+  // 그 사이 지나간 특정 캔들에서 체결됐어야 하는 경우에 쓴다. closePosition(수동 청산 버튼)은
+  // 항상 currentPrice(=지금 드러난 마지막 캔들)로 닫는 게 맞아서 그대로 별도 유지.
+  const closePositionAt = (id, price, time, posArg) => {
+    setPositions(prev => {
+      const pos = posArg || prev.find(p => p.id === id)
+      if (!pos) return prev
+      const { points, dollars } = calcPnl(pos, price)
       setBalance(b => b + dollars)
       closedTradesRef.current.push({
         source: tradeSource(pos.id), side: pos.side, symbol: pos.symbol, lot: pos.lot,
         entryPrice: pos.entryPrice, entryTime: pos.entryTime,
-        exitPrice: currentPrice, exitTime: rowsRef.current[playIndex - 1]?.time ?? null,
-        points, dollars,
+        exitPrice: price, exitTime: time, points, dollars,
       })
       setClosedTradesCount(c => c + 1)
-    }
-    setPositions(prev => prev.filter(p => p.id !== id))
+      return prev.filter(p => p.id !== id)
+    })
+  }
+
+  const closePosition = (id) => {
+    if (currentPrice == null) return
+    closePositionAt(id, currentPrice, rowsRef.current[playIndex - 1]?.time ?? null)
+  }
+
+  // 🚨 벌크 청산 - 모든 포지션을 지금 재생 위치 가격으로 일괄 청산 (전략1/골드/나스닥 탭 공용)
+  const closeAllPositionsModal = () => {
+    positions.forEach(p => closePosition(p.id))
+  }
+
+  // 손절이동(진입가) - 이미 진입가면 아무것도 안 함(원본과 동일)
+  const moveSlToEntry = (id) => {
+    setPositions(prev => prev.map(p => {
+      if (p.id !== id) return p
+      if (p.sl != null && Math.abs(p.sl - p.entryPrice) < 1e-9) return p
+      return { ...p, sl: p.entryPrice }
+    }))
   }
 
   // 시뮬레이션에서 나온 청산 거래만 모아서 DB에 저장 - 화면엔 노출 안 되고, 나중에 Claude가
@@ -3082,6 +3349,327 @@ export default function ReplayChart() {
             >{sz}</button>
           ))}
         </div>
+      </div>
+    </div>
+  )
+
+  // ══════════════════════════════════════════════════════════════════════
+  // 분리매매창(EasyTrade_MT5 데스크톱 앱 "매매 실행" 팝업) - 렌더 헬퍼
+  // ══════════════════════════════════════════════════════════════════════
+  const onTwHeaderMouseDown = (e) => {
+    twDragRef.current = { startX: e.clientX, startY: e.clientY, origX: twPos.x, origY: twPos.y }
+    const onMove = (ev) => {
+      if (!twDragRef.current) return
+      setTwPos({
+        x: twDragRef.current.origX + (ev.clientX - twDragRef.current.startX),
+        y: twDragRef.current.origY + (ev.clientY - twDragRef.current.startY),
+      })
+    }
+    const onUp = () => {
+      twDragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  // 지금 재생 위치(playIndex-1, dayRows 기준)의 실시간 계산값 하나를 읽는다 - reservationSeriesRef는
+  // fullRows(절대) 인덱스라 offset을 더해서 변환. 데이터가 없거나 워밍업 중이면 null.
+  const twSeriesVal = (key) => {
+    const S = reservationSeriesRef.current
+    if (!S || playIndex <= 0) return null
+    const i = (playIndex - 1) + S.offset
+    const v = S[key]?.[i]
+    return v == null ? null : v
+  }
+
+  const twMoneyColor = (v) => (v >= 0 ? '#26a69a' : '#ef5350')
+
+  // 손절이동(진입가) 4슬롯 - 전략1/골드/나스닥 탭 공용. 원본은 MT5 티켓 순(진입시각 순 정렬)으로
+  // 4개까지 보여주고 이미 진입가면 버튼이 비활성 상태 텍스트를 보여준다.
+  const renderTwMoveSlSlots = () => {
+    const sorted = [...positions].sort((a, b) => a.entryTime - b.entryTime).slice(0, 4)
+    return (
+      <div style={{ border: '1px solid #2a2e38', borderRadius: 10, padding: 10, marginTop: 10 }}>
+        <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 8, fontWeight: 700 }}>손절이동 (진입가)</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          {[0, 1, 2, 3].map(i => {
+            const pos = sorted[i]
+            const atEntry = pos && pos.sl != null && Math.abs(pos.sl - pos.entryPrice) < 1e-9
+            const pnl = pos && currentPrice != null ? calcPnl(pos, currentPrice) : null
+            return (
+              <button
+                key={i} type="button" disabled={!pos || atEntry}
+                onClick={() => pos && moveSlToEntry(pos.id)}
+                style={{
+                  minHeight: 46, borderRadius: 6, border: 'none', fontSize: 11.5, fontWeight: 700, lineHeight: 1.4,
+                  cursor: pos && !atEntry ? 'pointer' : 'not-allowed',
+                  background: pos && !atEntry ? TW_MOVE_SL_ON : TW_MOVE_SL_OFF,
+                  color: 'white',
+                }}
+              >
+                {!pos ? `${i + 1}번\n대기` : atEntry ? `${i + 1}번\n진입가 완료` :
+                  `${i + 1}번 ${pos.side === 'buy' ? '🟢' : '🔴'}\n${pnl.dollars >= 0 ? '+' : ''}$${pnl.dollars.toFixed(1)}`}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  // [상태] 표시등 - 44px 고정폭. active=false면 꺼짐(회색). colorB를 주면 twBlinkPhase에 따라 colorA/colorB를
+  // 번갈아 점멸, colorB 없이 colorA만 주면 점멸 없이 고정색(1번 신호처럼).
+  const TwStatusDot = ({ active, colorA, colorB }) => {
+    const c = active ? (colorB ? (twBlinkPhase ? colorA : colorB) : colorA) : TW_STATUS_OFF
+    return (
+      <span style={{
+        display: 'inline-block', width: 44, textAlign: 'center', fontSize: 10, fontWeight: 700,
+        padding: '2px 4px', borderRadius: 4, color: 'white', background: c.bg, border: `2px solid ${c.border}`,
+      }}>[상태]</span>
+    )
+  }
+
+  // 골드/나스닥 탭 - hma_reservation_tab.py / nas100_tab.py와 완전히 동일한 로직·색상.
+  // symbol이 이 탭의 대상(GOLD/NASDAQ)과 다르면 신호는 계산되지만 실제로 발동은 안 됨(applyIncrement에서
+  // isGold/isNasdaq로 걸러짐) - UI에서도 "대기 중" 안내를 보여준다.
+  const renderTwReservationTab = (which) => {
+    const targetSymbol = which === 'gold' ? 'GOLD' : 'NASDAQ'
+    const live = symbol === targetSymbol
+    const armed = which === 'gold' ? twGoldArmed : twNasdaqArmed
+    const setArmed = which === 'gold' ? setTwGoldArmed : setTwNasdaqArmed
+    const title = which === 'gold' ? '🥇 XAUUSD+ 전용' : '📈 NAS100 전용'
+    const titleBg = which === 'gold' ? '#B8860B' : '#1565C0'
+    const bulkLabel = which === 'gold' ? '🚨 벌크 청산 (XAUUSD+)' : '🚨 벌크 청산 (NAS100)'
+
+    const h1 = twSeriesVal('h1'), h3 = twSeriesVal('h3'), h100 = twSeriesVal('h100'), h300 = twSeriesVal('h300')
+    const wma17 = twSeriesVal('wma17_1m'), sma20 = twSeriesVal('sma20_1m')
+    const wma85 = twSeriesVal('wma85'), sma100 = twSeriesVal('sma100')
+    const wma255 = twSeriesVal('wma255'), sma300 = twSeriesVal('sma300')
+    const price = playIndex > 0 ? rowsRef.current[playIndex - 1]?.close ?? null : null
+    const bbUp = twSeriesVal('bbUp'), bbLo = twSeriesVal('bbLo')
+
+    // 정배열 라벨 3개 (WMA17/SMA20, WMA85/SMA100, WMA255/SMA300) - 빠른선이 위면 파랑, 아래면 핑크
+    const alignLabel = (fastLabel, fastVal, slowLabel, slowVal) => {
+      if (fastVal == null || slowVal == null) return { text: `${fastLabel}/${slowLabel}\n-`, bg: '#616161' }
+      const isBuy = fastVal > slowVal
+      const text = isBuy
+        ? `${fastLabel} / ${fastVal.toFixed(2)}\n${slowLabel} / ${slowVal.toFixed(2)}`
+        : `${slowLabel} / ${slowVal.toFixed(2)}\n${fastLabel} / ${fastVal.toFixed(2)}`
+      return { text, bg: isBuy ? '#1976D2' : '#D81B60' }
+    }
+    const a1 = alignLabel('W17', wma17, 'S20', sma20)
+    const a2 = alignLabel('W85', wma85, 'S100', sma100)
+    const a3 = alignLabel('W255', wma255, 'S300', sma300)
+
+    // 1/2번 체크박스 라벨 텍스트+색
+    const row1Outside = price != null && bbUp != null && bbLo != null && (price < bbLo || price > bbUp)
+    const row1Armed = twSeriesVal('row1Armed')
+    const row1Color = row1Outside ? TW_TEXT_ORANGE : TW_TEXT_GRAY
+    const row2Golden = h3 != null && sma100 != null && h3 > sma100
+    const row2Color = (h3 == null || sma100 == null) ? TW_TEXT_GRAY : (row2Golden ? TW_TEXT_BLUE : TW_TEXT_PINK)
+    const fmtTopBottom = (fast, slow) => {
+      if (fast == null || slow == null) return '-'
+      const golden = fast > slow
+      const top = golden ? fast : slow, bottom = golden ? slow : fast
+      return `${top.toFixed(2)}\n${bottom.toFixed(2)}`
+    }
+
+    // 3/4번 라벨 색 - "상승/하락중"(prev 비교) 2개 조건만 빼고 나머지는 그대로 반영한 근사치.
+    // 실제 발동 판정(applyIncrement)은 rising/falling까지 포함한 정확한 조건으로 이루어짐.
+    const stochGolden = twSeriesVal('stochGolden')
+    const row3Buy = wma85 != null && sma100 != null && h1 != null && wma85 > sma100 && stochGolden === true && price != null && price > h1
+    const row4Sell = wma85 != null && sma100 != null && h1 != null && wma85 < sma100 && stochGolden === false && price != null && price < h1
+
+    const row5Golden = h3 != null && h100 != null && h3 > h100
+    const row6Dead = h1 != null && h3 != null && h1 < h3
+
+    const rowDef = (n, label, checked, onCheck, sideBtns) => (
+      <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', width: 130, cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input type="checkbox" checked={checked} onChange={onCheck} style={{ accentColor: '#4CAF50' }} />
+            {label.color ? <span style={{ color: label.color, whiteSpace: 'pre-line' }}>{label.text}</span> : <span style={{ whiteSpace: 'pre-line' }}>{label.text}</span>}
+          </span>
+        </label>
+        {sideBtns}
+      </div>
+    )
+
+    const dirBtn = (text, active, onClick, isLong) => (
+      <button type="button" onClick={onClick} style={{
+        height: 38, padding: '4px 10px', fontSize: 13, fontWeight: 700, borderRadius: 5, cursor: 'pointer',
+        color: 'white', border: active ? '3px solid white' : 'none',
+        background: active ? (isLong ? TW_LONG_ON : TW_SHORT_ON) : (isLong ? TW_LONG_OFF : TW_SHORT_OFF),
+      }}>{text}</button>
+    )
+
+    const arm = (row, side) => setArmed(a => (a && a.row === row && a.side === side) ? null : { row, side })
+
+    return (
+      <div>
+        <div style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: 'white', background: titleBg, padding: 8, borderRadius: 5, marginBottom: 8 }}>
+          {title}{!live && <span style={{ fontWeight: 400, fontSize: 11 }}> — 지금은 {symbol === 'GOLD' ? '골드' : '나스닥'} 데이터 재생 중이라 대기만 함</span>}
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          {[a1, a2, a3].map((a, i) => (
+            <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 13, fontWeight: 700, color: 'white', background: a.bg, padding: '10px 4px', borderRadius: 5, whiteSpace: 'pre-line' }}>{a.text}</div>
+          ))}
+        </div>
+
+        <button type="button" onClick={() => setTwSwapped(v => !v)} style={{ width: '100%', background: '#9E9E9E', color: 'white', border: 'none', borderRadius: 5, padding: 6, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>버튼 위치 변경</button>
+
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
+          <button type="button" onClick={() => openModalPosition('sell', { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
+            disabled={currentPrice == null || !live}
+            style={{ flex: 1, height: 57, background: TW_SHORT_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>SELL 🔴 매도</button>
+          <button type="button" onClick={() => openModalPosition('buy', { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
+            disabled={currentPrice == null || !live}
+            style={{ flex: 1, height: 57, background: TW_LONG_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>BUY 🟢 매수</button>
+        </div>
+
+        <CollapsibleCard title="🎯 반자동 예약" maxWidth="none" defaultOpen={false}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            {rowDef(1, { text: `1번: H1×H3\n${fmtTopBottom(h1, h3)}`, color: row1Color }, armed?.row === 1, () => { if (armed?.row === 1) setArmed(null) },
+              <>{dirBtn('SELL 🔴 매도', armed?.row === 1 && armed.side === 'sell', () => arm(1, 'sell'), false)}{dirBtn('BUY 🟢 매수', armed?.row === 1 && armed.side === 'buy', () => arm(1, 'buy'), true)}</>)}
+            <TwStatusDot active={row1Outside || !!row1Armed} colorA={row1Outside ? TW_STATUS_YELLOW : TW_STATUS_ORANGE} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            {rowDef(2, { text: `2번: H3×S5\n${fmtTopBottom(h3, sma100)}`, color: row2Color }, armed?.row === 2, () => { if (armed?.row === 2) setArmed(null) },
+              <>{dirBtn('SELL 🔴 매도', armed?.row === 2 && armed.side === 'sell', () => arm(2, 'sell'), false)}{dirBtn('BUY 🟢 매수', armed?.row === 2 && armed.side === 'buy', () => arm(2, 'buy'), true)}</>)}
+            <TwStatusDot active={h3 != null && sma100 != null} colorA={row2Golden ? TW_STATUS_BLUE_A : TW_STATUS_PINK_A} colorB={row2Golden ? TW_STATUS_BLUE_B : TW_STATUS_PINK_B} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            {rowDef(3, { text: `3번: 상승추세\n-`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, armed?.row === 3, () => arm(3, 'buy'), dirBtn('BUY 🟢 매수', armed?.row === 3, () => arm(3, 'buy'), true))}
+            <TwStatusDot active={row3Buy} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            {rowDef(4, { text: `4번: 하락추세\n-`, color: row4Sell ? TW_TEXT_PINK : TW_TEXT_GRAY }, armed?.row === 4, () => arm(4, 'sell'), dirBtn('SELL 🔴 매도', armed?.row === 4, () => arm(4, 'sell'), false))}
+            <TwStatusDot active={row4Sell} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            {rowDef(5, { text: `5번: H60/H100\n${fmtTopBottom(h3, h100)}`, color: row5Golden ? TW_TEXT_BLUE : TW_TEXT_GRAY }, armed?.row === 5, () => arm(5, 'buy'), dirBtn('BUY 🟢 매수', armed?.row === 5, () => arm(5, 'buy'), true))}
+            <span style={{ width: 44, textAlign: 'center', fontSize: 10, fontWeight: 700, padding: '2px 4px', borderRadius: 4,
+              color: h1 != null && sma20 != null && h1 > sma20 ? 'white' : TW_READY_OFF.color,
+              background: h1 != null && sma20 != null && h1 > sma20 ? (twBlinkPhase ? TW_STATUS_BLUE_A.bg : TW_STATUS_BLUE_B.bg) : 'transparent',
+              border: `2px solid ${h1 != null && sma20 != null && h1 > sma20 ? (twBlinkPhase ? TW_STATUS_BLUE_A.border : TW_STATUS_BLUE_B.border) : TW_READY_OFF.border}` }}>[준비]</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            {rowDef(6, { text: `6번: H20/H60\n${fmtTopBottom(h3, h1)}`, color: row6Dead ? TW_TEXT_PINK : TW_TEXT_GRAY }, armed?.row === 6, () => arm(6, 'sell'), dirBtn('SELL 🔴 매도', armed?.row === 6, () => arm(6, 'sell'), false))}
+            <span style={{ width: 44, textAlign: 'center', fontSize: 10, fontWeight: 700, padding: '2px 4px', borderRadius: 4,
+              color: h1 != null && sma20 != null && h1 < sma20 ? 'white' : TW_READY_OFF.color,
+              background: h1 != null && sma20 != null && h1 < sma20 ? (twBlinkPhase ? TW_STATUS_PINK_A.bg : TW_STATUS_PINK_B.bg) : 'transparent',
+              border: `2px solid ${h1 != null && sma20 != null && h1 < sma20 ? (twBlinkPhase ? TW_STATUS_PINK_A.border : TW_STATUS_PINK_B.border) : TW_READY_OFF.border}` }}>[준비]</span>
+          </div>
+        </CollapsibleCard>
+
+        <div style={{ marginTop: 8 }}>
+          <CollapsibleCard title="📋 신호 설명" maxWidth="none" defaultOpen={false}>
+            <div style={{ fontSize: 11.5, color: '#c8ccd4', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+              {[
+                armed?.row === 1 && '1번: H1×H3\n   SMA100 밴드 바깥→안쪽 재진입으로 무장된 뒤, 그 방향과 맞는\n   H1×H3 크로스가 나오면 진입 (재진입·크로스는 동시일 필요 없음)',
+                armed?.row === 2 && '2번: H3(HMA60) × S5(SMA100) 크로스',
+                armed?.row === 3 && '3번: 상승추세 (매수 전용)\n   WMA85>SMA100, 1분스토 골든, 가격>HMA20, HMA20 상승중, HMA300 상승중',
+                armed?.row === 4 && '4번: 하락추세 (매도 전용)\n   WMA85<SMA100, 1분스토 데드, 가격<HMA20, HMA20 하락중, HMA300 하락중',
+                armed?.row === 5 && '5번: HMA20/SMA20 (매수 전용)\n   진입 - HMA60>HMA100, HMA20×SMA20 골든크로스\n   청산 - HMA20×HMA100 데드크로스 (항상 감시)',
+                armed?.row === 6 && '6번: HMA60×HMA100 (매도 전용)\n   진입 - HMA20<SMA20, HMA60×HMA100 데드크로스\n   청산 - HMA20×HMA60 골든크로스 (항상 감시)',
+              ].filter(Boolean).join('\n\n') || '체크된 신호가 없습니다'}
+            </div>
+          </CollapsibleCard>
+        </div>
+
+        <button type="button" onClick={closeAllPositionsModal} style={{ width: '100%', marginTop: 10, background: '#FF5722', color: 'white', border: 'none', borderRadius: 5, padding: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>{bulkLabel}</button>
+
+        {renderTwMoveSlSlots()}
+      </div>
+    )
+  }
+
+  // 매매1 탭 - strategy1_tab.py와 동일(수동 SELL/BUY + 벌크청산 + 손절이동 4슬롯). 실시간 MT5 연동인
+  // "손절이동" 클릭 시 실제 브로커 주문수정은 리플레이엔 없으니, 시뮬레이션 포지션의 sl 값을 진입가로 옮긴다.
+  const renderTwStrategy1Tab = () => (
+    <div>
+      <button type="button" onClick={() => setTwSwapped(v => !v)} style={{ width: '100%', background: '#9E9E9E', color: 'white', border: 'none', borderRadius: 5, padding: 6, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>버튼 위치 변경</button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
+        <button type="button" onClick={() => openModalPosition('sell', { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'strategy1' })}
+          disabled={currentPrice == null}
+          style={{ flex: 1, padding: 20, background: TW_SHORT_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>SELL<br />🔴 매도</button>
+        <button type="button" onClick={() => openModalPosition('buy', { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'strategy1' })}
+          disabled={currentPrice == null}
+          style={{ flex: 1, padding: 20, background: TW_LONG_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>BUY<br />🟢 매수</button>
+      </div>
+      <button type="button" onClick={closeAllPositionsModal} style={{ width: '100%', background: '#FF5722', color: 'white', border: 'none', borderRadius: 5, padding: 15, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>🚨 벌크 청산</button>
+      {renderTwMoveSlSlots()}
+    </div>
+  )
+
+  const renderTradingWindow = () => (
+    <div style={{
+      position: 'fixed', left: twPos.x, top: twPos.y, width: 400, maxHeight: '92vh', overflowY: 'auto',
+      background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+      zIndex: 1000, fontSize: 13,
+    }}>
+      <div onMouseDown={onTwHeaderMouseDown} style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px',
+        borderBottom: '1px solid #2a2e38', cursor: 'move', userSelect: 'none',
+      }}>
+        <span style={{ fontWeight: 700, fontSize: 13.5 }}>🖱 매매 실행 (분리매매창)</span>
+        <button type="button" onClick={() => setShowTradingWindow(false)} style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+      </div>
+
+      <div style={{ padding: 14 }}>
+        <div style={{ border: '1px solid #2a2e38', borderRadius: 10, padding: 10, marginBottom: 10 }}>
+          <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6, fontWeight: 700 }}>거래 정보</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: '6px 10px', alignItems: 'center', fontSize: 12.5 }}>
+            <span style={{ color: '#9aa0ab' }}>종목:</span>
+            <span style={{ fontWeight: 700 }}>{symbol === 'GOLD' ? 'XAUUSD+' : 'NAS100'}</span>
+            <span />
+            <span style={{ color: '#9aa0ab' }}>잔고:</span>
+            <span style={{ color: twMoneyColor(balance - startingBalance), fontWeight: 700 }}>${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span />
+            <span style={{ color: '#9aa0ab' }}>랏수:</span>
+            <input type="number" step={0.01} min={0.01} value={twLots} onChange={e => setTwLots(Math.max(0.01, Number(e.target.value) || 0.01))}
+              style={{ width: 80, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '4px 6px', fontSize: 12.5 }} />
+            <span />
+            <span style={{ color: '#9aa0ab' }}>손절(포인트):</span>
+            <input type="number" min={1} value={twSl} disabled={!twUseSl} onChange={e => setTwSl(Math.max(1, Number(e.target.value) || 1))}
+              style={{ width: 80, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '4px 6px', fontSize: 12.5, opacity: twUseSl ? 1 : 0.5 }} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#4CAF50', fontWeight: 700, fontSize: 11.5 }}>
+              <input type="checkbox" checked={twUseSl} onChange={e => setTwUseSl(e.target.checked)} /> 사용
+            </label>
+            <span style={{ color: '#9aa0ab' }}>익절(포인트):</span>
+            <input type="number" min={1} value={twTp} disabled={!twUseTp} onChange={e => setTwTp(Math.max(1, Number(e.target.value) || 1))}
+              style={{ width: 80, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '4px 6px', fontSize: 12.5, opacity: twUseTp ? 1 : 0.5 }} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#4CAF50', fontWeight: 700, fontSize: 11.5 }}>
+              <input type="checkbox" checked={twUseTp} onChange={e => setTwUseTp(e.target.checked)} /> 사용
+            </label>
+          </div>
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#1976D2', fontWeight: 700, fontSize: 12, cursor: 'pointer', marginBottom: 8 }}>
+          <input type="checkbox" checked={twTpExitCross} onChange={e => { setTwTpExitCross(e.target.checked); if (e.target.checked) setTwUseTp(false) }} />
+          ✅ 익절: H1×H3 크로스 청산 (숏=골든청산 / 롱=데드청산)
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#FF9800', fontWeight: 700, fontSize: 12, cursor: 'pointer', marginBottom: 10 }}>
+          <input type="checkbox" checked={twSkipPopup} onChange={e => setTwSkipPopup(e.target.checked)} /> 팝업 확인 제외 (빠른 거래)
+        </label>
+
+        <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+          {[['strategy1', '매매1'], ['gold', '골드'], ['nasdaq', '나스닥']].map(([id, label]) => (
+            <button key={id} type="button" onClick={() => setTwTab(id)} style={{
+              flex: 1, padding: '8px 0', fontSize: 12.5, fontWeight: 700, borderRadius: 7, cursor: 'pointer',
+              border: `1px solid ${twTab === id ? '#4CAF50' : '#2a2e38'}`,
+              background: twTab === id ? 'rgba(76,175,80,0.15)' : 'none',
+              color: twTab === id ? '#4CAF50' : '#9aa0ab',
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {twTab === 'strategy1' && renderTwStrategy1Tab()}
+        {twTab === 'gold' && renderTwReservationTab('gold')}
+        {twTab === 'nasdaq' && renderTwReservationTab('nasdaq')}
       </div>
     </div>
   )
@@ -4027,7 +4615,17 @@ export default function ReplayChart() {
                     }}
                   >SELL</button>
 
-                  <span style={{ fontSize: 11, color: '#5a5f6a' }}>
+                  <button
+                    type="button" onClick={() => setShowTradingWindow(v => !v)}
+                    style={{
+                      marginLeft: 'auto', fontSize: 12, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', fontWeight: 700,
+                      border: `1px solid ${showTradingWindow ? '#4CAF50' : '#2a2e38'}`,
+                      background: showTradingWindow ? 'rgba(76,175,80,0.15)' : 'none',
+                      color: showTradingWindow ? '#4CAF50' : '#9aa0ab',
+                    }}
+                  >🖱 매매 실행 (분리매매창){showTradingWindow ? ' 닫기' : ''}</button>
+
+                  <span style={{ fontSize: 11, color: '#5a5f6a', width: '100%' }}>
                     {symbol === 'GOLD' ? '골드 1랏 = 1.00pt당 $100' : '나스닥 1랏 = 1.00pt당 $1'} (수수료 미반영)
                   </span>
                 </div>
@@ -4157,6 +4755,8 @@ export default function ReplayChart() {
             </p>
           </div>
         </main>
+
+        {showTradingWindow && renderTradingWindow()}
       </div>
     </>
   )
