@@ -4093,14 +4093,38 @@ export default function ReplayChart() {
       zIndex: 1000, fontSize: 13,
     }}>
       <div onMouseDown={onPosPanelHeaderMouseDown} style={{
-        position: 'sticky', top: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px',
+        position: 'sticky', top: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 14px',
         background: '#171a21', borderBottom: '1px solid #2a2e38', cursor: 'move', userSelect: 'none', zIndex: 1,
       }}>
-        <span style={{ fontWeight: 700, fontSize: 13.5 }}>매매진입 현황 {positions.length > 0 && `(${positions.length})`}</span>
-        <button type="button" onClick={() => setPositionPanelFloating(false)} title="원래 자리로 다시 붙이기"
-          style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>🔗</button>
+        {/* site.css의 전역 button{width:100%} 규칙이 .bt-page 밖(document.body 포탈)에선 안 걸러져서
+            버튼이 제멋대로 커지던 문제(사용자 지적) - width:'auto'로 직접 눌러준다. 제목도 줄바꿈되던
+            문제(사용자 지적) - whiteSpace:nowrap. */}
+        <span style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>매매진입 현황 {positions.length > 0 && `(${positions.length})`}</span>
+        {/* 닫기 버튼을 "🔗"만으론 뭘 하는 건지 알기 어려워서(사용자 지적) X박스 형태로 눈에 띄게 바꿈.
+            기능은 그대로 - 이 패널엔 "완전히 숨김" 상태가 없어서 닫으면 곧 원래 자리(인라인)로 돌아간다. */}
+        <button type="button" onClick={() => setPositionPanelFloating(false)} title="닫기 (원래 자리로 돌아감)"
+          style={{
+            width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: '#2a2e38', border: '1px solid #3a3f4a', borderRadius: 5, color: '#e8eaed', fontSize: 13,
+            cursor: 'pointer', lineHeight: 1, padding: 0,
+          }}>✕</button>
       </div>
-      <div style={{ padding: 14 }}>
+      <div style={{ padding: 14, overflowX: 'auto' }}>
+        {/* 포지션이 여러 개일 때 맨 위에 전체 합계(사용자 요청) */}
+        {positions.length > 1 && (() => {
+          const totalDollars = positions.reduce((sum, pos) => sum + (currentPrice != null ? calcPnl(pos, currentPrice).dollars : 0), 0)
+          const totalPoints = positions.reduce((sum, pos) => sum + (currentPrice != null ? calcPnl(pos, currentPrice).points : 0), 0)
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0 10px', marginBottom: 6, borderBottom: '1px solid #2a2e38', whiteSpace: 'nowrap' }}>
+              <span style={{ fontWeight: 700 }}>합계</span>
+              <span style={{ color: totalDollars >= 0 ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
+                {currentPrice == null ? '—' : pnlDisplay === 'dollar'
+                  ? `${totalDollars >= 0 ? '+' : ''}$${totalDollars.toFixed(2)}`
+                  : `${totalPoints >= 0 ? '+' : ''}${totalPoints.toFixed(2)}pt`}
+              </span>
+            </div>
+          )
+        })()}
         {positions.length === 0 ? (
           <div style={{ fontSize: 12.5, color: '#5a5f6a' }}>보유 중인 포지션이 없습니다</div>
         ) : (
@@ -4108,20 +4132,20 @@ export default function ReplayChart() {
             const { points, dollars } = currentPrice != null ? calcPnl(pos, currentPrice) : { points: 0, dollars: 0 }
             const profit = dollars >= 0
             return (
-              <div key={pos.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5, borderBottom: '1px solid #2a2e38' }}>
-                <span style={{ color: pos.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36 }}>
+              <div key={pos.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5, borderBottom: '1px solid #2a2e38', whiteSpace: 'nowrap' }}>
+                <span style={{ color: pos.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36, flexShrink: 0 }}>
                   {pos.side === 'buy' ? 'BUY' : 'SELL'}
                 </span>
-                <span style={{ color: '#9aa0ab' }}>{pos.lot.toFixed(2)}랏</span>
-                <span style={{ color: '#9aa0ab' }}>진입 {pos.entryPrice.toFixed(2)}</span>
-                <span style={{ color: profit ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
+                <span style={{ color: '#9aa0ab', flexShrink: 0 }}>{pos.lot.toFixed(2)}랏</span>
+                <span style={{ color: '#9aa0ab', flexShrink: 0 }}>진입 {pos.entryPrice.toFixed(2)}</span>
+                <span style={{ color: profit ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto', flexShrink: 0 }}>
                   {currentPrice == null ? '—' : pnlDisplay === 'dollar'
                     ? `${profit ? '+' : ''}$${dollars.toFixed(2)}`
                     : `${points >= 0 ? '+' : ''}${points.toFixed(2)}pt`}
                 </span>
                 <button
                   type="button" onClick={() => closePosition(pos.id)}
-                  style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
+                  style={{ width: 'auto', flexShrink: 0, fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
                 >청산</button>
               </div>
             )
@@ -5213,6 +5237,21 @@ export default function ReplayChart() {
                     <button type="button" onClick={() => setPositionPanelFloating(true)} title="떠다니는 패널로 분리"
                       style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 14, cursor: 'pointer', lineHeight: 1 }}>🗗</button>
                   </div>
+                  {/* 포지션이 여러 개일 때 맨 위에 전체 합계(사용자 요청) */}
+                  {positions.length > 1 && (() => {
+                    const totalDollars = positions.reduce((sum, pos) => sum + (currentPrice != null ? calcPnl(pos, currentPrice).dollars : 0), 0)
+                    const totalPoints = positions.reduce((sum, pos) => sum + (currentPrice != null ? calcPnl(pos, currentPrice).points : 0), 0)
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0 10px', marginBottom: 6, borderBottom: '1px solid #2a2e38' }}>
+                        <span style={{ fontWeight: 700 }}>합계</span>
+                        <span style={{ color: totalDollars >= 0 ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
+                          {currentPrice == null ? '—' : pnlDisplay === 'dollar'
+                            ? `${totalDollars >= 0 ? '+' : ''}$${totalDollars.toFixed(2)}`
+                            : `${totalPoints >= 0 ? '+' : ''}${totalPoints.toFixed(2)}pt`}
+                        </span>
+                      </div>
+                    )
+                  })()}
                   {positions.length === 0 ? (
                     <div style={{ fontSize: 12.5, color: '#5a5f6a' }}>보유 중인 포지션이 없습니다</div>
                   ) : (
