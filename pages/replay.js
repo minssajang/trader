@@ -895,7 +895,7 @@ export default function ReplayChart() {
   const rs = settingsRestoreRef.current || {}
   const hasAutoRestoredRef = useRef(false)
 
-  const [symbol, setSymbol] = useState(() => restoreRef.current?.symbol || 'NASDAQ')
+  const [symbol, setSymbol] = useState('NASDAQ') // 기본값을 항상 나스닥으로 - 이전 세션에서 골드를 보고 있었어도 새로 열면 나스닥부터 시작(사용자 요청)
   // 브로커 서머타임 여부 - 겨울엔 서버시간이 1시간 밀려서(EEST→EET) 한국시간 환산 오프셋이 6→7시간으로 바뀐다.
   // 자동판별할 방법이 없어서 버튼으로 직접 전환하게 함(기본값: 서머타임 켜짐)
   const [summerTime, setSummerTime] = useState(true)
@@ -4594,6 +4594,16 @@ export default function ReplayChart() {
                     {selectedDateTo ? `${selectedDate} ~ ${selectedDateTo}` : selectedDate}
                   </span>
                 )}
+              </div>
+              {/* 재생 진행률 바(빨강) - ▶재생을 처음부터 눌러온 진행 상황을 파란 바(캔들 위치 스크럽) 위에
+                  항상 표시. 파란 바는 드래그로 아무 위치나 스크럽 가능하지만, 빨간 바는 순수 진행률
+                  표시용이라 입력을 받지 않는다(재생/스크럽 둘 다 playIndex를 그대로 따라간다). */}
+              <div style={{ position: 'relative', width: '100%', height: 6, marginTop: 8, background: '#2a2e38', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, height: '100%',
+                  width: `${total ? Math.min(100, (playIndex / total) * 100) : 0}%`,
+                  background: '#F44336', transition: playing ? 'width 0.15s linear' : 'none',
+                }} />
               </div>
               {uploadedTradeFile && (
                 <input
