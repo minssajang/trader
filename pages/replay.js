@@ -593,9 +593,16 @@ const BUCKET = 'backtest-data'
 
 const SYMBOL_LABEL = { GOLD: '🥇 골드', NASDAQ: '💻 나스닥' }
 // x1 = 실제 1분봉 그대로(캔들 1개 = 60초). 다른 배속은 전부 이 기준의 배수.
-const SPEEDS = [0.25, 0.5, 1, 2, 3, 5, 20, 60, 100, 200, 300]
+const SPEEDS = [1, 2, 3, 5, 20, 60, 100, 200, 300] // x0.25/x0.5는 너무 느려서 뺌(사용자 요청)
 // x1 = 1분봉 1개당 실제 60초(실제 시세 속도) - 사용자 확정. 되돌림(1000으로 바꿨던 건 잘못된 추측이었음).
 const REALTIME_MS = 60000
+// 날짜를 새로 불러왔을 때 화면에 기본으로 보여줄 캔들 개수(줌 레벨) - 원래 코드도 이 값을 60으로
+// 의도했었지만, applyIndex()의 setData() 직후 auto-fit된(수백 개짜리) 범위를 그대로 읽어버리는 버그
+// 때문에 한 번도 실제로 적용된 적이 없었다(그래서 X축이 항상 15분 단위로 뭉개져 보였다 - 실측 확인).
+// 이 상수 자체가 정확히 5분 눈금을 만드는지는 아직 화면으로 재확인 못 했다 - 캔들당 픽셀이 이전보다는
+// 훨씬 넓어지니 나아질 것으로 예상하지만, 라이브러리 내부 임계값을 모르는 채로 하는 추정이라 실제
+// 화면에서 여전히 5분이 아니면 이 숫자를 더 줄여야 한다.
+const INITIAL_VISIBLE_CANDLES = 60
 const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
 // 캔들 타이머 표시용 - ms를 "1:05" 또는 "48.2초" 형태로 포맷. 1분 이상이면 분:초, 아니면 소수점 1자리 초.
 const formatCandleTimer = (ms) => {
@@ -918,7 +925,7 @@ export default function ReplayChart() {
   const [loadingCsv, setLoadingCsv] = useState(false)
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState(1)
+  const [speed, setSpeed] = useState(20) // 기본 배속(사용자 요청) - x20 = 캔들 1개당 3초
   // 다음 캔들이 그려질 때까지 남은 시간(ms) - 재생 중엔 REALTIME_MS/speed에서 0으로 카운트다운하다가
   // 실제로 캔들이 그려지는 순간 다시 꽉 채워진다. 재생을 멈추거나 배속을 바꾸면 그 배속 기준 풀타임으로 리셋.
   const [candleTimerMs, setCandleTimerMs] = useState(REALTIME_MS / speed)
@@ -1983,10 +1990,20 @@ export default function ReplayChart() {
         startIdx = j
       }
     }
+    // "하루의 시작"을 자정이 아니라 아시아 세션 시작 시각(SESSIONS의 asia.startHour=7, 07:00 KST)으로
+    // 본다(사용자 지적 - 재생 시작이 07시 근처여야 한다고 함, 이 코드베이스가 이미 세션 구분에 쓰는
+    // 기준과 동일). 자정~07시 사이 캔들은 있으면 전날 몫처럼 이미 그려진 채로 두고, 재생 위치(빨간 바)만
+    // 07시부터 시작한다. 그날 07시 이후 캔들이 아예 없는 이례적인 경우(조기 마감 등)엔 자정 그대로 둔다.
+    let playStartCandleIdx = selectedStartIdx
+    if (!selectedEmpty) {
+      for (let i = selectedStartIdx; i < endIdx; i++) {
+        if (new Date(fullRows[i].time * 1000).getHours() >= 7) { playStartCandleIdx = i; break }
+      }
+    }
     const dayRows = selectedEmpty ? [] : fullRows.slice(startIdx, endIdx)
     // dayRows 안에서 "선택한 날짜"가 시작되는 idx - loadRange가 재생 위치 초기값으로 씀(전날 끝까지는
     // 이미 그려진 채로 시작, 그 뒤부터 캔들이 하나씩 나타남).
-    dayRows.playStartIdx = selectedEmpty ? 0 : selectedStartIdx - startIdx
+    dayRows.playStartIdx = selectedEmpty ? 0 : playStartCandleIdx - startIdx
     rowsRef.current = dayRows
     setTotal(dayRows.length)
     setBluePos(dayRows.length) // 파란 바는 데이터 로드 즉시 맨 끝(전부 로드됨)에 위치
@@ -2264,13 +2281,17 @@ export default function ReplayChart() {
         applyIndex(dayRows.playStartIdx ?? 0)
         // fitContent()는 전날+선택일 전체를 억지로 한 화면에 욱여넣어서 캔들 비율이 뭉개지는 문제가
         // 있었다(사용자 지적) - 그 대신 재생 시작 지점(전날 끝) 근처를 평소 캔들 폭 그대로 보여준다.
+        // ★ 예전엔 여기서 ts.getVisibleLogicalRange()를 읽어서 "기존 줌 유지"를 시도했는데, 바로 위
+        // applyIndex()의 setData()가 lightweight-charts의 기본 auto-fit을 트리거해서 그 순간 range가
+        // 이미 "지금까지 그려진 캔들 전체"(수백 개)로 망가져 있었다 - 그 결과 캔들 하나당 픽셀이 너무
+        // 좁아져서 X축 눈금이 항상 15분 단위로 뭉개져 보이는 원인이었다(실측으로 확인: 15분 간격일 때
+        // 캔들당 약 6px, INITIAL_VISIBLE_CANDLES=60이면 훨씬 넓은 약 15~19px/캔들이 나와 정상 범위).
+        // 이제 그 손상된 값을 읽지 않고 항상 고정값을 쓴다.
         const chart = chartRef.current
         if (chart) {
           const boundary = dayRows.playStartIdx ?? 0
           const ts = chart.timeScale()
-          const range = ts.getVisibleLogicalRange()
-          const width = range ? (range.to - range.from) : 60
-          ts.setVisibleLogicalRange({ from: boundary - width * 0.8, to: boundary + width * 0.2 })
+          ts.setVisibleLogicalRange({ from: boundary - INITIAL_VISIBLE_CANDLES * 0.8, to: boundary + INITIAL_VISIBLE_CANDLES * 0.2 })
         }
       }
     } catch (e) {
@@ -3347,7 +3368,7 @@ export default function ReplayChart() {
     if (!chart) return
     const ts = chart.timeScale()
     const range = ts.getVisibleLogicalRange()
-    const width = range ? (range.to - range.from) : 60
+    const width = range ? (range.to - range.from) : INITIAL_VISIBLE_CANDLES
     ts.setVisibleLogicalRange({ from: idx - width / 2, to: idx + width / 2 })
   }
 
@@ -4803,11 +4824,12 @@ export default function ReplayChart() {
                 {/* 캔들 타이머 - 차트 구석에 고정된 배지가 아니라, 재생 위치(마지막으로 그려진 캔들)를
                     거리를 두고 계속 따라다녀야 한다는 지적(사용자) - updateTimerAnchor가 그 캔들의
                     시각/종가를 실제 화면 좌표로 변환해서 timerAnchor에 넣어두면 그 좌표 기준으로 뜬다.
-                    컨테이너 padding(16px)만큼 보정하고, 캔들 오른쪽으로 14px 떨어뜨린다.
+                    컨테이너 padding(16px)만큼 보정하고, 캔들 오른쪽으로 40px 떨어뜨린다(사용자 요청 -
+                    캔들에 너무 붙어 있어서 간격을 더 벌림).
                     pointerEvents:none이라 차트 드래그/줌 조작은 그대로 통과한다. */}
                 {timerAnchor && (
                   <span title="다음 캔들이 그려질 때까지 남은 시간" style={{
-                    position: 'absolute', left: timerAnchor.x + 16 + 14, top: timerAnchor.y + 16 - 15,
+                    position: 'absolute', left: timerAnchor.x + 16 + 40, top: timerAnchor.y + 16 - 15,
                     zIndex: 5, pointerEvents: 'none', whiteSpace: 'nowrap',
                     display: 'inline-flex', alignItems: 'center', gap: 6,
                     background: 'rgba(23,26,33,0.92)', border: '1px solid #2a2e38', borderRadius: 9,
