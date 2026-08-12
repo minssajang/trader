@@ -1322,11 +1322,25 @@ export default function ReplayChart() {
     })
     markersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
 
-    const onResize = () => chart.applyOptions({ width: containerRef.current.clientWidth })
+    // applyOptions({width})는 이 차트처럼 pane이 여러 개(캔들+RSI+MACD+스토캐스틱)일 때 서브pane
+    // 캔버스까지는 안 따라가는 경우가 실측으로 확인됐다 - chart.resize(w,h)가 라이브러리가 명시하는
+    // 정식 전체 리사이즈 API라 이걸로 통일한다.
+    const onResize = () => chart.resize(containerRef.current.clientWidth, 750)
     window.addEventListener('resize', onResize)
+    // 브라우저 창 자체를 resize할 때만 반응하는 위 리스너로는 부족했다 - 왼쪽 사이드바(달력/체크박스
+    // 카드들)의 레이아웃이 차트 생성 시점 이후에 자리잡으면서 컨테이너 폭이 나중에 바뀌는 경우
+    // (또는 생성 시점에 아직 0이었던 경우) 창을 실제로 리사이즈하기 전까진 차트가 라이브러리 기본값
+    // (300x150)에 눌어붙어 비율이 다 깨진 채로 남아있었다(사용자가 실측으로 발견) - ResizeObserver로
+    // 컨테이너 자체의 크기 변화를 직접 감시해서 항상 실제 폭에 맞춘다.
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect?.width
+      if (w) chart.resize(w, 750)
+    })
+    ro.observe(containerRef.current)
 
     return () => {
       window.removeEventListener('resize', onResize)
+      ro.disconnect()
       chart.remove()
     }
   }, [])
@@ -1772,18 +1786,17 @@ export default function ReplayChart() {
 
   // 캔들을 하나씩 update()로 이어붙이는 게 setData 전체 재계산보다 가볍다
   const applyIncrement = (from, to) => {
+    // 이 함수 안 어디서든(캔들 그리기·지표 동기화·반자동/시뮬레이션·분리매매창 로직 전부) 에러가 나도
+    // 재생 위치(indexRef/playIndex, 빨간 바)는 반드시 끝까지 진행돼야 한다 - 안 그러면 같은 자리에서
+    // 매 틱 조용히 멈추기만 하고 빨간 바가 안 움직이는 버그가 된다. 그래서 함수 전체를 감싸고, 위치
+    // 갱신은 try/catch/finally의 finally에서 무조건 실행한다.
+    try {
     if (ribbonEnabled) scanSpreadSwings(from, to, swingStateRef.current) // 재생은 항상 앞으로만 가므로 이어서 스캔
     if (sidewaysEnabled) applySidewaysBands(to)
     applySessionBands(to)
     applyShooting5MinIndex(to)
     const rows = rowsRef.current
-    // 캔들 update()가 실패해도(라이브러리 내부 시간순서 오류 등) 재생 위치(indexRef/playIndex)는 반드시
-    // 앞으로 진행돼야 한다 - 여기서 막혀버리면 빨간 바가 그 자리에 영원히 멈추는 버그가 된다.
-    try {
-      for (let i = from; i < to; i++) seriesRef.current?.update(rows[i])
-    } catch (e) {
-      console.error('[재생] 캔들 update 실패, 위치는 계속 진행함:', e)
-    }
+    for (let i = from; i < to; i++) seriesRef.current?.update(rows[i])
     // markerSeriesRef는 applyIndex()가 이미 구간 전체(rowsRef.current 전부)를 앵커로 setData해뒀으므로
     // 여기서 다시 update()할 필요가 없다 - 오히려 재생 위치를 0으로 되돌린 뒤(파란 바 시작점 변경 등)
     // 다시 재생하면 이미 markerSeriesRef에 들어있는 "이후 시각"보다 과거인 rows[i]를 update()하게 되어
@@ -1888,9 +1901,12 @@ export default function ReplayChart() {
         }
       }
     }
-
-    indexRef.current = to
-    setPlayIndex(to)
+    } catch (e) {
+      console.error('[재생] applyIncrement 도중 에러, 위치는 계속 진행함:', e)
+    } finally {
+      indexRef.current = to
+      setPlayIndex(to)
+    }
   }
 
   // [fromStr,toStr] 구간의 지표(볼린저/도치안/이평선/RSI/MACD/스토캐스틱/횡보/세션/크로스/신호마커)를
@@ -1924,12 +1940,6 @@ export default function ReplayChart() {
     // dayRows 안에서 "선택한 날짜"가 시작되는 idx - loadRange가 재생 위치 초기값으로 씀(전날 끝까지는
     // 이미 그려진 채로 시작, 그 뒤부터 캔들이 하나씩 나타남).
     dayRows.playStartIdx = selectedEmpty ? 0 : selectedStartIdx - startIdx
-    console.log('[전날연결 디버그]', {
-      fromStr, toStr, selectedStartIdx, endIdx, startIdx,
-      selectedDate: fullRows[selectedStartIdx] ? toLocalDateStr(fullRows[selectedStartIdx].time) : null,
-      startRowDate: fullRows[startIdx] ? toLocalDateStr(fullRows[startIdx].time) : null,
-      playStartIdx: dayRows.playStartIdx, dayRowsLength: dayRows.length,
-    })
     rowsRef.current = dayRows
     setTotal(dayRows.length)
     setBluePos(dayRows.length) // 파란 바는 데이터 로드 즉시 맨 끝(전부 로드됨)에 위치
@@ -2203,8 +2213,16 @@ export default function ReplayChart() {
         // 재생 위치(빨간 바)는 전날 끝(=선택한 날짜가 시작되는 지점)에서 출발한다 - 전날 차트는 이미
         // 다 그려진 채로 있고, 거기서부터 선택한 날짜 캔들이 하나씩 새로 나타난다(사용자 요청).
         applyIndex(dayRows.playStartIdx ?? 0)
-        // 전날분이 화면(뷰포트)에 실제로 보이도록 - setData만으로는 예전 줌 상태가 남아있을 수 있어서 명시적으로 맞춰준다
-        chartRef.current?.timeScale().fitContent()
+        // fitContent()는 전날+선택일 전체를 억지로 한 화면에 욱여넣어서 캔들 비율이 뭉개지는 문제가
+        // 있었다(사용자 지적) - 그 대신 재생 시작 지점(전날 끝) 근처를 평소 캔들 폭 그대로 보여준다.
+        const chart = chartRef.current
+        if (chart) {
+          const boundary = dayRows.playStartIdx ?? 0
+          const ts = chart.timeScale()
+          const range = ts.getVisibleLogicalRange()
+          const width = range ? (range.to - range.from) : 60
+          ts.setVisibleLogicalRange({ from: boundary - width * 0.8, to: boundary + width * 0.2 })
+        }
       }
     } catch (e) {
       setError(e.message)
