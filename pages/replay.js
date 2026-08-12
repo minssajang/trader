@@ -4110,6 +4110,23 @@ export default function ReplayChart() {
           }}>✕</button>
       </div>
       <div style={{ padding: 14, overflowX: 'auto' }}>
+        {/* BUY/SELL도 여기서 바로(사용자 요청) - 메인 차트의 openPosition/lotSize 그대로 재사용 */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <button
+            type="button" onClick={() => openPosition('buy')} disabled={currentPrice == null}
+            style={{
+              flex: 1, width: 'auto', background: '#26a69a', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+              padding: '9px 0', fontSize: 13, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
+            }}
+          >BUY</button>
+          <button
+            type="button" onClick={() => openPosition('sell')} disabled={currentPrice == null}
+            style={{
+              flex: 1, width: 'auto', background: '#ef5350', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+              padding: '9px 0', fontSize: 13, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
+            }}
+          >SELL</button>
+        </div>
         {/* 포지션이 여러 개일 때 맨 위에 전체 합계(사용자 요청) */}
         {positions.length > 1 && (() => {
           const totalDollars = positions.reduce((sum, pos) => sum + (currentPrice != null ? calcPnl(pos, currentPrice).dollars : 0), 0)
@@ -5245,6 +5262,23 @@ export default function ReplayChart() {
                     <div style={{ fontSize: 13, fontWeight: 700 }}>매매진입 현황 {positions.length > 0 && `(${positions.length})`}</div>
                     <button type="button" onClick={() => setPositionPanelFloating(true)} title="떠다니는 패널로 분리"
                       style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 14, cursor: 'pointer', lineHeight: 1 }}>🗗</button>
+                  </div>
+                  {/* BUY/SELL도 여기서 바로(사용자 요청) */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                    <button
+                      type="button" onClick={() => openPosition('buy')} disabled={currentPrice == null}
+                      style={{
+                        flex: 1, background: '#26a69a', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+                        padding: '9px 0', fontSize: 13, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
+                      }}
+                    >BUY</button>
+                    <button
+                      type="button" onClick={() => openPosition('sell')} disabled={currentPrice == null}
+                      style={{
+                        flex: 1, background: '#ef5350', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+                        padding: '9px 0', fontSize: 13, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
+                      }}
+                    >SELL</button>
                   </div>
                   {/* 포지션이 여러 개일 때 맨 위에 전체 합계(사용자 요청) */}
                   {positions.length > 1 && (() => {
