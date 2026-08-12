@@ -4842,7 +4842,7 @@ export default function ReplayChart() {
                 })}
               </div>
               <div style={{ fontSize: 12.5, color: '#c8ccd4', marginTop: 6, fontWeight: 500 }}>
-                x1 = 1초당 캔들 1개. 배속은 그 배수 — x2=0.5초/캔들, x60=1/60초/캔들
+                x1 = 1분당 캔들 1개(실제 시세 속도). 배속은 그 배수 — x2=30초/캔들, x60=1초/캔들
               </div>
 
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16 }}>
