@@ -1039,7 +1039,10 @@ export default function ReplayChart() {
   const [uploadedTradeError, setUploadedTradeError] = useState('')
   const [tradeDragOver, setTradeDragOver] = useState(false)
   const [uploadedTradeRows, setUploadedTradeRows] = useState([]) // 현재 불러온 구간 안에 있는 거래 목록(캔들번호 포함) - 마커 찾기 힘들다는 지적으로 추가
-  const [viewScrubPos, setViewScrubPos] = useState(0) // 빨간 바 위치 - 재생 위치(파란 바)와 독립적으로 화면만 이동시킬 때 씀
+  // scrubView()가 화면(카메라) 이동 위치를 기록해두는 내부 상태 - 매매내역 CSV 업로드 시 뜨는 전용
+  // 스크럽 슬라이더, 그리고 아래 빨간 바 드래그 둘 다 이 함수를 거쳐가지만 화면에 직접 그리는 값으로는
+  // 안 쓴다(빨간 바는 redPos=playIndex를 그린다).
+  const [viewScrubPos, setViewScrubPos] = useState(0)
   // 파란 바 - 재생 버튼과는 완전히 무관, 사용자가 직접 드래그할 때만 움직인다. 데이터를 불러오면
   // 항상 맨 끝(total)에 가 있는 상태로 시작(사용자 요청) - setTotal이 바뀌는 4곳에서 같이 맞춰준다.
   const [bluePos, setBluePos] = useState(0)
@@ -3256,8 +3259,10 @@ export default function ReplayChart() {
     window.addEventListener('mouseup', onUp)
   }
 
-  // 빨간 바 전용 - 재생 위치(indexRef/playIndex, 파란 바)는 절대 건드리지 않고 차트 "화면"만 그 캔들로 이동시킨다.
-  // 지금 보이는 창 너비(logical range)는 유지한 채 중심만 옮긴다.
+  // 화면(카메라) 전용 이동 - 재생 위치(indexRef/playIndex)는 이 함수 자체는 안 건드리고 차트 "화면"만
+  // 그 캔들로 이동시킨다. 지금 보이는 창 너비(logical range)는 유지한 채 중심만 옮긴다.
+  // (매매내역 CSV 업로드 스크럽바, 빨간 바 드래그 둘 다 이 함수를 쓴다 - 빨간 바는 여기에 더해서
+  // playIndex도 직접 옮기지만, 그건 onScrubBarMouseDown이 scrubView 호출 뒤에 따로 한다.)
   const scrubView = (idx) => {
     setViewScrubPos(idx)
     const chart = chartRef.current
@@ -4736,13 +4741,14 @@ export default function ReplayChart() {
                 }} />
               </div>
 
-              {/* 빨간 바 - 재생 버튼과만 연동(재생하면 자동으로 채워짐). 드래그하는 동안엔 화면(카메라)만
-                  그 시점으로 옮기고(scrubView, 이미 드러난 캔들은 안 사라짐) 손을 떼면 다시 실제 재생
-                  위치로 돌아온다. 예전엔 매매내역 CSV를 올렸을 때만 떴는데 이제 항상 켜져 있다. */}
+              {/* 빨간 바 - 재생 버튼과만 연동(재생하면 자동으로 채워짐), 파란 바와는 완전히 독립.
+                  드래그하면 화면(카메라)만 그 시점으로 옮기고(scrubView, 이미 드러난 캔들은 안 사라짐)
+                  재생 위치(playIndex) 자체도 그 자리로 같이 옮겨둔다 - 손을 떼도 스냅백 없이 그
+                  자리에 그대로 있고, 다음 ▶재생은 거기서부터 이어진다. */}
               <div
                 ref={scrubBarRef}
                 onMouseDown={onScrubBarMouseDown}
-                title="드래그하는 동안엔 화면만 이동(재생 위치는 그대로) - 손을 떼면 다시 재생 위치를 보여줍니다"
+                title="드래그하면 그 자리로 재생 위치가 옮겨갑니다(캔들은 안 사라짐) - 손을 떼도 그 자리에 그대로 있고, 다음 재생은 여기서부터 이어집니다"
                 style={{
                   position: 'relative', width: '100%', height: 16, marginTop: 8,
                   background: '#2a2e38', borderRadius: 8, overflow: 'visible',
