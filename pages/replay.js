@@ -1778,9 +1778,10 @@ export default function ReplayChart() {
     applyShooting5MinIndex(to)
     const rows = rowsRef.current
     for (let i = from; i < to; i++) seriesRef.current?.update(rows[i])
-    for (let i = from; i < to; i++) {
-      markerSeriesRef.current?.update({ time: rows[i].time, value: rows[i].close })
-    }
+    // markerSeriesRef는 applyIndex()가 이미 구간 전체(rowsRef.current 전부)를 앵커로 setData해뒀으므로
+    // 여기서 다시 update()할 필요가 없다 - 오히려 재생 위치를 0으로 되돌린 뒤(파란 바 시작점 변경 등)
+    // 다시 재생하면 이미 markerSeriesRef에 들어있는 "이후 시각"보다 과거인 rows[i]를 update()하게 되어
+    // lightweight-charts가 "Cannot update oldest data"로 크래시했다(재생이 첫 틱에서 멈추던 버그의 원인).
     syncBands(to)
     syncMA(to)
     syncRSI(to)
@@ -3133,13 +3134,9 @@ export default function ReplayChart() {
     const idealMs = REALTIME_MS / speed
     const tickMs = Math.max(MIN_TICK_MS, idealMs)
     const candlesPerTick = Math.max(1, Math.round(speed * tickMs / REALTIME_MS))
-    // eslint-disable-next-line no-console
-    console.log('[재생 디버그] speed=', speed, 'tickMs=', tickMs, 'candlesPerTick=', candlesPerTick, 'total=', rowsRef.current.length)
     intervalRef.current = setInterval(() => {
       const from = indexRef.current
       const to = Math.min(from + candlesPerTick, rowsRef.current.length)
-      // eslint-disable-next-line no-console
-      console.log('[재생 디버그] tick', new Date().toLocaleTimeString(), 'from=', from, 'to=', to)
       applyIncrement(from, to)
       if (to >= rowsRef.current.length) stopPlayback()
     }, tickMs)
