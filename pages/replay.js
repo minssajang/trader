@@ -1254,7 +1254,9 @@ export default function ReplayChart() {
       grid: { vertLines: { color: '#1c2028' }, horzLines: { color: '#1c2028' } },
       crosshair: { mode: CrosshairMode.Normal },
       timeScale: { borderColor: '#2a2e38', timeVisible: true, secondsVisible: false, tickMarkFormatter: localTickMarkFormatter },
-      rightPriceScale: { borderColor: '#2a2e38' },
+      // scaleMargins 기본값(위 20%/아래 10%)이라 캔들이 실제 가격 범위에 비해 눌려 보였다(사용자 지적)
+      // - 위아래 여백을 줄여서 캔들이 세로로 더 넓게 퍼지게 한다.
+      rightPriceScale: { borderColor: '#2a2e38', scaleMargins: { top: 0.08, bottom: 0.08 } },
       localization: { timeFormatter: localTimeFormatter },
     })
     const series = chart.addSeries(CandlestickSeries, {
@@ -1990,10 +1992,9 @@ export default function ReplayChart() {
         startIdx = j
       }
     }
-    // "하루의 시작"을 자정이 아니라 아시아 세션 시작 시각(SESSIONS의 asia.startHour=7, 07:00 KST)으로
-    // 본다(사용자 지적 - 재생 시작이 07시 근처여야 한다고 함, 이 코드베이스가 이미 세션 구분에 쓰는
-    // 기준과 동일). 자정~07시 사이 캔들은 있으면 전날 몫처럼 이미 그려진 채로 두고, 재생 위치(빨간 바)만
-    // 07시부터 시작한다. 그날 07시 이후 캔들이 아예 없는 이례적인 경우(조기 마감 등)엔 자정 그대로 둔다.
+    // "하루의 시작"은 자정이 아니라 07:00(KST) 고정 기준 - 자정~07시 사이 캔들은 있으면 이미 그려진
+    // 채로 두고, 그날 07시 이후 첫 캔들부터 재생 위치가 시작된다(사용자 확정 - 공백 탐지 방식은 다른
+    // 공백에 잘못 걸릴 수 있어서 폐기하고, 07시 고정으로 되돌림).
     let playStartCandleIdx = selectedStartIdx
     if (!selectedEmpty) {
       for (let i = selectedStartIdx; i < endIdx; i++) {
@@ -2280,18 +2281,20 @@ export default function ReplayChart() {
         // 다 그려진 채로 있고, 거기서부터 선택한 날짜 캔들이 하나씩 새로 나타난다(사용자 요청).
         applyIndex(dayRows.playStartIdx ?? 0)
         // fitContent()는 전날+선택일 전체를 억지로 한 화면에 욱여넣어서 캔들 비율이 뭉개지는 문제가
-        // 있었다(사용자 지적) - 그 대신 재생 시작 지점(전날 끝) 근처를 평소 캔들 폭 그대로 보여준다.
+        // 있었다(사용자 지적) - 그 대신 재생 시작 지점 근처를 평소 캔들 폭 그대로, 화면 좌우 중앙에
+        // 오도록 보여준다(사용자 요청 - play()/reset()이 scrubView로 재생 위치를 중앙에 두는 것과 동일).
         // ★ 예전엔 여기서 ts.getVisibleLogicalRange()를 읽어서 "기존 줌 유지"를 시도했는데, 바로 위
         // applyIndex()의 setData()가 lightweight-charts의 기본 auto-fit을 트리거해서 그 순간 range가
         // 이미 "지금까지 그려진 캔들 전체"(수백 개)로 망가져 있었다 - 그 결과 캔들 하나당 픽셀이 너무
         // 좁아져서 X축 눈금이 항상 15분 단위로 뭉개져 보이는 원인이었다(실측으로 확인: 15분 간격일 때
         // 캔들당 약 6px, INITIAL_VISIBLE_CANDLES=60이면 훨씬 넓은 약 15~19px/캔들이 나와 정상 범위).
-        // 이제 그 손상된 값을 읽지 않고 항상 고정값을 쓴다.
+        // 이제 그 손상된 값을 읽지 않고 항상 고정값을 쓴다(scrubView를 그대로 쓰면 여기서도 같은
+        // auto-fit 문제에 걸리므로, 고정폭으로 직접 계산한다).
         const chart = chartRef.current
         if (chart) {
           const boundary = dayRows.playStartIdx ?? 0
           const ts = chart.timeScale()
-          ts.setVisibleLogicalRange({ from: boundary - INITIAL_VISIBLE_CANDLES * 0.8, to: boundary + INITIAL_VISIBLE_CANDLES * 0.2 })
+          ts.setVisibleLogicalRange({ from: boundary - INITIAL_VISIBLE_CANDLES / 2, to: boundary + INITIAL_VISIBLE_CANDLES / 2 })
         }
       }
     } catch (e) {
