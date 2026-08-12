@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import Head from 'next/head'
 import Link from 'next/link'
 import { createChart, CrosshairMode, CandlestickSeries, LineSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts'
@@ -1007,6 +1008,9 @@ export default function ReplayChart() {
   const [twGoldArmed, setTwGoldArmed] = useState(null)   // { row: 1~6, side: 'buy'|'sell' } | null
   const [twNasdaqArmed, setTwNasdaqArmed] = useState(null)
   const [twBlinkPhase, setTwBlinkPhase] = useState(false) // 600ms 점멸 - _blink_timer 그대로
+  const [twPopupEl, setTwPopupEl] = useState(null) // 새 창으로 뺐을 때 그 창 안에 만든 portal 대상 div (없으면 페이지 안 모달로 렌더)
+  const twWinRef = useRef(null) // 새 창의 window 객체
+  const twOnUnloadRef = useRef(null) // 위 창의 beforeunload 핸들러 참조(다시 붙이기 시 떼어내기 위해 보관)
   // 반자동진입 - 왼쪽 표시(crossPairs 슬롯)와 켜고 끄는 슬롯 상태는 따로 관리한다(화면엔 여러 개
   // 띄워두고 그중 일부만 실전 진입 조건으로 쓸 수 있게). 계산 로직(findMACrossForPair)은 공유하므로,
   // 왼쪽과 여기에 같은 조합을 골라두면 마커 표시 캔들 = 실제 진입 캔들이 항상 일치한다.
@@ -3374,6 +3378,49 @@ export default function ReplayChart() {
     window.addEventListener('mouseup', onUp)
   }
 
+  // 진짜 브라우저 새 창으로 분리매매창을 띄운다 - 같은 origin의 window.open이라 자바스크립트 힙을 공유하므로,
+  // React 포탈(createPortal)로 그 창 document에 렌더하면 별도 동기화 코드 없이도 지금 이 컴포넌트의
+  // state/함수(포지션·잔고·재생 위치 등)를 그대로 함께 쓴다 - 클릭하면 즉시 이 페이지의 시뮬레이션에 반영됨.
+  const openTwPopup = () => {
+    const w = window.open('', 'easytrade-tw', 'width=440,height=920,resizable=yes')
+    if (!w) { alert('팝업이 차단됐어요. 브라우저 주소창의 팝업 차단 아이콘을 눌러 허용해주세요.'); return }
+    w.document.title = '매매 실행 — EasyTrade'
+    // 부모 문서의 스타일시트(styles/site.css 등)를 그대로 복사 - 새 창은 별도 document라 기본적으로 비어있음
+    document.querySelectorAll('link[rel="stylesheet"], style').forEach(node => {
+      w.document.head.appendChild(node.cloneNode(true))
+    })
+    // site.css의 전역 `button{width:100%;margin-top:20px}` 규칙이 이 창 안 버튼들의 flex 레이아웃을
+    // 깨뜨리는 걸 막는다 - replay.js 안에서도 .bt-page에 같은 이유로 이미 걸어둔 오버라이드와 동일.
+    const resetStyle = w.document.createElement('style')
+    resetStyle.textContent = 'body{margin:0} #tw-root button{width:auto;margin-top:0}'
+    w.document.head.appendChild(resetStyle)
+    w.document.body.style.background = '#0f1115'
+    const root = w.document.createElement('div')
+    root.id = 'tw-root'
+    w.document.body.appendChild(root)
+    twWinRef.current = w
+    setTwPopupEl(root)
+    // 사용자가 새 창을 (우리가 만든 버튼이 아니라) 직접 OS 창 닫기 버튼으로 닫은 경우에만
+    // 분리매매창 전체를 종료한다 - closeTwPopup()으로 "다시 붙이기"할 땐 이 리스너를 먼저 떼어내서
+    // 안 걸리게 한다(안 그러면 다시 붙이기 눌러도 모달째로 꺼져버림).
+    const onUserClosed = () => { twWinRef.current = null; setTwPopupEl(null); setShowTradingWindow(false) }
+    twOnUnloadRef.current = onUserClosed
+    w.addEventListener('beforeunload', onUserClosed)
+  }
+
+  const closeTwPopup = () => {
+    if (twWinRef.current && !twWinRef.current.closed) {
+      if (twOnUnloadRef.current) twWinRef.current.removeEventListener('beforeunload', twOnUnloadRef.current)
+      twWinRef.current.close()
+    }
+    twOnUnloadRef.current = null
+    twWinRef.current = null
+    setTwPopupEl(null)
+  }
+
+  // 탭이 닫히거나 이 페이지를 벗어나면 열어둔 새 창도 같이 정리
+  useEffect(() => () => { if (twWinRef.current && !twWinRef.current.closed) twWinRef.current.close() }, [])
+
   // 지금 재생 위치(playIndex-1, dayRows 기준)의 실시간 계산값 하나를 읽는다 - reservationSeriesRef는
   // fullRows(절대) 인덱스라 offset을 더해서 변환. 데이터가 없거나 워밍업 중이면 null.
   const twSeriesVal = (key) => {
@@ -3419,16 +3466,17 @@ export default function ReplayChart() {
     )
   }
 
-  // [상태] 표시등 - 44px 고정폭. active=false면 꺼짐(회색). colorB를 주면 twBlinkPhase에 따라 colorA/colorB를
-  // 번갈아 점멸, colorB 없이 colorA만 주면 점멸 없이 고정색(1번 신호처럼).
-  const TwStatusDot = ({ active, colorA, colorB }) => {
-    const c = active ? (colorB ? (twBlinkPhase ? colorA : colorB) : colorA) : TW_STATUS_OFF
-    return (
-      <span style={{
-        display: 'inline-block', width: 44, textAlign: 'center', fontSize: 10, fontWeight: 700,
-        padding: '2px 4px', borderRadius: 4, color: 'white', background: c.bg, border: `2px solid ${c.border}`,
-      }}>[상태]</span>
-    )
+  // [상태] 표시등 - 44px 고정폭, 체크박스와 SELL/BUY 버튼 "사이"(원본 QHBoxLayout 순서 그대로: 체크박스→상태→방향버튼).
+  // active=false면 꺼짐. colorB를 주면 twBlinkPhase에 따라 colorA/colorB를 번갈아 점멸, colorB 없이 colorA만
+  // 주면 점멸 없이 고정색(1번 신호). readyOff=true면 꺼짐 스타일이 5/6번처럼 투명 배경+테두리만(READY_OFF).
+  const TwStatusDot = ({ active, colorA, colorB, readyOff }) => {
+    if (!active) {
+      return readyOff
+        ? <span style={{ display: 'inline-block', width: 44, textAlign: 'center', fontSize: 9, fontWeight: 700, padding: '2px 4px', borderRadius: 4, color: TW_READY_OFF.color, background: 'transparent', border: `2px solid ${TW_READY_OFF.border}` }}>상태</span>
+        : <span style={{ display: 'inline-block', width: 44, textAlign: 'center', fontSize: 9, fontWeight: 700, padding: '2px 4px', borderRadius: 4, color: 'white', background: TW_STATUS_OFF.bg, border: `2px solid ${TW_STATUS_OFF.border}` }}>상태</span>
+    }
+    const c = colorB ? (twBlinkPhase ? colorA : colorB) : colorA
+    return <span style={{ display: 'inline-block', width: 44, textAlign: 'center', fontSize: 9, fontWeight: 700, padding: '2px 4px', borderRadius: 4, color: 'white', background: c.bg, border: `2px solid ${c.border}` }}>상태</span>
   }
 
   // 골드/나스닥 탭 - hma_reservation_tab.py / nas100_tab.py와 완전히 동일한 로직·색상.
@@ -3485,15 +3533,17 @@ export default function ReplayChart() {
     const row5Golden = h3 != null && h100 != null && h3 > h100
     const row6Dead = h1 != null && h3 != null && h1 < h3
 
-    const rowDef = (n, label, checked, onCheck, sideBtns) => (
+    // 원본 QHBoxLayout 순서 그대로: [체크박스+라벨] → [상태 표시등] → [SELL/BUY 버튼]
+    const rowDef = (n, label, checked, onCheck, statusEl, sideBtns) => (
       <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <label style={{ display: 'flex', flexDirection: 'column', width: 130, cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', width: 130, flexShrink: 0, cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <input type="checkbox" checked={checked} onChange={onCheck} style={{ accentColor: '#4CAF50' }} />
-            {label.color ? <span style={{ color: label.color, whiteSpace: 'pre-line' }}>{label.text}</span> : <span style={{ whiteSpace: 'pre-line' }}>{label.text}</span>}
+            <span style={{ color: label.color, whiteSpace: 'pre-line' }}>{label.text}</span>
           </span>
         </label>
-        {sideBtns}
+        {statusEl}
+        <div style={{ display: 'flex', gap: 4, flex: 1 }}>{sideBtns}</div>
       </div>
     )
 
@@ -3531,38 +3581,24 @@ export default function ReplayChart() {
         </div>
 
         <CollapsibleCard title="🎯 반자동 예약" maxWidth="none" defaultOpen={false}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            {rowDef(1, { text: `1번: H1×H3\n${fmtTopBottom(h1, h3)}`, color: row1Color }, armed?.row === 1, () => { if (armed?.row === 1) setArmed(null) },
-              <>{dirBtn('SELL 🔴 매도', armed?.row === 1 && armed.side === 'sell', () => arm(1, 'sell'), false)}{dirBtn('BUY 🟢 매수', armed?.row === 1 && armed.side === 'buy', () => arm(1, 'buy'), true)}</>)}
-            <TwStatusDot active={row1Outside || !!row1Armed} colorA={row1Outside ? TW_STATUS_YELLOW : TW_STATUS_ORANGE} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            {rowDef(2, { text: `2번: H3×S5\n${fmtTopBottom(h3, sma100)}`, color: row2Color }, armed?.row === 2, () => { if (armed?.row === 2) setArmed(null) },
-              <>{dirBtn('SELL 🔴 매도', armed?.row === 2 && armed.side === 'sell', () => arm(2, 'sell'), false)}{dirBtn('BUY 🟢 매수', armed?.row === 2 && armed.side === 'buy', () => arm(2, 'buy'), true)}</>)}
-            <TwStatusDot active={h3 != null && sma100 != null} colorA={row2Golden ? TW_STATUS_BLUE_A : TW_STATUS_PINK_A} colorB={row2Golden ? TW_STATUS_BLUE_B : TW_STATUS_PINK_B} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            {rowDef(3, { text: `3번: 상승추세\n-`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, armed?.row === 3, () => arm(3, 'buy'), dirBtn('BUY 🟢 매수', armed?.row === 3, () => arm(3, 'buy'), true))}
-            <TwStatusDot active={row3Buy} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            {rowDef(4, { text: `4번: 하락추세\n-`, color: row4Sell ? TW_TEXT_PINK : TW_TEXT_GRAY }, armed?.row === 4, () => arm(4, 'sell'), dirBtn('SELL 🔴 매도', armed?.row === 4, () => arm(4, 'sell'), false))}
-            <TwStatusDot active={row4Sell} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            {rowDef(5, { text: `5번: H60/H100\n${fmtTopBottom(h3, h100)}`, color: row5Golden ? TW_TEXT_BLUE : TW_TEXT_GRAY }, armed?.row === 5, () => arm(5, 'buy'), dirBtn('BUY 🟢 매수', armed?.row === 5, () => arm(5, 'buy'), true))}
-            <span style={{ width: 44, textAlign: 'center', fontSize: 10, fontWeight: 700, padding: '2px 4px', borderRadius: 4,
-              color: h1 != null && sma20 != null && h1 > sma20 ? 'white' : TW_READY_OFF.color,
-              background: h1 != null && sma20 != null && h1 > sma20 ? (twBlinkPhase ? TW_STATUS_BLUE_A.bg : TW_STATUS_BLUE_B.bg) : 'transparent',
-              border: `2px solid ${h1 != null && sma20 != null && h1 > sma20 ? (twBlinkPhase ? TW_STATUS_BLUE_A.border : TW_STATUS_BLUE_B.border) : TW_READY_OFF.border}` }}>[준비]</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            {rowDef(6, { text: `6번: H20/H60\n${fmtTopBottom(h3, h1)}`, color: row6Dead ? TW_TEXT_PINK : TW_TEXT_GRAY }, armed?.row === 6, () => arm(6, 'sell'), dirBtn('SELL 🔴 매도', armed?.row === 6, () => arm(6, 'sell'), false))}
-            <span style={{ width: 44, textAlign: 'center', fontSize: 10, fontWeight: 700, padding: '2px 4px', borderRadius: 4,
-              color: h1 != null && sma20 != null && h1 < sma20 ? 'white' : TW_READY_OFF.color,
-              background: h1 != null && sma20 != null && h1 < sma20 ? (twBlinkPhase ? TW_STATUS_PINK_A.bg : TW_STATUS_PINK_B.bg) : 'transparent',
-              border: `2px solid ${h1 != null && sma20 != null && h1 < sma20 ? (twBlinkPhase ? TW_STATUS_PINK_A.border : TW_STATUS_PINK_B.border) : TW_READY_OFF.border}` }}>[준비]</span>
-          </div>
+          {rowDef(1, { text: `1번: H1×H3\n${fmtTopBottom(h1, h3)}`, color: row1Color }, armed?.row === 1, () => { if (armed?.row === 1) setArmed(null) },
+            <TwStatusDot active={row1Outside || !!row1Armed} colorA={row1Outside ? TW_STATUS_YELLOW : TW_STATUS_ORANGE} />,
+            <>{dirBtn('SELL 🔴 매도', armed?.row === 1 && armed.side === 'sell', () => arm(1, 'sell'), false)}{dirBtn('BUY 🟢 매수', armed?.row === 1 && armed.side === 'buy', () => arm(1, 'buy'), true)}</>)}
+          {rowDef(2, { text: `2번: H3×S5\n${fmtTopBottom(h3, sma100)}`, color: row2Color }, armed?.row === 2, () => { if (armed?.row === 2) setArmed(null) },
+            <TwStatusDot active={h3 != null && sma100 != null} colorA={row2Golden ? TW_STATUS_BLUE_A : TW_STATUS_PINK_A} colorB={row2Golden ? TW_STATUS_BLUE_B : TW_STATUS_PINK_B} />,
+            <>{dirBtn('SELL 🔴 매도', armed?.row === 2 && armed.side === 'sell', () => arm(2, 'sell'), false)}{dirBtn('BUY 🟢 매수', armed?.row === 2 && armed.side === 'buy', () => arm(2, 'buy'), true)}</>)}
+          {rowDef(3, { text: `3번: 상승추세\n-`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, armed?.row === 3, () => arm(3, 'buy'),
+            <TwStatusDot active={row3Buy} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
+            dirBtn('BUY 🟢 매수', armed?.row === 3, () => arm(3, 'buy'), true))}
+          {rowDef(4, { text: `4번: 하락추세\n-`, color: row4Sell ? TW_TEXT_PINK : TW_TEXT_GRAY }, armed?.row === 4, () => arm(4, 'sell'),
+            <TwStatusDot active={row4Sell} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
+            dirBtn('SELL 🔴 매도', armed?.row === 4, () => arm(4, 'sell'), false))}
+          {rowDef(5, { text: `5번: H60/H100\n${fmtTopBottom(h3, h100)}`, color: row5Golden ? TW_TEXT_BLUE : TW_TEXT_GRAY }, armed?.row === 5, () => arm(5, 'buy'),
+            <TwStatusDot readyOff active={h1 != null && sma20 != null && h1 > sma20} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
+            dirBtn('BUY 🟢 매수', armed?.row === 5, () => arm(5, 'buy'), true))}
+          {rowDef(6, { text: `6번: H20/H60\n${fmtTopBottom(h3, h1)}`, color: row6Dead ? TW_TEXT_PINK : TW_TEXT_GRAY }, armed?.row === 6, () => arm(6, 'sell'),
+            <TwStatusDot readyOff active={h1 != null && sma20 != null && h1 < sma20} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
+            dirBtn('SELL 🔴 매도', armed?.row === 6, () => arm(6, 'sell'), false))}
         </CollapsibleCard>
 
         <div style={{ marginTop: 8 }}>
@@ -3605,21 +3641,9 @@ export default function ReplayChart() {
     </div>
   )
 
-  const renderTradingWindow = () => (
-    <div style={{
-      position: 'fixed', left: twPos.x, top: twPos.y, width: 400, maxHeight: '92vh', overflowY: 'auto',
-      background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
-      zIndex: 1000, fontSize: 13,
-    }}>
-      <div onMouseDown={onTwHeaderMouseDown} style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px',
-        borderBottom: '1px solid #2a2e38', cursor: 'move', userSelect: 'none',
-      }}>
-        <span style={{ fontWeight: 700, fontSize: 13.5 }}>🖱 매매 실행 (분리매매창)</span>
-        <button type="button" onClick={() => setShowTradingWindow(false)} style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>✕</button>
-      </div>
-
-      <div style={{ padding: 14 }}>
+  // 모달 본문(거래정보+체크박스+탭바+탭 내용) - 페이지 안 모달/새 창 둘 다 이 내용을 그대로 재사용한다.
+  const renderTwInner = () => (
+    <>
         <div style={{ border: '1px solid #2a2e38', borderRadius: 10, padding: 10, marginBottom: 10 }}>
           <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6, fontWeight: 700 }}>거래 정보</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: '6px 10px', alignItems: 'center', fontSize: 12.5 }}>
@@ -3670,7 +3694,44 @@ export default function ReplayChart() {
         {twTab === 'strategy1' && renderTwStrategy1Tab()}
         {twTab === 'gold' && renderTwReservationTab('gold')}
         {twTab === 'nasdaq' && renderTwReservationTab('nasdaq')}
+    </>
+  )
+
+  // 페이지 안 모달 - 드래그로 위치 이동 + 우측 하단 모서리로 좌우/상하 크기 조절(CSS resize) 가능.
+  const renderTwEmbedded = () => (
+    <div style={{
+      position: 'fixed', left: twPos.x, top: twPos.y, width: 400, height: 700,
+      minWidth: 340, minHeight: 320, maxWidth: '92vw', maxHeight: '92vh',
+      resize: 'both', overflow: 'auto',
+      background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+      zIndex: 1000, fontSize: 13,
+    }}>
+      <div onMouseDown={onTwHeaderMouseDown} style={{
+        position: 'sticky', top: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px',
+        background: '#171a21', borderBottom: '1px solid #2a2e38', cursor: 'move', userSelect: 'none', zIndex: 1,
+      }}>
+        <span style={{ fontWeight: 700, fontSize: 13.5 }}>🖱 매매 실행 (분리매매창)</span>
+        <span style={{ display: 'flex', gap: 10 }}>
+          <button type="button" onClick={openTwPopup} title="진짜 새 창으로 분리해서 열기 (크기 자유 조절, 리플레이와 계속 연동됨)"
+            style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 14, cursor: 'pointer', lineHeight: 1 }}>🗗</button>
+          <button type="button" onClick={() => setShowTradingWindow(false)} style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+        </span>
       </div>
+      <div style={{ padding: 14 }}>{renderTwInner()}</div>
+    </div>
+  )
+
+  // 새 창(팝업) - window.open으로 띄운 실제 브라우저 창 document에 portal로 렌더. 같은 origin이라
+  // React state를 공유하므로 여기서 BUY/SELL을 눌러도 이 페이지의 포지션·잔고에 곧바로 반영된다.
+  const renderTwPopupContent = () => (
+    <div style={{ padding: 14, color: '#e8eaed', fontFamily: '-apple-system, "Segoe UI", "Malgun Gothic", sans-serif', fontSize: 13 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 14, marginBottom: 8 }}>
+        <button type="button" onClick={closeTwPopup} title="이 창을 닫고 페이지 안 모달로 다시 붙이기"
+          style={{ background: 'none', border: '1px solid #2a2e38', borderRadius: 7, color: '#9aa0ab', fontSize: 12, padding: '5px 10px', cursor: 'pointer' }}>🔗 페이지에 다시 붙이기</button>
+        <button type="button" onClick={() => { closeTwPopup(); setShowTradingWindow(false) }}
+          style={{ background: 'none', border: '1px solid #2a2e38', borderRadius: 7, color: '#9aa0ab', fontSize: 12, padding: '5px 10px', cursor: 'pointer' }}>✕ 닫기</button>
+      </div>
+      {renderTwInner()}
     </div>
   )
 
@@ -4756,7 +4817,8 @@ export default function ReplayChart() {
           </div>
         </main>
 
-        {showTradingWindow && renderTradingWindow()}
+        {showTradingWindow && !twPopupEl && renderTwEmbedded()}
+        {showTradingWindow && twPopupEl && createPortal(renderTwPopupContent(), twPopupEl)}
       </div>
     </>
   )
