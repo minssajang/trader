@@ -1069,6 +1069,12 @@ export default function ReplayChart() {
   const rowsRef = useRef([])
   const intervalRef = useRef(null)
   const indexRef = useRef(0)
+  // 캔들 시리즈(seriesRef)에 실제로 .update()가 호출된 가장 앞선(마지막) 인덱스 - indexRef/playIndex와는
+  // 다르다. playIndex는 "지금 빨간 바가 가리키는 위치"(뒤로 돌려볼 수도 있음)인 반면, 이건 "실제로
+  // 화면에 그려진 가장 먼 지점"이다. 이 둘을 분리 안 하고 그냥 playIndex부터 그리면, 빨간 바를
+  // 뒤로 드래그했다가 다시 재생했을 때 이미 그려진 것보다 과거 시각을 update()하게 되어
+  // lightweight-charts가 "Cannot update oldest data"로 크래시하는 문제가 있었다(실사용 중 재현됨).
+  const drawnUpToRef = useRef(0)
   const datasetCacheRef = useRef({}) // dataset.id -> 파싱된 전체 rows (CSV 재요청 방지용)
   const bandDataRef = useRef({})     // bandId -> { upper, middle, lower } - 선택한 날짜분, 워밍업 포함해서 계산됨
   const bandSeriesRef = useRef({})   // bandId -> { upper, middle, lower } lightweight-charts 라인 시리즈
@@ -1328,7 +1334,12 @@ export default function ReplayChart() {
     // applyOptions({width})는 이 차트처럼 pane이 여러 개(캔들+RSI+MACD+스토캐스틱)일 때 서브pane
     // 캔버스까지는 안 따라가는 경우가 실측으로 확인됐다 - chart.resize(w,h)가 라이브러리가 명시하는
     // 정식 전체 리사이즈 API라 이걸로 통일한다.
-    const onResize = () => chart.resize(containerRef.current.clientWidth, 750)
+    // forceRepaint(3번째 인자)를 true로 줘야 캔버스 내부 그리기 버퍼(width/height 속성 - CSS 크기와는
+    // 별개로 실제 해상도를 결정하는 값)가 그 자리에서 바로 재할당된다. 이걸 안 주면 CSS 크기(화면에
+    // 보이는 크기)는 986px로 맞게 바뀌어도 내부 버퍼는 라이브러리 기본값(300x150)에 그대로 남아있어서,
+    // 브라우저가 300px짜리 그림을 986px로 늘려 그리는 바람에 실제로 그려지는 캔들 개수가 확 줄어
+    // "차트가 중간에서 끊긴 것처럼" 보이는 문제가 있었다(실측으로 확인).
+    const onResize = () => chart.resize(containerRef.current.clientWidth, 750, true)
     window.addEventListener('resize', onResize)
     // 브라우저 창 자체를 resize할 때만 반응하는 위 리스너로는 부족했다 - 왼쪽 사이드바(달력/체크박스
     // 카드들)의 레이아웃이 차트 생성 시점 이후에 자리잡으면서 컨테이너 폭이 나중에 바뀌는 경우
@@ -1337,7 +1348,7 @@ export default function ReplayChart() {
     // 컨테이너 자체의 크기 변화를 직접 감시해서 항상 실제 폭에 맞춘다.
     const ro = new ResizeObserver(entries => {
       const w = entries[0]?.contentRect?.width
-      if (w) chart.resize(w, 750)
+      if (w) chart.resize(w, 750, true)
     })
     ro.observe(containerRef.current)
 
@@ -1756,6 +1767,7 @@ export default function ReplayChart() {
   const applyIndex = (idx) => {
     const dayRows = rowsRef.current.slice(0, idx)
     seriesRef.current?.setData(dayRows)
+    drawnUpToRef.current = idx // setData로 완전히 다시 그렸으니, "실제로 그려진 지점"도 정확히 idx로 갱신
     // 마커 전용 투명 시리즈는 항상 구간 전체를 앵커로 갖고 있어야 한다 - 재생 위치(idx)까지만 주면
     // 아직 재생 안 된 시각의 마커(특히 재생 위치와 무관하게 항상 표시하는 업로드 매매내역)가 앵커를
     // 못 찾아서 화면 오른쪽 끝에 전부 쏠려 붙는 버그가 있었다. 다른 신호 마커들은 어차피
@@ -1799,11 +1811,14 @@ export default function ReplayChart() {
     applySessionBands(to)
     applyShooting5MinIndex(to)
     const rows = rowsRef.current
-    for (let i = from; i < to; i++) seriesRef.current?.update(rows[i])
+    // from이 아니라 drawnUpToRef(실제로 이미 그려진 지점)부터 그린다 - 빨간 바를 뒤로 드래그했다가
+    // 다시 재생하면 from(playIndex)이 이미 그려진 지점보다 과거일 수 있는데, 그 과거 시각을 그대로
+    // update()하면 lightweight-charts가 "Cannot update oldest data"로 크래시했다(실사용 중 재현됨).
+    // 이미 그려진 구간은 다시 그릴 필요도 없으므로 Math.max로 항상 앞으로만 그린다.
+    for (let i = Math.max(from, drawnUpToRef.current); i < to; i++) seriesRef.current?.update(rows[i])
+    drawnUpToRef.current = Math.max(drawnUpToRef.current, to)
     // markerSeriesRef는 applyIndex()가 이미 구간 전체(rowsRef.current 전부)를 앵커로 setData해뒀으므로
-    // 여기서 다시 update()할 필요가 없다 - 오히려 재생 위치를 0으로 되돌린 뒤(파란 바 시작점 변경 등)
-    // 다시 재생하면 이미 markerSeriesRef에 들어있는 "이후 시각"보다 과거인 rows[i]를 update()하게 되어
-    // lightweight-charts가 "Cannot update oldest data"로 크래시했다(재생이 첫 틱에서 멈추던 버그의 원인).
+    // 여기서 다시 update()할 필요가 없다.
     syncBands(to)
     syncMA(to)
     syncRSI(to)
@@ -3209,8 +3224,35 @@ export default function ReplayChart() {
     applyIndex(idx)
   }
 
-  // 빨간 바 - 드래그하면 화면만 그 시점으로 옮기고(scrubView, 캔들은 안 지워짐) 재생 위치(playIndex)도
-  // 같이 그 자리로 옮겨둔다. 손을 떼도 그대로 그 자리에 있고, 다음 ▶재생은 거기서부터 이어진다.
+  // 빨간 바를 앞으로 드래그할 때 - 아직 한 번도 안 그려진 구간(drawnUpToRef 이후)이면 캔들을
+  // 실제로 그려준다(applyIncrement와 같은 안전한 방식: 이미 그려진 곳은 건너뛰고 항상 앞으로만).
+  // 뒤로 드래그할 땐 이미 다 그려져 있으니 아무것도 새로 그릴 필요가 없다 - indexRef/playIndex만 옮긴다.
+  const revealTo = (idx) => {
+    const rows = rowsRef.current
+    if (idx > drawnUpToRef.current) {
+      for (let i = drawnUpToRef.current; i < idx; i++) seriesRef.current?.update(rows[i])
+      drawnUpToRef.current = idx
+      syncBands(idx)
+      syncMA(idx)
+      syncRSI(idx)
+      syncMACD(idx)
+      syncMACD5(idx)
+      syncStoch1(idx)
+      syncStoch2(idx)
+      syncStoch3(idx)
+      applyAllMarkers(idx)
+      if (ribbonEnabled) recomputeSpreadExtremes(idx)
+      if (sidewaysEnabled) applySidewaysBands(idx)
+      applySessionBands(idx)
+      applyShooting5MinIndex(idx)
+    }
+    indexRef.current = idx
+    setPlayIndex(idx)
+  }
+
+  // 빨간 바 - 드래그하면 화면만 그 시점으로 옮기고(scrubView, 캔들은 안 지워짐) + 아직 안 그려진 구간이면
+  // revealTo로 실제로 그려준다. 재생 위치(playIndex)도 같이 그 자리로 옮겨둔다. 손을 떼도 그대로 그
+  // 자리에 있고, 다음 ▶재생은 거기서부터 이어진다.
   const scrubBarRef = useRef(null)
   const onScrubBarMouseDown = (e) => {
     if (!total) return
@@ -3222,8 +3264,7 @@ export default function ReplayChart() {
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
       const idx = Math.round(ratio * total)
       scrubView(idx)
-      indexRef.current = idx
-      setPlayIndex(idx)
+      revealTo(idx)
     }
     moveTo(e.clientX)
     const onMove = (ev) => moveTo(ev.clientX)
