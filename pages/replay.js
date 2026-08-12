@@ -1019,7 +1019,9 @@ export default function ReplayChart() {
   // 매매 연습 - 헤징 허용(바이/셀 동시 보유 가능), 수수료/스프레드는 계산 안 함
   const [startingBalance, setStartingBalanceState] = useState(rs.startingBalance ?? DEFAULT_STARTING_BALANCE)
   const [balance, setBalance] = useState(DEFAULT_STARTING_BALANCE)
-  const [lotSize, setLotSize] = useState(rs.lotSize ?? 0.01)
+  // 메인 차트 매매 패널의 랏수 - 분리매매창(twLots였던 것)과 완전히 같은 값을 공유한다(사용자 지적 -
+  // "메인차트 금액/랏수와 분리매매 설정이 안 맞는다"). 예전엔 별도 state(twLots)라 서로 안 따라갔다.
+  const [lotSize, setLotSize] = useState(rs.lotSize ?? DEFAULT_TW_LOTS.gold)
   const [positions, setPositions] = useState([]) // { id, side:'buy'|'sell', symbol, lot, entryPrice, entryTime }
   const [pnlDisplay, setPnlDisplay] = useState(rs.pnlDisplay ?? 'dollar') // 'dollar' | 'point'
 
@@ -1029,15 +1031,21 @@ export default function ReplayChart() {
   // 심볼만 로드하므로 다른 심볼 탭은 대기 상태로 표시만 됨).
   const [showTradingWindow, setShowTradingWindow] = useState(false)
   const [twPos, setTwPos] = useState({ x: 80, y: 80 })
+  // 매매진입 현황도 분리매매창처럼 떼어낼 수 있게(사용자 요청) - 페이지 안에 고정으로 박혀있던 걸
+  // 분리매매창과 같은 방식(드래그 가능한 fixed 패널 + document.body 포탈로 항상 최상단)으로 바꾼다.
+  const [showPositionPanel, setShowPositionPanel] = useState(true)
+  const [posPanelPos, setPosPanelPos] = useState({ x: 80, y: 160 })
   const [twTab, setTwTab] = useState('gold') // 'strategy1' | 'gold' | 'nasdaq' - symbol 기본값(골드)과 맞춤(사용자 지적)
   const [twSwapped, setTwSwapped] = useState(false)
-  const [twLots, setTwLots] = useState(DEFAULT_TW_LOTS.gold)
   const [twSl, setTwSl] = useState(DEFAULT_TW_SL.gold)
   const [twTp, setTwTp] = useState(DEFAULT_TW_TP.gold)
   const [twUseSl, setTwUseSl] = useState(true)
   const [twUseTp, setTwUseTp] = useState(false) // twTpExitCross가 기본 켜져 있어서(둘은 상호배타) 포인트 익절은 기본 꺼둔다 - 둘 다 기본 true였던 게 "동시 체크" 버그의 진짜 원인이었음
   const [twTpExitCross, setTwTpExitCross] = useState(true) // "✅ 익절: H1×H3 크로스 청산" 기본 체크(원본과 동일 - 체크 시 포인트익절은 자동 꺼짐)
   const [twSkipPopup, setTwSkipPopup] = useState(true)
+  // 반자동 신호(골드/나스닥 탭의 방향버튼 무장 상태)를 차트 아래에 "N 롱 / M 셀"로 표시(사용자 요청,
+  // 기본 체크)
+  const [showSemiAutoSignalOnChart, setShowSemiAutoSignalOnChart] = useState(true)
   // symbol(메인 차트 🥇골드/💻나스닥 버튼)이 바뀌면 분리매매창 탭/랏수/손절/익절도 그 심볼 기준으로 같이
   // 맞춘다(사용자 지적 - "기본값만 나스닥이어야지 나스닥으로 고정해두라는 게 아니다". 분리매매창 탭을
   // 직접 누르는 방향(id==='gold'/'nasdaq'일 때 setSymbol 호출)은 이미 반영돼 있었는데, 반대로 메인
@@ -1048,7 +1056,7 @@ export default function ReplayChart() {
     const twId = symbol === 'GOLD' ? 'gold' : symbol === 'NASDAQ' ? 'nasdaq' : null
     if (!twId || twId === twTab) return
     setTwTab(twId)
-    setTwLots(DEFAULT_TW_LOTS[twId])
+    setLotSize(DEFAULT_TW_LOTS[twId])
     setTwSl(DEFAULT_TW_SL[twId])
     setTwTp(DEFAULT_TW_TP[twId])
   }, [symbol])
@@ -1153,6 +1161,7 @@ export default function ReplayChart() {
   const positionsRef = useRef([]) // applyIncrement가 재생 인터벌의 오래된 클로저에서도 최신 포지션 목록을 읽을 수 있게 미러링
   useEffect(() => { positionsRef.current = positions }, [positions])
   const twDragRef = useRef(null) // 분리매매창 드래그용
+  const posPanelDragRef = useRef(null) // 매매진입 현황 패널 드래그용
   // 분리매매창 [상태] 표시등 점멸 - _blink_timer(600ms)와 동일, 모달이 열려 있을 때만 돈다
   useEffect(() => {
     if (!showTradingWindow) return
@@ -1945,7 +1954,7 @@ export default function ReplayChart() {
         )
         const fireRow = (row, side, idx) => {
           openModalPositionAt(side, rows[idx].close, rows[idx].time,
-            { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: `row${row}` })
+            { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: `row${row}` })
         }
         // 발동 조건 = 체크박스(twXChecked)와 방향버튼(twXDir)이 "같은 행"으로 둘 다 켜져 있을 때만
         if (isGold && twGoldChecked != null && twGoldDir?.row === twGoldChecked) {
@@ -3664,6 +3673,25 @@ export default function ReplayChart() {
     window.addEventListener('mouseup', onUp)
   }
 
+  // 매매진입 현황 패널 드래그 - 분리매매창 드래그(onTwHeaderMouseDown)와 완전히 같은 방식
+  const onPosPanelHeaderMouseDown = (e) => {
+    posPanelDragRef.current = { startX: e.clientX, startY: e.clientY, origX: posPanelPos.x, origY: posPanelPos.y }
+    const onMove = (ev) => {
+      if (!posPanelDragRef.current) return
+      setPosPanelPos({
+        x: posPanelDragRef.current.origX + (ev.clientX - posPanelDragRef.current.startX),
+        y: posPanelDragRef.current.origY + (ev.clientY - posPanelDragRef.current.startY),
+      })
+    }
+    const onUp = () => {
+      posPanelDragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   // 진짜 브라우저 새 창으로 분리매매창을 띄운다 - 같은 origin의 window.open이라 자바스크립트 힙을 공유하므로,
   // React 포탈(createPortal)로 그 창 document에 렌더하면 별도 동기화 코드 없이도 지금 이 컴포넌트의
   // state/함수(포지션·잔고·재생 위치 등)를 그대로 함께 쓴다 - 클릭하면 즉시 이 페이지의 시뮬레이션에 반영됨.
@@ -3878,10 +3906,10 @@ export default function ReplayChart() {
         <button type="button" onClick={() => setTwSwapped(v => !v)} style={{ width: '100%', background: '#9E9E9E', color: 'white', border: 'none', borderRadius: 5, padding: 6, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>버튼 위치 변경</button>
 
         <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
-          <button type="button" onClick={() => openModalPosition('sell', { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
+          <button type="button" onClick={() => openModalPosition('sell', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
             disabled={currentPrice == null || !live}
             style={{ flex: 1, height: 57, background: TW_SHORT_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>SELL 🔴 매도</button>
-          <button type="button" onClick={() => openModalPosition('buy', { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
+          <button type="button" onClick={() => openModalPosition('buy', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
             disabled={currentPrice == null || !live}
             style={{ flex: 1, height: 57, background: TW_LONG_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>BUY 🟢 매수</button>
         </div>
@@ -3936,10 +3964,10 @@ export default function ReplayChart() {
     <div>
       <button type="button" onClick={() => setTwSwapped(v => !v)} style={{ width: '100%', background: '#9E9E9E', color: 'white', border: 'none', borderRadius: 5, padding: 6, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>버튼 위치 변경</button>
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
-        <button type="button" onClick={() => openModalPosition('sell', { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'strategy1' })}
+        <button type="button" onClick={() => openModalPosition('sell', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'strategy1' })}
           disabled={currentPrice == null}
           style={{ flex: 1, padding: 20, background: TW_SHORT_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>SELL<br />🔴 매도</button>
-        <button type="button" onClick={() => openModalPosition('buy', { lot: twLots, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'strategy1' })}
+        <button type="button" onClick={() => openModalPosition('buy', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'strategy1' })}
           disabled={currentPrice == null}
           style={{ flex: 1, padding: 20, background: TW_LONG_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>BUY<br />🟢 매수</button>
       </div>
@@ -3961,7 +3989,7 @@ export default function ReplayChart() {
             <span style={{ color: twMoneyColor(balance - startingBalance), fontWeight: 700 }}>${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             <span />
             <span style={{ color: '#9aa0ab' }}>랏수:</span>
-            <input type="number" step={0.01} min={0.01} value={twLots} onChange={e => setTwLots(Math.max(0.01, Number(e.target.value) || 0.01))}
+            <input type="number" step={0.01} min={0.01} value={lotSize} onChange={e => setLotSize(Math.max(0.01, Number(e.target.value) || 0.01))}
               style={{ width: 80, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '4px 6px', fontSize: 12.5 }} />
             <span />
             <span style={{ color: '#9aa0ab' }}>손절(포인트):</span>
@@ -3983,9 +4011,15 @@ export default function ReplayChart() {
           <input type="checkbox" checked={twTpExitCross} onChange={e => { setTwTpExitCross(e.target.checked); if (e.target.checked) setTwUseTp(false) }} />
           ✅ 익절: H1×H3 크로스 청산 (숏=골든청산 / 롱=데드청산)
         </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#FF9800', fontWeight: 700, fontSize: 12, cursor: 'pointer', marginBottom: 10 }}>
-          <input type="checkbox" checked={twSkipPopup} onChange={e => setTwSkipPopup(e.target.checked)} /> 팝업 확인 제외 (빠른 거래)
-        </label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 10, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#FF9800', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+            <input type="checkbox" checked={twSkipPopup} onChange={e => setTwSkipPopup(e.target.checked)} /> 팝업 확인 제외 (빠른 거래)
+          </label>
+          {/* 반자동 신호를 차트 아래에 "N 롱 / M 셀"로 표시(사용자 요청, 기본 체크) */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#4CAF50', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+            <input type="checkbox" checked={showSemiAutoSignalOnChart} onChange={e => setShowSemiAutoSignalOnChart(e.target.checked)} /> 반자동 신호 차트 표시
+          </label>
+        </div>
 
         <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
           {[['strategy1', '매매1'], ['gold', '골드'], ['nasdaq', '나스닥']].map(([id, label]) => (
@@ -3993,7 +4027,7 @@ export default function ReplayChart() {
               setTwTab(id)
               // 골드/나스닥 탭을 선택하면 랏수/손절/익절도 그 심볼 기본값으로 바뀐다(사용자 요청 - "탭을
               // 나스닥 선택했을 때만 나스닥, 골드를 선택했을 때는 골드 셋팅으로 바뀌어야 함"). 매매1 탭은 해당 없음.
-              if (DEFAULT_TW_LOTS[id] != null) setTwLots(DEFAULT_TW_LOTS[id])
+              if (DEFAULT_TW_LOTS[id] != null) setLotSize(DEFAULT_TW_LOTS[id])
               if (DEFAULT_TW_SL[id] != null) setTwSl(DEFAULT_TW_SL[id])
               if (DEFAULT_TW_TP[id] != null) setTwTp(DEFAULT_TW_TP[id])
               // 탭이 대상으로 하는 심볼과 실제 로드된 차트 데이터(symbol)가 다르면 live가 false가 되어
@@ -4019,7 +4053,7 @@ export default function ReplayChart() {
   // 페이지 안 모달 - 드래그로 위치 이동 + 우측 하단 모서리로 좌우/상하 크기 조절(CSS resize) 가능.
   const renderTwEmbedded = () => (
     <div style={{
-      position: 'fixed', left: twPos.x, top: twPos.y, width: 400, height: 700,
+      position: 'fixed', left: twPos.x, top: twPos.y, width: 460, height: 700, // width 400→460(사용자 요청, 조금 더 넓게)
       minWidth: 340, minHeight: 320, maxWidth: '92vw', maxHeight: '92vh',
       resize: 'both', overflow: 'auto',
       background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
@@ -4037,6 +4071,54 @@ export default function ReplayChart() {
         </span>
       </div>
       <div style={{ padding: 14 }}>{renderTwInner()}</div>
+    </div>
+  )
+
+  // 매매진입 현황 패널 - 분리매매창(renderTwEmbedded)과 완전히 같은 구조(드래그 헤더 + fixed + resize +
+  // document.body 포탈로 항상 최상단)로 뗀 떠다니는 패널(사용자 요청).
+  const renderPositionPanel = () => (
+    <div style={{
+      position: 'fixed', left: posPanelPos.x, top: posPanelPos.y, width: 360, height: 400,
+      minWidth: 280, minHeight: 200, maxWidth: '92vw', maxHeight: '92vh',
+      resize: 'both', overflow: 'auto',
+      background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+      zIndex: 1000, fontSize: 13,
+    }}>
+      <div onMouseDown={onPosPanelHeaderMouseDown} style={{
+        position: 'sticky', top: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px',
+        background: '#171a21', borderBottom: '1px solid #2a2e38', cursor: 'move', userSelect: 'none', zIndex: 1,
+      }}>
+        <span style={{ fontWeight: 700, fontSize: 13.5 }}>매매진입 현황 {positions.length > 0 && `(${positions.length})`}</span>
+        <button type="button" onClick={() => setShowPositionPanel(false)} style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+      </div>
+      <div style={{ padding: 14 }}>
+        {positions.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: '#5a5f6a' }}>보유 중인 포지션이 없습니다</div>
+        ) : (
+          positions.map(pos => {
+            const { points, dollars } = currentPrice != null ? calcPnl(pos, currentPrice) : { points: 0, dollars: 0 }
+            const profit = dollars >= 0
+            return (
+              <div key={pos.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5, borderBottom: '1px solid #2a2e38' }}>
+                <span style={{ color: pos.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36 }}>
+                  {pos.side === 'buy' ? 'BUY' : 'SELL'}
+                </span>
+                <span style={{ color: '#9aa0ab' }}>{pos.lot.toFixed(2)}랏</span>
+                <span style={{ color: '#9aa0ab' }}>진입 {pos.entryPrice.toFixed(2)}</span>
+                <span style={{ color: profit ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
+                  {currentPrice == null ? '—' : pnlDisplay === 'dollar'
+                    ? `${profit ? '+' : ''}$${dollars.toFixed(2)}`
+                    : `${points >= 0 ? '+' : ''}${points.toFixed(2)}pt`}
+                </span>
+                <button
+                  type="button" onClick={() => closePosition(pos.id)}
+                  style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
+                >청산</button>
+              </div>
+            )
+          })
+        )}
+      </div>
     </div>
   )
 
@@ -4897,6 +4979,37 @@ export default function ReplayChart() {
                 )}
               </div>
 
+              {/* 반자동 신호를 차트 바로 아래에 "N 롱 / M 셀"로 표시(사용자 요청, showSemiAutoSignalOnChart
+                  체크박스로 켜고 끔) - "사용자가 무장(체크)한 것만"이 아니라 1~6번 신호 전부를 항상
+                  모니터링해서 지금 몇 개가 롱 쪽/숏 쪽으로 읽히는지 센다(사용자 지적: "모니터링은 모두
+                  해서"). 각 행의 판정은 렌더 색을 정하는 것과 완전히 같은 조건(row1Outside 방향/
+                  row2Golden/row3Buy/row4Sell/row5Golden/row6Dead)을 그대로 재사용 - 골드/나스닥을 동시에
+                  진행 안 하므로(사용자 확인) twSeriesVal은 지금 로드된 symbol 데이터 기준 값을 그대로 쓴다. */}
+              {showSemiAutoSignalOnChart && (() => {
+                const h1 = twSeriesVal('h1'), h3 = twSeriesVal('h3'), h100 = twSeriesVal('h100')
+                const wma85 = twSeriesVal('wma85'), sma100 = twSeriesVal('sma100')
+                const stochGolden = twSeriesVal('stochGolden')
+                const bbUp = twSeriesVal('bbUp'), bbLo = twSeriesVal('bbLo')
+                const price = playIndex > 0 ? rowsRef.current[playIndex - 1]?.close ?? null : null
+
+                let longCount = 0, shortCount = 0
+                if (price != null && bbLo != null && price < bbLo) longCount++ // 1번: 밴드 아래로 이탈
+                if (price != null && bbUp != null && price > bbUp) shortCount++ // 1번: 밴드 위로 이탈
+                if (h3 != null && sma100 != null) { if (h3 > sma100) longCount++; else shortCount++ } // 2번: H3×S5
+                if (wma85 != null && sma100 != null && h1 != null && wma85 > sma100 && stochGolden === true && price != null && price > h1) longCount++ // 3번: 상승추세
+                if (wma85 != null && sma100 != null && h1 != null && wma85 < sma100 && stochGolden === false && price != null && price < h1) shortCount++ // 4번: 하락추세
+                if (h3 != null && h100 != null && h3 > h100) longCount++ // 5번: H60/H100 골든
+                if (h1 != null && h3 != null && h1 < h3) shortCount++ // 6번: H20/H60 데드
+
+                return (
+                  <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700 }}>
+                    <span style={{ color: '#26a69a' }}>{longCount} 롱</span>
+                    <span style={{ color: '#5a5f6a' }}> / </span>
+                    <span style={{ color: '#ef5350' }}>{shortCount} 셀</span>
+                  </div>
+                )
+              })()}
+
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
                 <span style={{ color: '#9aa0ab', fontSize: 13 }}>{playIndex.toLocaleString()} / {total.toLocaleString()}봉</span>
                 {selectedDate && (
@@ -4989,7 +5102,9 @@ export default function ReplayChart() {
                 x1 = 1분당 캔들 1개(실제 시세 속도). 배속은 그 배수 — x2=30초/캔들, x60=1초/캔들
               </div>
 
-              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16 }}>
+              {/* 매매 컨트롤(폭 절반, 사용자 요청) - 매매진입 현황은 더 이상 여기 오른쪽 컬럼이 아니라
+                  분리매매창처럼 떼어낼 수 있는 별도 떠다니는 패널로 뺐다(showPositionPanel/posPanelPos). */}
+              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16, maxWidth: 480 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa0ab' }}>
                     시작 자금
@@ -5000,6 +5115,13 @@ export default function ReplayChart() {
                     />
                     USD
                   </label>
+                  {/* 시작 자금 옆 리셋 버튼(사용자 요청) - 숫자를 다시 안 쳐도 잔고를 지금 시작 자금 값으로
+                      되돌린다. applyStartingBalance는 입력창 onChange에서도 이미 쓰는 것과 같은 함수라
+                      "시작자금을 리셋하거나 수정하면 초기화된다"는 동작이 두 경로 다 동일하게 보장된다. */}
+                  <button
+                    type="button" title="잔고를 시작 자금 값으로 리셋" onClick={() => applyStartingBalance(startingBalance)}
+                    style={{ fontSize: 11.5, padding: '5px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer', fontWeight: 700 }}
+                  >↺ 리셋</button>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>
                     잔고: ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
@@ -5047,6 +5169,16 @@ export default function ReplayChart() {
                     }}
                   >SELL</button>
 
+                  {/* 메인 차트에도 벌크 청산 추가(사용자 요청) - 분리매매창의 것과 완전히 같은 함수,
+                      보유 중인 포지션 전부(출처 무관) 지금 재생 위치 가격으로 일괄 청산한다. */}
+                  <button
+                    type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
+                    style={{
+                      background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+                      padding: '9px 16px', fontSize: 13, cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
+                    }}
+                  >🚨 벌크 청산</button>
+
                   <button
                     type="button" onClick={() => setShowTradingWindow(v => !v)}
                     style={{
@@ -5057,35 +5189,48 @@ export default function ReplayChart() {
                     }}
                   >🖱 매매 실행 (분리매매창){showTradingWindow ? ' 닫기' : ''}</button>
 
+                  {/* 매매진입 현황 패널 토글(사용자 요청) - 패널을 닫았을 때 다시 열 방법이 필요해서
+                      분리매매창 토글과 같은 자리/스타일로 추가 */}
+                  <button
+                    type="button" onClick={() => setShowPositionPanel(v => !v)}
+                    style={{
+                      fontSize: 12, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', fontWeight: 700,
+                      border: `1px solid ${showPositionPanel ? '#4CAF50' : '#2a2e38'}`,
+                      background: showPositionPanel ? 'rgba(76,175,80,0.15)' : 'none',
+                      color: showPositionPanel ? '#4CAF50' : '#9aa0ab',
+                    }}
+                  >📋 매매진입 현황{showPositionPanel ? ' 닫기' : ''}</button>
+
                   <span style={{ fontSize: 11, color: '#5a5f6a', width: '100%' }}>
                     {symbol === 'GOLD' ? '골드 1랏 = 1.00pt당 $100' : '나스닥 1랏 = 1.00pt당 $1'} (수수료 미반영)
                   </span>
                 </div>
+              </div>
 
-                {positions.length > 0 && (
-                  <div style={{ marginTop: 12, borderTop: '1px solid #2a2e38', paddingTop: 8 }}>
-                    {positions.map(pos => {
-                      const { points, dollars } = currentPrice != null ? calcPnl(pos, currentPrice) : { points: 0, dollars: 0 }
-                      const profit = dollars >= 0
-                      return (
-                        <div key={pos.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5 }}>
-                          <span style={{ color: pos.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36 }}>
-                            {pos.side === 'buy' ? 'BUY' : 'SELL'}
-                          </span>
-                          <span style={{ color: '#9aa0ab' }}>{pos.lot.toFixed(2)}랏</span>
-                          <span style={{ color: '#9aa0ab' }}>진입 {pos.entryPrice.toFixed(2)}</span>
-                          <span style={{ color: profit ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
-                            {currentPrice == null ? '—' : pnlDisplay === 'dollar'
-                              ? `${profit ? '+' : ''}$${dollars.toFixed(2)}`
-                              : `${points >= 0 ? '+' : ''}${points.toFixed(2)}pt`}
-                          </span>
-                          <button
-                            type="button" onClick={() => closePosition(pos.id)}
-                            style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
-                          >청산</button>
-                        </div>
-                      )
-                    })}
+              {/* 히스토리(사용자 요청) - closedTradesRef는 ref라 자체로는 리렌더를 안 일으키지만, 청산될
+                  때마다 같이 올라가는 closedTradesCount(state)가 리렌더를 트리거하니 그 시점에 여기서
+                  ref.current를 그대로 읽으면 항상 최신 상태가 보인다. 최근 청산이 위로 오게 뒤집어서 표시. */}
+              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, marginTop: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>히스토리 {closedTradesCount > 0 && `(${closedTradesCount})`}</div>
+                {closedTradesCount === 0 ? (
+                  <div style={{ fontSize: 12.5, color: '#5a5f6a' }}>청산된 거래가 없습니다</div>
+                ) : (
+                  <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                    {closedTradesRef.current.slice().reverse().map((t, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5, borderBottom: '1px solid #2a2e38' }}>
+                        <span style={{ color: t.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36 }}>
+                          {t.side === 'buy' ? 'BUY' : 'SELL'}
+                        </span>
+                        <span style={{ color: '#9aa0ab', width: 46 }}>{t.symbol === 'GOLD' ? '골드' : '나스닥'}</span>
+                        <span style={{ color: '#9aa0ab' }}>{t.lot.toFixed(2)}랏</span>
+                        <span style={{ color: '#9aa0ab' }}>{t.entryPrice.toFixed(2)} → {t.exitPrice.toFixed(2)}</span>
+                        <span style={{ color: t.dollars >= 0 ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
+                          {pnlDisplay === 'dollar'
+                            ? `${t.dollars >= 0 ? '+' : ''}$${t.dollars.toFixed(2)}`
+                            : `${t.points >= 0 ? '+' : ''}${t.points.toFixed(2)}pt`}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -5193,6 +5338,7 @@ export default function ReplayChart() {
             그 안에 갇혀서 다른 요소 뒤로 숨을 수 있었다. body에 바로 붙이면 그런 조상 영향을 아예 안 받는다. */}
         {showTradingWindow && !twPopupEl && createPortal(renderTwEmbedded(), document.body)}
         {showTradingWindow && twPopupEl && createPortal(renderTwPopupContent(), twPopupEl)}
+        {showPositionPanel && createPortal(renderPositionPanel(), document.body)}
       </div>
     </>
   )
