@@ -922,6 +922,9 @@ export default function ReplayChart() {
   // 다음 캔들이 그려질 때까지 남은 시간(ms) - 재생 중엔 REALTIME_MS/speed에서 0으로 카운트다운하다가
   // 실제로 캔들이 그려지는 순간 다시 꽉 채워진다. 재생을 멈추거나 배속을 바꾸면 그 배속 기준 풀타임으로 리셋.
   const [candleTimerMs, setCandleTimerMs] = useState(REALTIME_MS / speed)
+  // 캔들 타이머 배지가 화면에서 위치할 좌표(차트 컨테이너 기준 px) - 마지막으로 그려진 캔들(재생 위치)의
+  // 시각/가격을 좌표로 변환해서 구한다. null이면(범위 밖으로 스크롤됐거나 아직 데이터 없음) 숨긴다.
+  const [timerAnchor, setTimerAnchor] = useState(null)
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
   // 기본 셋팅(사용자 요청) - 1분 볼린저는 중간선만, 5분/15분/1시간 볼린저는 전체 표시
@@ -1365,13 +1368,19 @@ export default function ReplayChart() {
     // 컨테이너 자체의 크기 변화를 직접 감시해서 항상 실제 폭에 맞춘다.
     const ro = new ResizeObserver(entries => {
       const w = entries[0]?.contentRect?.width
-      if (w) chart.resize(w, 750, true)
+      if (w) { chart.resize(w, 750, true); updateTimerAnchor() }
     })
     ro.observe(containerRef.current)
+
+    // 캔들 타이머 배지 위치 - 화면을 드래그/줌하면(시각→x좌표 매핑이 바뀌므로) 캔들은 그대로여도
+    // 화면상 위치는 움직여야 한다. 보이는 범위가 바뀔 때마다 다시 계산한다.
+    const onVisibleRangeChange = () => updateTimerAnchor()
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRangeChange)
 
     return () => {
       window.removeEventListener('resize', onResize)
       ro.disconnect()
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange)
       chart.remove()
     }
   }, [])
@@ -1806,6 +1815,7 @@ export default function ReplayChart() {
     applyShooting5MinIndex(idx)
     indexRef.current = idx
     setPlayIndex(idx)
+    updateTimerAnchor()
   }
 
   // "5분 슈팅" - 다른 신호 마커들과 같은 방식으로 재생 위치(idx) 이전 것만 보여준다.
@@ -1942,6 +1952,7 @@ export default function ReplayChart() {
     } finally {
       indexRef.current = to
       setPlayIndex(to)
+      updateTimerAnchor()
     }
   }
 
@@ -3338,6 +3349,22 @@ export default function ReplayChart() {
     const range = ts.getVisibleLogicalRange()
     const width = range ? (range.to - range.from) : 60
     ts.setVisibleLogicalRange({ from: idx - width / 2, to: idx + width / 2 })
+  }
+
+  // 캔들 타이머 배지 위치 갱신 - 마지막으로 그려진 캔들(재생 위치)의 시각/종가를 실제 화면 좌표(px)로
+  // 변환해서 그 캔들 바로 옆에 거리를 두고 뜨게 한다(사용자 요청 - 차트 구석에 고정된 배지 말고,
+  // 재생 위치를 보여주는 그 지점을 계속 따라다녀야 함). 화면을 드래그/줌하거나 캔들이 새로 그려질 때마다
+  // 다시 계산해야 하므로 여러 곳(applyIncrement/applyIndex/차트 리사이즈/보이는 범위 변경)에서 호출한다.
+  const updateTimerAnchor = () => {
+    const idx = indexRef.current
+    const row = rowsRef.current[idx - 1]
+    const chart = chartRef.current
+    const series = seriesRef.current
+    if (!row || !chart || !series) { setTimerAnchor(null); return }
+    const x = chart.timeScale().timeToCoordinate(row.time)
+    const y = series.priceToCoordinate(row.close)
+    if (x == null || y == null) { setTimerAnchor(null); return }
+    setTimerAnchor({ x, y })
   }
 
   // 매매목록 클릭 시 진입 시점으로 이동 - 진입이 다른 날짜(전날 등)라 지금 불러온 구간 밖이면
@@ -4771,8 +4798,23 @@ export default function ReplayChart() {
                 >{summerTime ? '☀ 서머타임 (+6h)' : '❄ 윈터타임 (+7h)'}</button>
               </div>
 
-              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16 }}>
+              <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, position: 'relative' }}>
                 <div ref={containerRef} style={{ width: '100%', height: 750 }} />
+                {/* 캔들 타이머 - 차트 구석에 고정된 배지가 아니라, 재생 위치(마지막으로 그려진 캔들)를
+                    거리를 두고 계속 따라다녀야 한다는 지적(사용자) - updateTimerAnchor가 그 캔들의
+                    시각/종가를 실제 화면 좌표로 변환해서 timerAnchor에 넣어두면 그 좌표 기준으로 뜬다.
+                    컨테이너 padding(16px)만큼 보정하고, 캔들 오른쪽으로 14px 떨어뜨린다.
+                    pointerEvents:none이라 차트 드래그/줌 조작은 그대로 통과한다. */}
+                {timerAnchor && (
+                  <span title="다음 캔들이 그려질 때까지 남은 시간" style={{
+                    position: 'absolute', left: timerAnchor.x + 16 + 14, top: timerAnchor.y + 16 - 15,
+                    zIndex: 5, pointerEvents: 'none', whiteSpace: 'nowrap',
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    background: 'rgba(23,26,33,0.92)', border: '1px solid #2a2e38', borderRadius: 9,
+                    padding: '6px 12px', fontSize: 14, fontWeight: 700,
+                    color: playing ? '#4CAF50' : '#9aa0ab', fontVariantNumeric: 'tabular-nums',
+                  }}>⏱ {formatCandleTimer(candleTimerMs)}</span>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
@@ -4840,16 +4882,6 @@ export default function ReplayChart() {
                   padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
                 }}>{playing ? '⏸ 일시정지' : '▶ 재생'}</button>
 
-                {/* 캔들 타이머 - 다음 캔들이 그려질 때까지 남은 시간. 배속(x1=60초/x2=30초/x60=1초...)에
-                    맞춰 카운트다운하다가 캔들이 그려지는 순간 다시 꽉 찬다. 배속 버튼을 누르면(재생 중이든
-                    멈춰있든) 곧바로 그 배속 기준 시간으로 갱신된다. */}
-                <span title="다음 캔들이 그려질 때까지 남은 시간" style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  background: '#1b1e26', border: '1px solid #2a2e38', borderRadius: 9,
-                  padding: '8px 14px', fontSize: 14, fontWeight: 700,
-                  color: playing ? '#4CAF50' : '#9aa0ab', fontVariantNumeric: 'tabular-nums',
-                }}>⏱ {formatCandleTimer(candleTimerMs)}</span>
-
                 <button onClick={reset} disabled={!total} style={{
                   background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
                   padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
@@ -4863,11 +4895,13 @@ export default function ReplayChart() {
                 {SPEEDS.map(s => {
                   const secs = REALTIME_MS / s / 1000
                   const secsLabel = secs >= 60 ? `${(secs / 60).toFixed(secs % 60 === 0 ? 0 : 1)}분` : `${secs.toFixed(secs % 1 === 0 ? 0 : 1)}초`
+                  // 버튼에 배속마다 캔들 1개 그려지는 데 몇 초 걸리는지 바로 보이게(사용자 요청) - 예: x1 (60s), x3 (20s)
+                  const secDisplay = secs % 1 === 0 ? `${secs}` : secs.toFixed(1)
                   return (
                     <button key={s} onClick={() => setSpeed(s)} title={`캔들 1개 = ${secsLabel}`} style={{
                       background: speed === s ? '#2a2e38' : 'none', color: speed === s ? '#e8eaed' : '#9aa0ab',
                       border: '1px solid #2a2e38', borderRadius: 9, padding: '8px 12px', fontSize: 13, cursor: 'pointer',
-                    }}>x{s}</button>
+                    }}>x{s} ({secDisplay}s)</button>
                   )
                 })}
               </div>
