@@ -736,13 +736,15 @@ function computeReservationEvents(S, startIdx, endIdx) {
     // 2번(매수): 5분볼린저 아래에서 재진입(무장) + H3×H100 골든크로스 + 주가>H3>H5(H100)(사용자 요청 추가)
     // (H1×H3 골든이 아님 - 사용자 지정)
     if (h3h100Golden && row1Armed[i] === 'below' && closes[i] > h3[i] && h3[i] > h100[i]) row1.push({ idx, side: 'buy' })
-    // 3번(매도): 주가<H1 & H1 하락중(준비) + 시가<S1/SMA20(진입) (사용자 요청 - 조건 전면 교체, 5,6번과
-    // 더는 크로스를 공유하지 않음)
+    // 3번(매도): 주가<H1 & H1 하락중(준비) + 시가가 S1(SMA20) 아래로 직전 대비 새로 전환된 순간(진입,
+    // edge - 사용자 확인). 5,6번과 더는 크로스를 공유하지 않음.
     if (closes[i] != null && h1[i] != null && h1[i - 1] != null && closes[i] < h1[i] && h1[i] < h1[i - 1] &&
-        opens[i] != null && sma20_1m[i] != null && opens[i] < sma20_1m[i]) row2.push({ idx, side: 'sell' })
-    // 4번(매수): 주가>H1 & H1 상승중(준비) + 시가>S1/SMA20(진입)
+        opens[i] != null && sma20_1m[i] != null && opens[i - 1] != null && sma20_1m[i - 1] != null &&
+        opens[i] < sma20_1m[i] && opens[i - 1] >= sma20_1m[i - 1]) row2.push({ idx, side: 'sell' })
+    // 4번(매수): 주가>H1 & H1 상승중(준비) + 시가가 S1(SMA20) 위로 직전 대비 새로 전환된 순간(진입)
     if (closes[i] != null && h1[i] != null && h1[i - 1] != null && closes[i] > h1[i] && h1[i] > h1[i - 1] &&
-        opens[i] != null && sma20_1m[i] != null && opens[i] > sma20_1m[i]) row2.push({ idx, side: 'buy' })
+        opens[i] != null && sma20_1m[i] != null && opens[i - 1] != null && sma20_1m[i - 1] != null &&
+        opens[i] > sma20_1m[i] && opens[i - 1] <= sma20_1m[i - 1]) row2.push({ idx, side: 'buy' })
     // 7,8번: 상태 조건(WMA85 vs SMA100, 1분스토, 가격/HMA20, HMA300 방향)
     if (wma85[i] != null && sma100[i] != null && h1[i] != null && h1[i - 1] != null &&
         h300[i] != null && h300[i - 1] != null && stochGolden[i] != null) {
@@ -3811,6 +3813,7 @@ export default function ReplayChart() {
     const h300 = seriesValAt('h300', i), prevH300 = seriesValAt('h300', i, 1)
     const price = rowsRef.current[i - 1]?.close ?? null
     const openPrice = rowsRef.current[i - 1]?.open ?? null
+    const prevOpenPrice = rowsRef.current[i - 2]?.open ?? null
     const stochGolden = seriesValAt('stochGolden', i)
     const row1Armed = seriesValAt('row1Armed', i)
     const prevH1 = seriesValAt('h1', i, 1), prevH3 = seriesValAt('h3', i, 1), prevH100 = seriesValAt('h100', i, 1), prevSma20 = seriesValAt('sma20_1m', i, 1)
@@ -3818,8 +3821,8 @@ export default function ReplayChart() {
     const goldH1S20 = prevH1 != null && prevSma20 != null && h1 != null && sma20 != null && prevH1 <= prevSma20 && h1 > sma20
     if (row === 1) return row1Armed === 'above' && prevH1 != null && prevH3 != null && h1 != null && h3 != null && prevH1 >= prevH3 && h1 < h3 && price != null && price < h1
     if (row === 1.1) return row1Armed === 'below' && prevH3 != null && prevH100 != null && h3 != null && h100 != null && prevH3 <= prevH100 && h3 > h100 && price != null && price > h3
-    if (row === 2) return price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1 && openPrice != null && sma20 != null && openPrice < sma20
-    if (row === 2.1) return price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1 && openPrice != null && sma20 != null && openPrice > sma20
+    if (row === 2) return price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1 && openPrice != null && sma20 != null && prevOpenPrice != null && prevSma20 != null && openPrice < sma20 && prevOpenPrice >= prevSma20
+    if (row === 2.1) return price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1 && openPrice != null && sma20 != null && prevOpenPrice != null && prevSma20 != null && openPrice > sma20 && prevOpenPrice <= prevSma20
     if (row === 6) return h3 != null && h100 != null && h3 < h100 && deadH1S20
     if (row === 5) return h3 != null && h100 != null && h3 > h100 && goldH1S20
     if (row === 4) {
@@ -4016,12 +4019,14 @@ export default function ReplayChart() {
     const row3Entry = row3Ready && row3DeadCrossNow
 
     // 3번(매도 전용)/4번(매수 전용) 조건 전면 교체(사용자 요청) - 이전엔 5,6번과 크로스를 공유했지만,
-    // 이제 완전히 독립된 조건: 준비=주가 vs H1(HMA20) & H1 방향, 진입=시가(open) vs S1(SMA20).
+    // 이제 완전히 독립된 조건: 준비=주가 vs H1(HMA20) & H1 방향, 진입=시가(open)가 직전 대비 S1(SMA20)을
+    // 새로 넘어간 그 순간(edge, 사용자 확인 - 조건이 계속 참이어도 매번 안 잡히고 전환된 캔들 하나만).
     const openPrice = playIndex > 0 ? rowsRef.current[playIndex - 1]?.open ?? null : null
+    const prevOpenPrice = playIndex > 1 ? rowsRef.current[playIndex - 2]?.open ?? null : null
     const row2State = price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1 // 3번 준비: 주가<H1, H1 하락중
-    const row2Entry = row2State && openPrice != null && sma20 != null && openPrice < sma20 // 3번 진입: 시가<S1(SMA20)
+    const row2Entry = row2State && openPrice != null && sma20 != null && prevOpenPrice != null && prevSma20 != null && openPrice < sma20 && prevOpenPrice >= prevSma20 // 3번 진입: 시가가 S1 아래로 새로 전환
     const row2_1State = price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1 // 4번 준비: 주가>H1, H1 상승중
-    const row2_1Entry = row2_1State && openPrice != null && sma20 != null && openPrice > sma20 // 4번 진입: 시가>S1(SMA20)
+    const row2_1Entry = row2_1State && openPrice != null && sma20 != null && prevOpenPrice != null && prevSma20 != null && openPrice > sma20 && prevOpenPrice <= prevSma20 // 4번 진입: 시가가 S1 위로 새로 전환
 
     // 3,4,5,6번 "청산"(항상 감시, 무장 여부와 무관) 표시등 추가(사용자 요청). 3번/5번은 같은 청산
     // 조건(H1×H3 골든크로스), 4번/6번은 같은 청산 조건(H1×H100 데드크로스) - prevH1_1/prevH3_1/
@@ -4194,8 +4199,8 @@ export default function ReplayChart() {
               {[
                 checked === 1 && '1번: H1<H3 (매도 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 위에서 안쪽으로 재진입\n   진입 - 그 상태에서 H1<H3 데드크로스 & 주가<H1<H3',
                 checked === 1.1 && '2번: H3>H5 (매수 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 아래에서 안쪽으로 재진입\n   진입 - 그 상태에서 H3>H5(H100) 골든크로스 & 주가>H3>H5',
-                checked === 2 && '3번: 주가<H1 (매도 전용)\n   준비 - 주가<H1(HMA20), H1 하락중\n   진입 - 시가<S1(SMA20)\n   청산 - HMA20>HMA60 골든크로스 (항상 감시)',
-                checked === 2.1 && '4번: 주가>H1 (매수 전용)\n   준비 - 주가>H1(HMA20), H1 상승중\n   진입 - 시가>S1(SMA20)\n   청산 - HMA20<HMA100 데드크로스 (항상 감시)',
+                checked === 2 && '3번: 주가<H1 (매도 전용)\n   준비 - 주가<H1(HMA20), H1 하락중\n   진입 - 시가가 S1(SMA20) 아래로 직전 대비 새로 전환\n   청산 - HMA20>HMA60 골든크로스 (항상 감시)',
+                checked === 2.1 && '4번: 주가>H1 (매수 전용)\n   준비 - 주가>H1(HMA20), H1 상승중\n   진입 - 시가가 S1(SMA20) 위로 직전 대비 새로 전환\n   청산 - HMA20<HMA100 데드크로스 (항상 감시)',
                 checked === 6 && '5번: HMA20 < 1분 중심선(SMA20) (매도 전용)\n   준비 - HMA60<HMA100\n   진입 - 그 상태에서 HMA20 < 1분 중심선(SMA20) 데드크로스\n   청산 - HMA20>HMA60 골든크로스 (항상 감시)',
                 checked === 5 && '6번: HMA20 > 1분 중심선(SMA20) (매수 전용)\n   준비 - HMA60>HMA100\n   진입 - 그 상태에서 HMA20 > 1분 중심선(SMA20) 골든크로스\n   청산 - HMA20<HMA100 데드크로스 (항상 감시)',
                 checked === 4 && '7번: 하락추세 (매도 전용)\n   상태 - WMA85<5분중심\n   준비 - 가격<HMA20, HMA300 하락중\n   진입 - 1분스토 데드',
