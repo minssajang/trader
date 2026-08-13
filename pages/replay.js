@@ -5352,32 +5352,10 @@ export default function ReplayChart() {
                   </span>
                 )}
               </div>
-              {/* 파란 바 - 재생 버튼/재생 위치(빨간 바)와는 완전히 무관, 사용자가 직접 드래그할 때만
-                  움직인다(그 외엔 항상 맨 끝). 드래그하면 화면(카메라)만 그 지점으로 옮기고, 재생 위치나
-                  이미 그려진 캔들은 그대로 유지된다. */}
-              <div
-                ref={blueBarRef}
-                onMouseDown={onBlueBarMouseDown}
-                title="드래그하면 화면만 그 캔들로 이동합니다 (재생 위치는 그대로 유지됩니다)"
-                style={{
-                  position: 'relative', width: '100%', height: 16, marginTop: 8,
-                  background: '#2a2e38', borderRadius: 8, overflow: 'visible',
-                  cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
-                }}
-              >
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 8,
-                  width: `${total ? Math.min(100, (bluePos / total) * 100) : 0}%`,
-                  background: '#4FC3F7', pointerEvents: 'none',
-                }} />
-                <div style={{
-                  position: 'absolute', top: '50%', left: `${total ? Math.min(100, (bluePos / total) * 100) : 0}%`,
-                  width: 18, height: 18, marginLeft: -9, marginTop: -9, borderRadius: '50%',
-                  background: '#4FC3F7', border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.5)', pointerEvents: 'none',
-                }} />
-              </div>
-
-              {/* 빨간 바 - 재생 버튼과만 연동(재생하면 자동으로 채워짐), 파란 바와는 완전히 독립.
+              {/* 빨간 바를 파란 바보다 위로 옮김(사용자 요청) - 🔍 찾기 번호가 빨간 바 위(-15px)로
+                  떠서 클릭할 때, 바로 위에 파란 바가 있으면 자꾸 그게 눌렸다(사용자 지적). 순서를
+                  바꿔서 빨간 바 위쪽엔 아무 드래그 영역도 없게 만들었다.
+                  빨간 바 - 재생 버튼과만 연동(재생하면 자동으로 채워짐), 파란 바와는 완전히 독립.
                   드래그하면 화면(카메라)만 그 시점으로 옮기고(scrubView, 이미 드러난 캔들은 안 사라짐)
                   재생 위치(playIndex) 자체도 그 자리로 같이 옮겨둔다 - 손을 떼도 스냅백 없이 그
                   자리에 그대로 있고, 다음 ▶재생은 거기서부터 이어진다. */}
@@ -5418,6 +5396,31 @@ export default function ReplayChart() {
                     }}
                   >{n + 1}</div>
                 ))}
+              </div>
+
+              {/* 파란 바 - 재생 버튼/재생 위치(빨간 바)와는 완전히 무관, 사용자가 직접 드래그할 때만
+                  움직인다(그 외엔 항상 맨 끝). 드래그하면 화면(카메라)만 그 지점으로 옮기고, 재생 위치나
+                  이미 그려진 캔들은 그대로 유지된다. */}
+              <div
+                ref={blueBarRef}
+                onMouseDown={onBlueBarMouseDown}
+                title="드래그하면 화면만 그 캔들로 이동합니다 (재생 위치는 그대로 유지됩니다)"
+                style={{
+                  position: 'relative', width: '100%', height: 16, marginTop: 8,
+                  background: '#2a2e38', borderRadius: 8, overflow: 'visible',
+                  cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
+                }}
+              >
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 8,
+                  width: `${total ? Math.min(100, (bluePos / total) * 100) : 0}%`,
+                  background: '#4FC3F7', pointerEvents: 'none',
+                }} />
+                <div style={{
+                  position: 'absolute', top: '50%', left: `${total ? Math.min(100, (bluePos / total) * 100) : 0}%`,
+                  width: 18, height: 18, marginLeft: -9, marginTop: -9, borderRadius: '50%',
+                  background: '#4FC3F7', border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.5)', pointerEvents: 'none',
+                }} />
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
