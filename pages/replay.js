@@ -730,10 +730,11 @@ function computeReservationEvents(S, startIdx, endIdx) {
       h1s20Golden = h1[i - 1] <= sma20_1m[i - 1] && h1[i] > sma20_1m[i]
       h1s20Dead = h1[i - 1] >= sma20_1m[i - 1] && h1[i] < sma20_1m[i]
     }
-    // 1번(매도): 5분볼린저 위에서 재진입(무장) + H1×H3 데드크로스
-    if (h1h3Dead && row1Armed[i] === 'above') row1.push({ idx, side: 'sell' })
-    // 2번(매수): 5분볼린저 아래에서 재진입(무장) + H3×H100 골든크로스(H1×H3 골든이 아님 - 사용자 지정)
-    if (h3h100Golden && row1Armed[i] === 'below') row1.push({ idx, side: 'buy' })
+    // 1번(매도): 5분볼린저 위에서 재진입(무장) + H1×H3 데드크로스 + 주가<H1<H3(사용자 요청 추가)
+    if (h1h3Dead && row1Armed[i] === 'above' && closes[i] < h1[i] && h1[i] < h3[i]) row1.push({ idx, side: 'sell' })
+    // 2번(매수): 5분볼린저 아래에서 재진입(무장) + H3×H100 골든크로스 + 주가>H3>H5(H100)(사용자 요청 추가)
+    // (H1×H3 골든이 아님 - 사용자 지정)
+    if (h3h100Golden && row1Armed[i] === 'below' && closes[i] > h3[i] && h3[i] > h100[i]) row1.push({ idx, side: 'buy' })
     // 3번(매도): H3<5분중심(SMA100) 상태 + H1×S20 데드크로스
     if (h3[i] != null && sma100[i] != null && h3[i] < sma100[i] && h1s20Dead) row2.push({ idx, side: 'sell' })
     // 4번(매수): H3>5분중심(SMA100) 상태 + H1×S20 골든크로스
@@ -952,6 +953,9 @@ export default function ReplayChart() {
   // 캔들 타이머 배지가 화면에서 위치할 좌표(차트 컨테이너 기준 px) - 마지막으로 그려진 캔들(재생 위치)의
   // 시각/가격을 좌표로 변환해서 구한다. null이면(범위 밖으로 스크롤됐거나 아직 데이터 없음) 숨긴다.
   const [timerAnchor, setTimerAnchor] = useState(null)
+  // 🔍 찾기 결과를 캔들 위/아래에 표시하기 위한 화면 좌표들(사용자 요청 - timerAnchor와 같은 방식).
+  // [{n, x, y, side}] - n=순번, x/y=차트 컨테이너 기준 px, side='sell'이면 캔들 위 20px, 'buy'면 아래 20px.
+  const [foundMarkerAnchors, setFoundMarkerAnchors] = useState([])
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
   // 기본 셋팅(사용자 요청) - 1분 볼린저는 중간선만, 5분/15분/1시간 볼린저는 전체 표시
@@ -1088,9 +1092,13 @@ export default function ReplayChart() {
   // 🔍 찾기(검색) - 체크된 신호의 "진입" 위치를 불러온 구간 전체에서 찾아 순서대로 재생 바 위에
   // 번호로 표시(사용자 요청). [{idx, side}] 배열, idx는 dayRows 기준(1-based, playIndex와 같은 체계).
   const [twFoundPositions, setTwFoundPositions] = useState([])
+  // resize/pan/zoom 핸들러는 마운트 시 한 번만 설치돼서 클로저가 고정되므로, state를 직접 읽으면
+  // stale해진다(rowsRef/indexRef처럼 ref로 미러링해서 항상 최신값을 읽게 함).
+  const twFoundPositionsRef = useRef([])
+  useEffect(() => { twFoundPositionsRef.current = twFoundPositions }, [twFoundPositions])
   // 신호(체크박스)를 바꾸거나 데이터가 새로 로드되면 이전 검색 결과가 엉뚱한 캔들 위치를 가리키게
   // 되므로 자동으로 지운다.
-  useEffect(() => { setTwFoundPositions([]) }, [twGoldChecked, twNasdaqChecked, symbol, total])
+  useEffect(() => { setTwFoundPositions([]); setFoundMarkerAnchors([]) }, [twGoldChecked, twNasdaqChecked, symbol, total])
   const [twBlinkPhase, setTwBlinkPhase] = useState(false) // 600ms 점멸 - _blink_timer 그대로
   const [twPopupEl, setTwPopupEl] = useState(null) // 새 창으로 뺐을 때 그 창 안에 만든 portal 대상 div (없으면 페이지 안 모달로 렌더)
   const twWinRef = useRef(null) // 새 창의 window 객체
@@ -1135,7 +1143,6 @@ export default function ReplayChart() {
   const seriesRef = useRef(null)
   const markerSeriesRef = useRef(null) // 투명 라인 시리즈 - 마커 전용. 다른 라인이 새로 추가될 때마다 지웠다 다시 만들어서 항상 맨 위(가장 나중에 추가된 시리즈)에 오게 함
   const markersPrimitiveRef = useRef(null) // v5: series.setMarkers() 대신 createSeriesMarkers(series, markers)가 반환하는 primitive를 씀
-  const searchMarkersPrimitiveRef = useRef(null) // 🔍 찾기 결과 전용 마커(사용자 요청) - 크로스/세션 마커랑 안 섞이게 독립 primitive
   // 리본 외곽선(M5-M90) 폭이 "확정된" 국소 고점/저점 중 지금까지 최댓값/최솟값일 때만 세로선 위치를 옮김(방식 B, 사용자 요청)
   const maxSpreadLineRef = useRef(null)   // VerticalLinePrimitive 인스턴스(노랑, 발산 최대)
   const minSpreadLineRef = useRef(null)   // VerticalLinePrimitive 인스턴스(하늘, 수축 최소)
@@ -1259,7 +1266,6 @@ export default function ReplayChart() {
     reservationEventsRef.current = null
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
-    searchMarkersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
@@ -1418,7 +1424,6 @@ export default function ReplayChart() {
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     })
     markersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
-    searchMarkersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
 
     // applyOptions({width})는 이 차트처럼 pane이 여러 개(캔들+RSI+MACD+스토캐스틱)일 때 서브pane
     // 캔버스까지는 안 따라가는 경우가 실측으로 확인됐다 - chart.resize(w,h)가 라이브러리가 명시하는
@@ -1437,13 +1442,13 @@ export default function ReplayChart() {
     // 컨테이너 자체의 크기 변화를 직접 감시해서 항상 실제 폭에 맞춘다.
     const ro = new ResizeObserver(entries => {
       const w = entries[0]?.contentRect?.width
-      if (w) { chart.resize(w, 700, true); updateTimerAnchor() }
+      if (w) { chart.resize(w, 700, true); updateTimerAnchor(); updateFoundMarkerAnchors() }
     })
     ro.observe(containerRef.current)
 
     // 캔들 타이머 배지 위치 - 화면을 드래그/줌하면(시각→x좌표 매핑이 바뀌므로) 캔들은 그대로여도
-    // 화면상 위치는 움직여야 한다. 보이는 범위가 바뀔 때마다 다시 계산한다.
-    const onVisibleRangeChange = () => updateTimerAnchor()
+    // 화면상 위치는 움직여야 한다. 보이는 범위가 바뀔 때마다 다시 계산한다. 🔍 찾기 마커도 같은 이유로 같이 갱신.
+    const onVisibleRangeChange = () => { updateTimerAnchor(); updateFoundMarkerAnchors() }
     chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRangeChange)
 
     return () => {
@@ -1885,6 +1890,7 @@ export default function ReplayChart() {
     indexRef.current = idx
     setPlayIndex(idx)
     updateTimerAnchor()
+    updateFoundMarkerAnchors()
   }
 
   // "5분 슈팅" - 다른 신호 마커들과 같은 방식으로 재생 위치(idx) 이전 것만 보여준다.
@@ -2031,6 +2037,7 @@ export default function ReplayChart() {
       // 밖으로 넘어가는 문제가 있었다. 매 틱마다 scrubView로 지금 위치를 다시 중앙에 맞춘다.
       scrubView(to)
       updateTimerAnchor()
+      updateFoundMarkerAnchors()
     }
   }
 
@@ -2315,7 +2322,6 @@ export default function ReplayChart() {
     reservationEventsRef.current = null
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
-    searchMarkersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
@@ -2510,7 +2516,6 @@ export default function ReplayChart() {
     reservationEventsRef.current = null
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
-    searchMarkersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([])
   }
@@ -2662,7 +2667,6 @@ export default function ReplayChart() {
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     })
     markersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
-    searchMarkersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
     const idx = indexRef.current
     markerSeriesRef.current.setData(rowsRef.current.slice(0, idx).map(r => ({ time: r.time, value: r.close })))
     applyAllMarkers(idx)
@@ -3807,8 +3811,8 @@ export default function ReplayChart() {
     const prevH1 = seriesValAt('h1', i, 1), prevH3 = seriesValAt('h3', i, 1), prevH100 = seriesValAt('h100', i, 1), prevSma20 = seriesValAt('sma20_1m', i, 1)
     const deadH1S20 = prevH1 != null && prevSma20 != null && h1 != null && sma20 != null && prevH1 >= prevSma20 && h1 < sma20
     const goldH1S20 = prevH1 != null && prevSma20 != null && h1 != null && sma20 != null && prevH1 <= prevSma20 && h1 > sma20
-    if (row === 1) return row1Armed === 'above' && prevH1 != null && prevH3 != null && h1 != null && h3 != null && prevH1 >= prevH3 && h1 < h3
-    if (row === 1.1) return row1Armed === 'below' && prevH3 != null && prevH100 != null && h3 != null && h100 != null && prevH3 <= prevH100 && h3 > h100
+    if (row === 1) return row1Armed === 'above' && prevH1 != null && prevH3 != null && h1 != null && h3 != null && prevH1 >= prevH3 && h1 < h3 && price != null && price < h1
+    if (row === 1.1) return row1Armed === 'below' && prevH3 != null && prevH100 != null && h3 != null && h100 != null && prevH3 <= prevH100 && h3 > h100 && price != null && price > h3
     if (row === 2) return h3 != null && sma100 != null && h3 < sma100 && deadH1S20
     if (row === 2.1) return h3 != null && sma100 != null && h3 > sma100 && goldH1S20
     if (row === 6) return h3 != null && h100 != null && h3 < h100 && deadH1S20
@@ -3830,31 +3834,38 @@ export default function ReplayChart() {
   // 훑어서 순서대로 모은다. 결과는 재생 바(빨간 바) 위에 번호로 표시되고, 클릭하면 그 캔들로 이동한다.
   const findSignalPositions = () => {
     const checked = symbol === 'GOLD' ? twGoldChecked : twNasdaqChecked
-    if (checked == null || !total) { setTwFoundPositions([]); return }
+    if (checked == null || !total) { setTwFoundPositions([]); setFoundMarkerAnchors([]); return }
     const found = []
     for (let i = 1; i <= total; i++) {
       if (isSignalEntryAt(checked, i)) found.push({ idx: i, side: twSignalSide(checked) })
     }
     setTwFoundPositions(found)
+    updateFoundMarkerAnchors(found)
   }
-  // 재생 바 위 번호랑 완전히 같은 결과를 캔들 위에도 그대로 얹는다(사용자 요청 - "잘 동작하는지
-  // 찾아보게"). 셀=캔들 위(aboveBar)/롱=캔들 아래(belowBar), 번호도 재생 바와 같은 순서.
-  // 크로스/세션 마커랑 안 섞이게 독립 primitive(searchMarkersPrimitiveRef)를 씀.
-  useEffect(() => {
-    if (!searchMarkersPrimitiveRef.current) return
-    const markers = twFoundPositions
-      .map((f, n) => {
-        const row = rowsRef.current[f.idx - 1]
-        if (!row) return null
-        return {
-          time: row.time, position: f.side === 'sell' ? 'aboveBar' : 'belowBar',
-          color: f.side === 'sell' ? '#ef5350' : '#26a69a', shape: 'circle', size: 1, text: String(n + 1),
-        }
-      })
-      .filter(Boolean)
-      .sort((a, b) => a.time - b.time)
-    searchMarkersPrimitiveRef.current.setMarkers(markers)
-  }, [twFoundPositions])
+  // 재생 바 위 번호랑 완전히 같은 결과를 캔들 위/아래에도 그대로 얹는다(사용자 요청 - "잘 동작하는지
+  // 찾아보게"). lightweight-charts 네이티브 마커(createSeriesMarkers)는 markerSeriesRef가 다른 라인
+  // 추가/삭제 때마다 통째로 지웠다 다시 만들어지는 구조라(라인 위 배치 유지 목적) 그때마다 마커가
+  // 같이 사라져버렸다 - 그래서 timerAnchor(캔들 타이머 배지)와 같은 방식으로, 좌표를 직접 계산해서
+  // absolute 오버레이 div로 그린다(20px 간격도 이 방식이라야 정확히 지정 가능 - 사용자 요청).
+  // positions 인자를 따로 받을 수 있게 한 이유는 setTwFoundPositions 직후 같은 틱에서 부를 때
+  // (findSignalPositions) state/ref가 아직 갱신 전이라 stale할 수 있어서다. 기본값은 ref를 읽는다 -
+  // resize/pan/zoom 핸들러는 마운트 시 한 번만 설치되는 클로저라 state를 직접 읽으면 항상 옛날 값에
+  // 고정되기 때문(rowsRef/indexRef와 같은 이유).
+  const updateFoundMarkerAnchors = (positions = twFoundPositionsRef.current) => {
+    const chart = chartRef.current
+    const series = seriesRef.current
+    if (!chart || !series || positions.length === 0) { setFoundMarkerAnchors([]); return }
+    const ts = chart.timeScale()
+    const anchors = positions.map((f, n) => {
+      const row = rowsRef.current[f.idx - 1]
+      if (!row) return null
+      const x = ts.timeToCoordinate(row.time)
+      const y = f.side === 'sell' ? series.priceToCoordinate(row.high) : series.priceToCoordinate(row.low)
+      if (x == null || y == null) return null
+      return { n: n + 1, x, y, side: f.side }
+    }).filter(Boolean)
+    setFoundMarkerAnchors(anchors)
+  }
 
   const twMoneyColor = (v) => (v >= 0 ? '#26a69a' : '#ef5350')
 
@@ -3954,9 +3965,12 @@ export default function ReplayChart() {
     const row1BelowReady = row1Armed === 'below'
     const prevH1_1 = twSeriesVal('h1', 1), prevH3_1 = twSeriesVal('h3', 1), prevH100_1 = twSeriesVal('h100', 1)
     const row1DeadCrossNow = prevH1_1 != null && prevH3_1 != null && h1 != null && h3 != null && prevH1_1 >= prevH3_1 && h1 < h3
-    const row1SellEntry = row1AboveReady && row1DeadCrossNow
+    // 진입 시 주가<H1<H3 조건 추가(사용자 요청) - H1<H3는 데드크로스 자체로 이미 보장되지만, 명시적으로
+    // 셋 다 같이 검사(가독성/추후 변경 대비).
+    const row1SellEntry = row1AboveReady && row1DeadCrossNow && price != null && h1 != null && h3 != null && price < h1 && h1 < h3
     const row1GoldenCrossNow = prevH3_1 != null && prevH100_1 != null && h3 != null && h100 != null && prevH3_1 <= prevH100_1 && h3 > h100
-    const row1BuyEntry = row1BelowReady && row1GoldenCrossNow
+    // 진입 시 주가>H3>H5(H100) 조건 추가(사용자 요청) - H3>H100은 골든크로스로 이미 보장됨
+    const row1BuyEntry = row1BelowReady && row1GoldenCrossNow && price != null && h3 != null && h100 != null && price > h3 && h3 > h100
     // 두 줄(\n)로 나눠 보여주던 걸 "4051.58 X 4048.15" 한 줄로(사용자 요청)
     const fmtTopBottom = (fast, slow) => {
       if (fast == null || slow == null) return '-'
@@ -4088,7 +4102,7 @@ export default function ReplayChart() {
             {twFoundPositions.length > 0 && (
               <>
                 <span style={{ fontSize: 12, color: '#9aa0ab' }}>{twFoundPositions.length}개 찾음 (아래 재생 바 위 번호 클릭 시 이동)</span>
-                <button type="button" onClick={() => setTwFoundPositions([])}
+                <button type="button" onClick={() => { setTwFoundPositions([]); setFoundMarkerAnchors([]) }}
                   style={{ background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 5, padding: '5px 10px', fontSize: 11.5, cursor: 'pointer', width: 'auto', flexShrink: 0 }}
                 >✕ 지우기</button>
               </>
@@ -4173,8 +4187,8 @@ export default function ReplayChart() {
               {/* 라벨 번호를 위 반자동 예약 카드와 똑같이 화면 위치 기준 1~8 순번으로 다시 붙였다
                   (사용자 요청). 본문 설명 내용은 안 건드림 - 번호만 교체. */}
               {[
-                checked === 1 && '1번: H1<H3 (매도 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 위에서 안쪽으로 재진입\n   진입 - 그 상태에서 H1<H3 데드크로스',
-                checked === 1.1 && '2번: H3>H5 (매수 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 아래에서 안쪽으로 재진입\n   진입 - 그 상태에서 H3>H5(H100) 골든크로스',
+                checked === 1 && '1번: H1<H3 (매도 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 위에서 안쪽으로 재진입\n   진입 - 그 상태에서 H1<H3 데드크로스 & 주가<H1<H3',
+                checked === 1.1 && '2번: H3>H5 (매수 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 아래에서 안쪽으로 재진입\n   진입 - 그 상태에서 H3>H5(H100) 골든크로스 & 주가>H3>H5',
                 checked === 2 && '3번: H3 < 5분중심선 (매도 전용)\n   준비 - H3(HMA60) < 5분중심선(SMA100)\n   진입 - 그 상태에서 HMA20 < 1분 중심선(SMA20) 데드크로스\n   청산 - HMA20>HMA60 골든크로스 (항상 감시)',
                 checked === 2.1 && '4번: H3 > 5분중심선 (매수 전용)\n   준비 - H3(HMA60) > 5분중심선(SMA100)\n   진입 - 그 상태에서 HMA20 > 1분 중심선(SMA20) 골든크로스\n   청산 - HMA20<HMA100 데드크로스 (항상 감시)',
                 checked === 6 && '5번: HMA20 < 1분 중심선(SMA20) (매도 전용)\n   준비 - HMA60<HMA100\n   진입 - 그 상태에서 HMA20 < 1분 중심선(SMA20) 데드크로스\n   청산 - HMA20>HMA60 골든크로스 (항상 감시)',
@@ -5265,6 +5279,20 @@ export default function ReplayChart() {
                     color: playing ? '#4CAF50' : '#9aa0ab', fontVariantNumeric: 'tabular-nums',
                   }}>⏱ {formatCandleTimer(candleTimerMs)}</span>
                 )}
+                {/* 🔍 찾기 결과 - timerAnchor와 같은 좌표계(컨테이너 padding 16px 보정). 셀은 캔들 위
+                    20px, 롱은 캔들 아래 20px(사용자 요청 그대로). updateFoundMarkerAnchors가 화면을
+                    드래그/줌하거나 캔들이 새로 그려질 때마다 좌표를 다시 계산해서 계속 따라다닌다. */}
+                {foundMarkerAnchors.map(a => (
+                  <span key={a.n} title={`${a.n}번째 - 클릭 시 이동은 아래 재생 바 위 번호에서`} style={{
+                    position: 'absolute', left: a.x + 16, top: a.side === 'sell' ? a.y + 16 - 20 : a.y + 16 + 20,
+                    transform: a.side === 'sell' ? 'translate(-50%, -100%)' : 'translate(-50%, 0%)',
+                    zIndex: 5, pointerEvents: 'none', whiteSpace: 'nowrap',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    minWidth: 16, height: 16, padding: '0 3px', borderRadius: 3, fontSize: 10, fontWeight: 700,
+                    background: '#171a21', color: a.side === 'sell' ? '#ef5350' : '#26a69a',
+                    border: `1px solid ${a.side === 'sell' ? '#ef5350' : '#26a69a'}`,
+                  }}>{a.n}</span>
+                ))}
                 {/* 반자동 신호 - "차트 아래(별도 줄)"가 아니라 차트 그 자체 위에, 봉 하나하나에 붙는
                     마커가 아니라 차트 하단에 고정 기록되는 형태로 표시해달라는 지적(사용자) - 캔들
                     타이머와 같은 방식(차트 컨테이너 안에 절대좌표 오버레이)으로, 하단 중앙에 둔다.
