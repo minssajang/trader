@@ -3964,13 +3964,13 @@ export default function ReplayChart() {
           {/* 1번(셀 전용)/1-1번(롱 전용)으로 분리(사용자 요청) - "준비"+"진입" 두 표시등은 3,4번과 같은
               방식. 1-1번은 rowDef의 n=1.1(체크/방향 상태 키도 독립적으로 1.1) */}
           {rowDef(1, { text: `1번: H1×H3\n${fmtTopBottom(h1, h3)}`, color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 1, () => toggleCheck(1),
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row1AboveReady} colorA={TW_STATUS_RED_A} />
               <TwStatusDot label="진입" active={row1SellEntry} colorA={TW_STATUS_RED_A} />
             </div>,
             dirBtn('SELL 🔴 매도', dir?.row === 1, () => pressDir(1, 'sell'), false))}
           {rowDef(1.1, { text: `1-1번: H3×H5\n${fmtTopBottom(h3, h100)}`, color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 1.1, () => toggleCheck(1.1),
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row1BelowReady} colorA={TW_STATUS_LIME_A} />
               <TwStatusDot label="진입" active={row1BuyEntry} colorA={TW_STATUS_LIME_A} />
             </div>,
@@ -3987,13 +3987,13 @@ export default function ReplayChart() {
           {/* "상태" 표시등 하나였던 걸 "준비"(배경 상태)+"진입"(그 상태에서 지금 크로스가 났는지) 두 개로
               세로로 나눔(사용자 요청) - 둘 다 평소엔 테두리만, 조건 맞으면 안쪽까지 채워짐(TwStatusDot 공용) */}
           {rowDef(6, { text: `3번: H1 < 1분중심\nH1 < H3\n${fmtTopBottom(h3, h1)}`, color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 6, () => toggleCheck(6),
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row3Ready} colorA={TW_STATUS_RED_A} />
               <TwStatusDot label="진입" active={row3Entry} colorA={TW_STATUS_RED_A} />
             </div>,
             dirBtn('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false))}
           {rowDef(5, { text: `4번: H1 > 1분중심\nH3 > H5\n${fmtTopBottom(h3, h100)}`, color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 5, () => toggleCheck(5),
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row4Ready} colorA={TW_STATUS_LIME_A} />
               <TwStatusDot label="진입" active={row4Entry} colorA={TW_STATUS_LIME_A} />
             </div>,
@@ -4015,11 +4015,11 @@ export default function ReplayChart() {
               {/* 라벨 번호를 위 반자동 예약 카드와 똑같이 화면 위치 기준으로 다시 붙였다(3↔4, 5↔6 자리
                   맞바꾼 것 반영). 본문 설명 내용은 안 건드림 - 번호만 교체. */}
               {[
-                checked === 1 && '1번: H1×H3 (매도 전용)\n   준비 - 가격이 SMA100 볼린저(5분볼린저) 위에서 안쪽으로 재진입\n   진입 - 그 상태에서 H1×H3 데드크로스',
-                checked === 1.1 && '1-1번: H3×H5 (매수 전용)\n   준비 - 가격이 SMA100 볼린저(5분볼린저) 아래에서 안쪽으로 재진입\n   진입 - 그 상태에서 H3×H5(H100) 골든크로스',
+                checked === 1 && '1번: H1×H3 (매도 전용)\n   준비 - 가격이 5분볼린저(MA100 볼린저) 위에서 안쪽으로 재진입\n   진입 - 그 상태에서 H1×H3 데드크로스',
+                checked === 1.1 && '1-1번: H3×H5 (매수 전용)\n   준비 - 가격이 5분볼린저(MA100 볼린저) 아래에서 안쪽으로 재진입\n   진입 - 그 상태에서 H3×H5(H100) 골든크로스',
                 checked === 2 && '2번: H3(HMA60) × 5분중심선(SMA100) 크로스',
-                checked === 6 && '3번: HMA20/SMA20 (매도 전용)\n   준비 - HMA60<HMA100\n   진입 - 그 상태에서 HMA20×SMA20 데드크로스\n   청산 - HMA20×HMA60 골든크로스 (항상 감시)',
-                checked === 5 && '4번: HMA20/SMA20 (매수 전용)\n   준비 - HMA60>HMA100\n   진입 - 그 상태에서 HMA20×SMA20 골든크로스\n   청산 - HMA20×HMA100 데드크로스 (항상 감시)',
+                checked === 6 && '3번: HMA20 < 1분 중심선(SMA20) (매도 전용)\n   준비 - HMA60<HMA100\n   진입 - 그 상태에서 HMA20 < 1분 중심선(SMA20) 데드크로스\n   청산 - HMA20×HMA60 골든크로스 (항상 감시)',
+                checked === 5 && '4번: HMA20 > 1분 중심선(SMA20) (매수 전용)\n   준비 - HMA60>HMA100\n   진입 - 그 상태에서 HMA20 > 1분 중심선(SMA20) 골든크로스\n   청산 - HMA20×HMA100 데드크로스 (항상 감시)',
                 checked === 4 && '5번: 하락추세 (매도 전용)\n   WMA85<5분중심, 1분스토 데드, 가격<HMA20, HMA20 하락중, HMA300 하락중',
                 checked === 3 && '6번: 상승추세 (매수 전용)\n   WMA85>5분중심, 1분스토 골든, 가격>HMA20, HMA20 상승중, HMA300 상승중',
               ].filter(Boolean).join('\n\n') || '체크된 신호가 없습니다'}
