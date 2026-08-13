@@ -3978,13 +3978,13 @@ export default function ReplayChart() {
         <CollapsibleCard title="🎯 반자동 예약" maxWidth="none" defaultOpen={false}>
           {/* 1번(셀 전용)/1-1번(롱 전용)으로 분리(사용자 요청) - "준비"+"진입" 두 표시등은 3,4번과 같은
               방식. 1-1번은 rowDef의 n=1.1(체크/방향 상태 키도 독립적으로 1.1) */}
-          {rowDef(1, { text: `1번: H1×H3\n${fmtTopBottom(h1, h3)}`, color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 1, () => toggleCheck(1),
+          {rowDef(1, { text: `1번: 5Bol 상단 돌파후 진입\nH1<H3\n${fmtTopBottom(h1, h3)}`, color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 1, () => toggleCheck(1),
             <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row1AboveReady} colorA={TW_STATUS_RED_A} />
               <TwStatusDot label="진입" active={row1SellEntry} colorA={TW_STATUS_RED_A} />
             </div>,
             dirBtn('SELL 🔴 매도', dir?.row === 1, () => pressDir(1, 'sell'), false))}
-          {rowDef(1.1, { text: `1-1번: H3×H5\n${fmtTopBottom(h3, h100)}`, color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 1.1, () => toggleCheck(1.1),
+          {rowDef(1.1, { text: `1-1번: 5Bol 하단 돌파후 진입\nH3>H5\n${fmtTopBottom(h3, h100)}`, color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 1.1, () => toggleCheck(1.1),
             <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row1BelowReady} colorA={TW_STATUS_LIME_A} />
               <TwStatusDot label="진입" active={row1BuyEntry} colorA={TW_STATUS_LIME_A} />
@@ -3992,14 +3992,14 @@ export default function ReplayChart() {
             dirBtn('BUY 🟢 매수', dir?.row === 1.1, () => pressDir(1.1, 'buy'), true))}
           {/* 2번(셀 전용)/2-1번(롱 전용)으로 분리(사용자 요청) - 1,1-1번과 같은 방식, 진입 크로스는
               3,4번(H1×S20)과 완전히 동일한 계산을 재사용. */}
-          {rowDef(2, { text: `2번: H3×5분중심선\n${fmtTopBottom(h3, sma100)}`, color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 2, () => toggleCheck(2),
+          {rowDef(2, { text: `2번: H1 < 1분중심\nH3>5분중심\n${fmtTopBottom(h3, sma100)}`, color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 2, () => toggleCheck(2),
             <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row2State} colorA={TW_STATUS_RED_A} />
               <TwStatusDot label="진입" active={row2Entry} colorA={TW_STATUS_RED_A} />
               <TwStatusDot label="청산" active={exitGoldenH1H3} colorA={TW_STATUS_RED_A} />
             </div>,
             dirBtn('SELL 🔴 매도', dir?.row === 2, () => pressDir(2, 'sell'), false))}
-          {rowDef(2.1, { text: `2-1번: H3×5분중심선\n${fmtTopBottom(h3, sma100)}`, color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 2.1, () => toggleCheck(2.1),
+          {rowDef(2.1, { text: `2-1번: H1 > 1분중심\nH3<5분중심\n${fmtTopBottom(h3, sma100)}`, color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 2.1, () => toggleCheck(2.1),
             <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row2_1State} colorA={TW_STATUS_LIME_A} />
               <TwStatusDot label="진입" active={row2_1Entry} colorA={TW_STATUS_LIME_A} />
