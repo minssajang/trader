@@ -1135,6 +1135,7 @@ export default function ReplayChart() {
   const seriesRef = useRef(null)
   const markerSeriesRef = useRef(null) // 투명 라인 시리즈 - 마커 전용. 다른 라인이 새로 추가될 때마다 지웠다 다시 만들어서 항상 맨 위(가장 나중에 추가된 시리즈)에 오게 함
   const markersPrimitiveRef = useRef(null) // v5: series.setMarkers() 대신 createSeriesMarkers(series, markers)가 반환하는 primitive를 씀
+  const searchMarkersPrimitiveRef = useRef(null) // 🔍 찾기 결과 전용 마커(사용자 요청) - 크로스/세션 마커랑 안 섞이게 독립 primitive
   // 리본 외곽선(M5-M90) 폭이 "확정된" 국소 고점/저점 중 지금까지 최댓값/최솟값일 때만 세로선 위치를 옮김(방식 B, 사용자 요청)
   const maxSpreadLineRef = useRef(null)   // VerticalLinePrimitive 인스턴스(노랑, 발산 최대)
   const minSpreadLineRef = useRef(null)   // VerticalLinePrimitive 인스턴스(하늘, 수축 최소)
@@ -1258,6 +1259,7 @@ export default function ReplayChart() {
     reservationEventsRef.current = null
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
+    searchMarkersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
@@ -1416,6 +1418,7 @@ export default function ReplayChart() {
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     })
     markersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
+    searchMarkersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
 
     // applyOptions({width})는 이 차트처럼 pane이 여러 개(캔들+RSI+MACD+스토캐스틱)일 때 서브pane
     // 캔버스까지는 안 따라가는 경우가 실측으로 확인됐다 - chart.resize(w,h)가 라이브러리가 명시하는
@@ -2312,6 +2315,7 @@ export default function ReplayChart() {
     reservationEventsRef.current = null
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
+    searchMarkersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
@@ -2506,6 +2510,7 @@ export default function ReplayChart() {
     reservationEventsRef.current = null
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
+    searchMarkersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([])
   }
@@ -2657,6 +2662,7 @@ export default function ReplayChart() {
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
     })
     markersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
+    searchMarkersPrimitiveRef.current = createSeriesMarkers(markerSeriesRef.current, [])
     const idx = indexRef.current
     markerSeriesRef.current.setData(rowsRef.current.slice(0, idx).map(r => ({ time: r.time, value: r.close })))
     applyAllMarkers(idx)
@@ -3831,6 +3837,24 @@ export default function ReplayChart() {
     }
     setTwFoundPositions(found)
   }
+  // 재생 바 위 번호랑 완전히 같은 결과를 캔들 위에도 그대로 얹는다(사용자 요청 - "잘 동작하는지
+  // 찾아보게"). 셀=캔들 위(aboveBar)/롱=캔들 아래(belowBar), 번호도 재생 바와 같은 순서.
+  // 크로스/세션 마커랑 안 섞이게 독립 primitive(searchMarkersPrimitiveRef)를 씀.
+  useEffect(() => {
+    if (!searchMarkersPrimitiveRef.current) return
+    const markers = twFoundPositions
+      .map((f, n) => {
+        const row = rowsRef.current[f.idx - 1]
+        if (!row) return null
+        return {
+          time: row.time, position: f.side === 'sell' ? 'aboveBar' : 'belowBar',
+          color: f.side === 'sell' ? '#ef5350' : '#26a69a', shape: 'circle', size: 1, text: String(n + 1),
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.time - b.time)
+    searchMarkersPrimitiveRef.current.setMarkers(markers)
+  }, [twFoundPositions])
 
   const twMoneyColor = (v) => (v >= 0 ? '#26a69a' : '#ef5350')
 
