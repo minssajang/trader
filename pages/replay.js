@@ -2001,12 +2001,17 @@ export default function ReplayChart() {
       // 기준(종가 아님 - 안전 우선, 사용자 확인)으로 SL/TP 다음 우선순위로 검사한다.
       const maTrailKey = twMaTrailStopRef.current
         ? { s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85' }[twMaTrailStopRef.current] : null
+      // 🎯 청산목표 S100 계열 3종(사용자 요청) - 크로스가 아니라 "닿으면" 방식. 익절(목표 도달) 방향이라
+      // 손절과 정반대: SELL은 저가가 닿으면(가격 하락=이익), BUY는 고가가 닿으면(가격 상승=이익) 청산.
+      const exitTargetKey = twExitCrossPairRef.current
+        ? { center: 'sma100', bbUp: 'bbUp', bbLo: 'bbLo' }[twExitCrossPairRef.current] : null
       const S = reservationSeriesRef.current
-      // 같은 캔들에서 SL/TP/이평선손절이 여러 개 걸리면 보수적으로 SL→TP→이평선손절 순으로 우선한다
+      // 같은 캔들에서 여러 개 걸리면 보수적으로 SL→TP→이평선손절→청산목표 순으로 우선한다
       // (OHLC만으로는 어느 쪽이 먼저 닿았는지 알 수 없음)
       for (let i = from; i < to; i++) {
         const bar = rows[i]
         const maVal = (maTrailKey && S) ? S[maTrailKey]?.[i + S.offset] : null
+        const targetVal = (exitTargetKey && S) ? S[exitTargetKey]?.[i + S.offset] : null
         for (const pos of positionsRef.current) {
           if (closedIds.has(pos.id)) continue
           if (pos.sl != null) {
@@ -2019,7 +2024,11 @@ export default function ReplayChart() {
           }
           if (maVal != null) {
             const hitMaStop = pos.side === 'buy' ? bar.low <= maVal : bar.high >= maVal
-            if (hitMaStop) { closePositionAt(pos.id, maVal, bar.time, pos); closedIds.add(pos.id) }
+            if (hitMaStop) { closePositionAt(pos.id, maVal, bar.time, pos); closedIds.add(pos.id); continue }
+          }
+          if (targetVal != null) {
+            const hitTarget = pos.side === 'buy' ? bar.high >= targetVal : bar.low <= targetVal
+            if (hitTarget) { closePositionAt(pos.id, targetVal, bar.time, pos); closedIds.add(pos.id) }
           }
         }
       }
@@ -2053,9 +2062,10 @@ export default function ReplayChart() {
           if (hit) { fireRow(row, side, hit.idx); setTwNasdaqChecked(null); setTwNasdaqDir(null) }
         }
         // 3,4,5,6번 블랭킷 청산과 "✅ 익절: H1×H3 크로스 청산"(twTpExitCross) 기능은 삭제됨(사용자 요청).
-        // 🎯 청산 버튼 4종(후속 기능) - 선택된 페어만 무장 여부와 무관하게 항상 감시, 골든=숏 청산/
-        // 데드=롱 청산(tag 상관없이 열려있는 모든 포지션 대상 - 벌크 청산과는 별개로 실시간 자동 동작).
-        if ((isGold || isNasdaq) && twExitCrossPairRef.current) {
+        // 🎯 청산목표 - S1/H3/H5/W85 4종(후속 기능)만 여기서 처리, 골든=숏 청산/데드=롱 청산(tag 상관없이
+        // 열려있는 모든 포지션 대상 - 벌크 청산과는 별개로 실시간 자동 동작). S100 계열 3종(터치 방식)은
+        // rEvents.exitCross에 없어서 아래 SL/TP 루프 쪽에서 별도로 처리한다.
+        if ((isGold || isNasdaq) && twExitCrossPairRef.current && rEvents.exitCross[twExitCrossPairRef.current]) {
           const exitHit = rEvents.exitCross[twExitCrossPairRef.current].find(e => e.idx >= from && e.idx < to)
           if (exitHit) {
             positionsRef.current.forEach(p => {
@@ -4119,15 +4129,24 @@ export default function ReplayChart() {
     // 방향버튼(SELL/BUY) - 체크박스와 별개의 토글. 다시 누르면 원복.
     const pressDir = (row, side) => setDir(d => (d && d.row === row && d.side === side) ? null : { row, side })
 
-    // 🎯 청산 버튼 4종(사용자 요청, twTpExitCross 후속) - 라디오 방식(하나만 선택, 다시 누르면 꺼짐).
-    // 벌크 청산 버튼 위/아래 두 자리에 똑같이 보여준다(하나의 공유 상태, 위치만 두 곳).
-    const exitCrossOptions = [['s1', 'H1×S1'], ['h3', 'H1×H3'], ['h5', 'H1×H5'], ['w85', 'H1×W85']]
+    // 🎯 청산목표 버튼 7종(사용자 요청, twTpExitCross 후속) - 라디오 방식(하나만 선택, 다시 누르면 꺼짐).
+    // 벌크 청산 버튼 위/아래 두 자리에 똑같이 보여준다(하나의 공유 상태, 위치만 두 곳). 앞 4개(S1/H3/H5/
+    // W85)는 H1(HMA20)과의 크로스 방식(골든=숏 청산/데드=롱 청산) 그대로, 뒤 3개(S100 계열)는 크로스가
+    // 아니라 "닿으면"(터치) 방식 - 익절(목표 도달) 방향: SELL은 저가가 닿으면(가격 하락=이익), BUY는
+    // 고가가 닿으면(가격 상승=이익) 청산(사용자 확인 - 손절과 정반대 방향).
+    const exitCrossOptions = [
+      ['s1', 'H1×S1', false], ['h3', 'H1×H3', false], ['h5', 'H1×H5', false], ['w85', 'H1×W85', false],
+      ['center', '5분중심', true], ['bbUp', '5분상Bol', true], ['bbLo', '5분하Bol', true],
+    ]
     const renderExitCrossButtons = () => (
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        {exitCrossOptions.map(([id, label]) => (
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#9aa0ab', flexShrink: 0 }}>청산목표</span>
+        {exitCrossOptions.map(([id, label, isTouch]) => (
           <button key={id} type="button"
             onClick={() => setTwExitCrossPair(v => v === id ? null : id)}
-            title={`H1(HMA20)×${label.split('×')[1]} 골든크로스=숏 청산 / 데드크로스=롱 청산 - 무장 여부와 무관하게 항상 감시`}
+            title={isTouch
+              ? `${label}에 가격이 닿으면(SELL=저가, BUY=고가) 목표 도달로 청산 - 무장 여부와 무관하게 항상 감시`
+              : `H1(HMA20)×${label.split('×')[1]} 골든크로스=숏 청산 / 데드크로스=롱 청산 - 무장 여부와 무관하게 항상 감시`}
             style={{
               flex: 1, padding: '8px 4px', fontSize: 12, fontWeight: 700, borderRadius: 5, cursor: 'pointer',
               border: '1.5px solid white',
@@ -5380,7 +5399,7 @@ export default function ReplayChart() {
                     display: 'inline-flex', alignItems: 'center', gap: 6,
                     background: 'rgba(23,26,33,0.92)', border: '1px solid #FF5722', borderRadius: 9,
                     padding: '4px 10px', fontSize: 12, fontWeight: 700, color: '#FF5722',
-                  }}>🎯 청산: {{ s1: 'H1×S1', h3: 'H1×H3', h5: 'H1×H5', w85: 'H1×W85' }[twExitCrossPair]}</span>
+                  }}>🎯 청산목표: {{ s1: 'H1×S1', h3: 'H1×H3', h5: 'H1×H5', w85: 'H1×W85', center: '5분중심', bbUp: '5분상Bol', bbLo: '5분하Bol' }[twExitCrossPair]}</span>
                 )}
                 {/* 🛑 이평선 따라가기 손절 - 선택한 선의 "끝"(지금 값)에서 점선이 나와 라벨이 붙는다(사용자
                     요청, "-----손절(H5)" 형태). updateMaStopAnchor가 화면 갱신마다 좌표를 다시 계산해서
