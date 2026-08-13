@@ -4039,8 +4039,8 @@ export default function ReplayChart() {
                 checked === 2 && '2번: H3(HMA60) × 5분중심선(SMA100) 크로스',
                 checked === 6 && '3번: HMA20 < 1분 중심선(SMA20) (매도 전용)\n   준비 - HMA60<HMA100\n   진입 - 그 상태에서 HMA20 < 1분 중심선(SMA20) 데드크로스\n   청산 - HMA20×HMA60 골든크로스 (항상 감시)',
                 checked === 5 && '4번: HMA20 > 1분 중심선(SMA20) (매수 전용)\n   준비 - HMA60>HMA100\n   진입 - 그 상태에서 HMA20 > 1분 중심선(SMA20) 골든크로스\n   청산 - HMA20×HMA100 데드크로스 (항상 감시)',
-                checked === 4 && '5번: 하락추세 (매도 전용)\n   WMA85<5분중심, 1분스토 데드, 가격<HMA20, HMA20 하락중, HMA300 하락중',
-                checked === 3 && '6번: 상승추세 (매수 전용)\n   WMA85>5분중심, 1분스토 골든, 가격>HMA20, HMA20 상승중, HMA300 상승중',
+                checked === 4 && '5번: 하락추세 (매도 전용)\n   상태 - WMA85<5분중심\n   준비 - 가격<HMA20, HMA300 하락중\n   진입 - 1분스토 데드',
+                checked === 3 && '6번: 상승추세 (매수 전용)\n   상태 - WMA85>5분중심\n   준비 - 가격>HMA20, HMA300 상승중\n   진입 - 1분스토 골드',
               ].filter(Boolean).join('\n\n') || '체크된 신호가 없습니다'}
             </div>
           </CollapsibleCard>
