@@ -3789,16 +3789,17 @@ export default function ReplayChart() {
   }
 
   // [상태] 표시등 - 44px 고정폭, 체크박스와 SELL/BUY 버튼 "사이"(원본 QHBoxLayout 순서 그대로: 체크박스→상태→방향버튼).
-  // 항상 배경은 투명(테두리만) - active=false면 회색 테두리로 꺼짐, active=true면 테두리·글자색이 해당 상태색.
-  // colorB를 주면 twBlinkPhase에 따라 colorA/colorB를 번갈아 점멸, colorB 없이 colorA만 주면 점멸 없이 고정색(1번 신호).
+  // 평소(꺼짐)엔 테두리만, active일 땐 안쪽도 색으로 채운다(사용자 요청 - "점멸을 해달라는게 안에
+  // 색칠을 해달라는 거였어, 평소에는 테두리만 있다가"). colorB를 주면 twBlinkPhase에 따라 colorA/colorB
+  // 배경색을 번갈아 점멸, colorB 없이 colorA만 주면 점멸 없이 고정 채움(1번 신호).
   const TwStatusDot = ({ active, colorA, colorB }) => {
     const c = active ? (colorB ? (twBlinkPhase ? colorA : colorB) : colorA) : null
     const borderColor = c ? c.border : TW_STATUS_OFF.border
     return (
       <span style={{
         display: 'inline-block', width: 44, textAlign: 'center', fontSize: 9, fontWeight: 700,
-        padding: '2px 4px', borderRadius: 4, background: 'transparent',
-        color: c ? borderColor : TW_READY_OFF.color, border: `2px solid ${borderColor}`,
+        padding: '2px 4px', borderRadius: 4, background: c ? c.bg : 'transparent',
+        color: c ? '#fff' : TW_READY_OFF.color, border: `2px solid ${borderColor}`,
       }}>상태</span>
     )
   }
@@ -3862,11 +3863,13 @@ export default function ReplayChart() {
     const row6Dead = h1 != null && h3 != null && h1 < h3
 
     // 원본 QHBoxLayout 순서 그대로: [체크박스+라벨] → [상태 표시등] → [SELL/BUY 버튼]
-    const rowDef = (n, label, checked, onCheck, statusEl, sideBtns) => (
-      <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <label style={{ display: 'flex', flexDirection: 'column', width: 130, flexShrink: 0, cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+    // disabled(사용자 요청) - 3↔4, 5↔6은 같은 방향성의 반대쌍이라 한쪽이 무장되면 반대쪽은 아예 못
+    // 누르게 막는다(그냥 unchecked가 아니라 disabled로 - "3번이 활성이면 4번은 비활성"이라고 명시함).
+    const rowDef = (n, label, checked, onCheck, statusEl, sideBtns, disabled) => (
+      <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, opacity: disabled ? 0.4 : 1 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', width: 130, flexShrink: 0, cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 11, fontWeight: 700 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input type="checkbox" checked={checked} onChange={onCheck} style={{ accentColor: '#4CAF50' }} />
+            <input type="checkbox" checked={checked} disabled={disabled} onChange={onCheck} style={{ accentColor: '#4CAF50' }} />
             <span style={{ color: label.color, whiteSpace: 'pre-line' }}>{label.text}</span>
           </span>
         </label>
@@ -3929,18 +3932,27 @@ export default function ReplayChart() {
           {rowDef(2, { text: `2번: H3×S5\n${fmtTopBottom(h3, sma100)}`, color: row2Color }, checked === 2, () => toggleCheck(2),
             <TwStatusDot active={h3 != null && sma100 != null} colorA={row2Golden ? TW_STATUS_BLUE_A : TW_STATUS_PINK_A} colorB={row2Golden ? TW_STATUS_BLUE_B : TW_STATUS_PINK_B} />,
             dirPair(2))}
-          {rowDef(3, { text: `3번: 상승추세\n${fmtTopBottom(wma85, sma100)}`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 3, () => toggleCheck(3),
-            <TwStatusDot active={row3Buy} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
-            dirBtn('BUY 🟢 매수', dir?.row === 3, () => pressDir(3, 'buy'), true))}
-          {rowDef(4, { text: `4번: 하락추세\n${fmtTopBottom(wma85, sma100)}`, color: row4Sell ? TW_TEXT_PINK : TW_TEXT_GRAY }, checked === 4, () => toggleCheck(4),
-            <TwStatusDot active={row4Sell} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
-            dirBtn('SELL 🔴 매도', dir?.row === 4, () => pressDir(4, 'sell'), false))}
-          {rowDef(5, { text: `5번: H60/H100\n${fmtTopBottom(h3, h100)}`, color: row5Golden ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 5, () => toggleCheck(5),
+          {/* 5,6번을 3,4번 자리로, 3,4번을 5,6번 자리로 위치를 맞바꿨다(사용자 요청) - 번호(체크/방향
+              상태 키)는 그대로 3,4,5,6이고 화면에 보이는 순서만 5,6,3,4로 바뀐 것. 3↔4, 5↔6은 서로
+              반대쌍이라 한쪽이 무장되면 반대쪽은 disabled로 아예 못 누르게 막는다(사용자 요청). */}
+          {/* 헤더 텍스트를 "H60/H100"·"H20/H60"(기간 기반 이름) 대신 실제 비교식 그대로(사용자 요청) -
+              내부 변수명이 그대로 h3/h100/h1이라 "H3 > H100"/"H1 < H3"로 바꿈(row5Golden=h3>h100,
+              row6Dead=h1<h3와 정확히 일치). "H60/H100 => H3 > H5"라고 하신 건 h100을 그대로 쓰는 게
+              row6과 같은 패턴(h1→H1, h3→H3)이라 H5는 오타로 보고 H100으로 넣었습니다 - 다르면 알려주세요. */}
+          {rowDef(5, { text: `5번: H3 > H100\n${fmtTopBottom(h3, h100)}`, color: row5Golden ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 5, () => toggleCheck(5),
             <TwStatusDot active={h1 != null && sma20 != null && h1 > sma20} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
-            dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true))}
-          {rowDef(6, { text: `6번: H20/H60\n${fmtTopBottom(h3, h1)}`, color: row6Dead ? TW_TEXT_PINK : TW_TEXT_GRAY }, checked === 6, () => toggleCheck(6),
+            dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true), checked === 6)}
+          {rowDef(6, { text: `6번: H1 < H3\n${fmtTopBottom(h3, h1)}`, color: row6Dead ? TW_TEXT_PINK : TW_TEXT_GRAY }, checked === 6, () => toggleCheck(6),
             <TwStatusDot active={h1 != null && sma20 != null && h1 < sma20} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
-            dirBtn('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false))}
+            dirBtn('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false), checked === 5)}
+          {/* 3/4번 아래에 숫자값(fmtTopBottom) 대신 조건식 그대로 텍스트로(사용자 요청 - 예전에 값으로
+              넣었던 건 원하신 게 아니었음) */}
+          {rowDef(3, { text: `3번: 상승추세\nWMA85 > SMA100\n${fmtTopBottom(wma85, sma100)}`, color: row3Buy ? TW_TEXT_BLUE : TW_TEXT_GRAY }, checked === 3, () => toggleCheck(3),
+            <TwStatusDot active={row3Buy} colorA={TW_STATUS_BLUE_A} colorB={TW_STATUS_BLUE_B} />,
+            dirBtn('BUY 🟢 매수', dir?.row === 3, () => pressDir(3, 'buy'), true), checked === 4)}
+          {rowDef(4, { text: `4번: 하락추세\nWMA85 < SMA100\n${fmtTopBottom(wma85, sma100)}`, color: row4Sell ? TW_TEXT_PINK : TW_TEXT_GRAY }, checked === 4, () => toggleCheck(4),
+            <TwStatusDot active={row4Sell} colorA={TW_STATUS_PINK_A} colorB={TW_STATUS_PINK_B} />,
+            dirBtn('SELL 🔴 매도', dir?.row === 4, () => pressDir(4, 'sell'), false), checked === 3)}
         </CollapsibleCard>
 
         <button type="button" onClick={closeAllPositionsModal} style={{ width: '100%', marginTop: 10, background: '#FF5722', color: 'white', border: 'none', borderRadius: 5, padding: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>{bulkLabel}</button>
@@ -3949,13 +3961,15 @@ export default function ReplayChart() {
         <div style={{ marginTop: 8 }}>
           <CollapsibleCard title="📋 신호 설명" maxWidth="none" defaultOpen={false}>
             <div style={{ fontSize: 11.5, color: '#c8ccd4', lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+              {/* 목록 순서도 위 반자동 예약 카드의 새 화면 순서(1,2,5,6,3,4)에 맞춰 재배열(사용자 요청) -
+                  실제로는 checked가 한 번에 하나뿐이라 한 항목만 보이지만, 순서 자체는 맞춰둔다. */}
               {[
                 checked === 1 && '1번: H1×H3\n   SMA100 밴드 바깥→안쪽 재진입으로 무장된 뒤, 그 방향과 맞는\n   H1×H3 크로스가 나오면 진입 (재진입·크로스는 동시일 필요 없음)',
                 checked === 2 && '2번: H3(HMA60) × S5(SMA100) 크로스',
-                checked === 3 && '3번: 상승추세 (매수 전용)\n   WMA85>SMA100, 1분스토 골든, 가격>HMA20, HMA20 상승중, HMA300 상승중',
-                checked === 4 && '4번: 하락추세 (매도 전용)\n   WMA85<SMA100, 1분스토 데드, 가격<HMA20, HMA20 하락중, HMA300 하락중',
                 checked === 5 && '5번: HMA20/SMA20 (매수 전용)\n   진입 - HMA60>HMA100, HMA20×SMA20 골든크로스\n   청산 - HMA20×HMA100 데드크로스 (항상 감시)',
                 checked === 6 && '6번: HMA60×HMA100 (매도 전용)\n   진입 - HMA20<SMA20, HMA60×HMA100 데드크로스\n   청산 - HMA20×HMA60 골든크로스 (항상 감시)',
+                checked === 3 && '3번: 상승추세 (매수 전용)\n   WMA85>SMA100, 1분스토 골든, 가격>HMA20, HMA20 상승중, HMA300 상승중',
+                checked === 4 && '4번: 하락추세 (매도 전용)\n   WMA85<SMA100, 1분스토 데드, 가격<HMA20, HMA20 하락중, HMA300 하락중',
               ].filter(Boolean).join('\n\n') || '체크된 신호가 없습니다'}
             </div>
           </CollapsibleCard>
@@ -5043,38 +5057,48 @@ export default function ReplayChart() {
                     color: playing ? '#4CAF50' : '#9aa0ab', fontVariantNumeric: 'tabular-nums',
                   }}>⏱ {formatCandleTimer(candleTimerMs)}</span>
                 )}
+                {/* 반자동 신호 - "차트 아래(별도 줄)"가 아니라 차트 그 자체 위에, 봉 하나하나에 붙는
+                    마커가 아니라 차트 하단에 고정 기록되는 형태로 표시해달라는 지적(사용자) - 캔들
+                    타이머와 같은 방식(차트 컨테이너 안에 절대좌표 오버레이)으로, 하단 중앙에 둔다.
+                    "사용자가 무장(체크)한 것만"이 아니라 1~6번 신호 전부를 항상 모니터링해서 지금 몇 개가
+                    롱 쪽/숏 쪽으로 읽히는지 센다(사용자 지적: "모니터링은 모두 해서"). 각 행의 판정은
+                    렌더 색을 정하는 것과 완전히 같은 조건(row1Outside 방향/row2Golden/row3Buy/row4Sell/
+                    row5Golden/row6Dead)을 그대로 재사용 - 골드/나스닥을 동시에 진행 안 하므로(사용자 확인)
+                    twSeriesVal은 지금 로드된 symbol 데이터 기준 값을 그대로 쓴다. */}
+                {showSemiAutoSignalOnChart && (() => {
+                  const h1 = twSeriesVal('h1'), h3 = twSeriesVal('h3'), h100 = twSeriesVal('h100')
+                  const wma85 = twSeriesVal('wma85'), sma100 = twSeriesVal('sma100')
+                  const stochGolden = twSeriesVal('stochGolden')
+                  const bbUp = twSeriesVal('bbUp'), bbLo = twSeriesVal('bbLo')
+                  const price = playIndex > 0 ? rowsRef.current[playIndex - 1]?.close ?? null : null
+
+                  // "3롱/1셀"처럼 개수만 세면 어떤 번호가 롱인지 안 보인다는 지적(사용자) - 몇 번 신호가
+                  // 롱인지/셀인지 번호 그대로 나열한다("1, 2, 3 롱" / "6 셀"). 각 행은 롱 아니면 숏 둘 중
+                  // 하나에만 들어간다(3/5번은 매수전용, 4/6번은 매도전용이라 애초에 반대쪽엔 못 들어가고,
+                  // 1/2번도 가격/크로스 조건이 상호배타라 같은 순간 양쪽에 동시에 들어갈 수 없음).
+                  const longRows = [], shortRows = []
+                  if (price != null && bbLo != null && price < bbLo) longRows.push(1) // 1번: 밴드 아래로 이탈
+                  if (price != null && bbUp != null && price > bbUp) shortRows.push(1) // 1번: 밴드 위로 이탈
+                  if (h3 != null && sma100 != null) { if (h3 > sma100) longRows.push(2); else shortRows.push(2) } // 2번: H3×S5
+                  if (wma85 != null && sma100 != null && h1 != null && wma85 > sma100 && stochGolden === true && price != null && price > h1) longRows.push(3) // 3번: 상승추세
+                  if (wma85 != null && sma100 != null && h1 != null && wma85 < sma100 && stochGolden === false && price != null && price < h1) shortRows.push(4) // 4번: 하락추세
+                  if (h3 != null && h100 != null && h3 > h100) longRows.push(5) // 5번: H60/H100 골든
+                  if (h1 != null && h3 != null && h1 < h3) shortRows.push(6) // 6번: H20/H60 데드
+
+                  if (longRows.length === 0 && shortRows.length === 0) return null
+                  return (
+                    <div style={{
+                      position: 'absolute', left: '50%', bottom: 26, transform: 'translateX(-50%)',
+                      zIndex: 5, pointerEvents: 'none', whiteSpace: 'nowrap', textAlign: 'center',
+                      background: 'rgba(23,26,33,0.92)', border: '1px solid #2a2e38', borderRadius: 9,
+                      padding: '6px 14px', fontSize: 13, fontWeight: 700, lineHeight: 1.5,
+                    }}>
+                      {longRows.length > 0 && <div style={{ color: '#26a69a' }}>{longRows.join(', ')} 롱</div>}
+                      {shortRows.length > 0 && <div style={{ color: '#ef5350' }}>{shortRows.join(', ')} 셀</div>}
+                    </div>
+                  )
+                })()}
               </div>
-
-              {/* 반자동 신호를 차트 바로 아래에 "N 롱 / M 셀"로 표시(사용자 요청, showSemiAutoSignalOnChart
-                  체크박스로 켜고 끔) - "사용자가 무장(체크)한 것만"이 아니라 1~6번 신호 전부를 항상
-                  모니터링해서 지금 몇 개가 롱 쪽/숏 쪽으로 읽히는지 센다(사용자 지적: "모니터링은 모두
-                  해서"). 각 행의 판정은 렌더 색을 정하는 것과 완전히 같은 조건(row1Outside 방향/
-                  row2Golden/row3Buy/row4Sell/row5Golden/row6Dead)을 그대로 재사용 - 골드/나스닥을 동시에
-                  진행 안 하므로(사용자 확인) twSeriesVal은 지금 로드된 symbol 데이터 기준 값을 그대로 쓴다. */}
-              {showSemiAutoSignalOnChart && (() => {
-                const h1 = twSeriesVal('h1'), h3 = twSeriesVal('h3'), h100 = twSeriesVal('h100')
-                const wma85 = twSeriesVal('wma85'), sma100 = twSeriesVal('sma100')
-                const stochGolden = twSeriesVal('stochGolden')
-                const bbUp = twSeriesVal('bbUp'), bbLo = twSeriesVal('bbLo')
-                const price = playIndex > 0 ? rowsRef.current[playIndex - 1]?.close ?? null : null
-
-                let longCount = 0, shortCount = 0
-                if (price != null && bbLo != null && price < bbLo) longCount++ // 1번: 밴드 아래로 이탈
-                if (price != null && bbUp != null && price > bbUp) shortCount++ // 1번: 밴드 위로 이탈
-                if (h3 != null && sma100 != null) { if (h3 > sma100) longCount++; else shortCount++ } // 2번: H3×S5
-                if (wma85 != null && sma100 != null && h1 != null && wma85 > sma100 && stochGolden === true && price != null && price > h1) longCount++ // 3번: 상승추세
-                if (wma85 != null && sma100 != null && h1 != null && wma85 < sma100 && stochGolden === false && price != null && price < h1) shortCount++ // 4번: 하락추세
-                if (h3 != null && h100 != null && h3 > h100) longCount++ // 5번: H60/H100 골든
-                if (h1 != null && h3 != null && h1 < h3) shortCount++ // 6번: H20/H60 데드
-
-                return (
-                  <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700 }}>
-                    <span style={{ color: '#26a69a' }}>{longCount} 롱</span>
-                    <span style={{ color: '#5a5f6a' }}> / </span>
-                    <span style={{ color: '#ef5350' }}>{shortCount} 셀</span>
-                  </div>
-                )
-              })()}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
                 <span style={{ color: '#9aa0ab', fontSize: 13 }}>{playIndex.toLocaleString()} / {total.toLocaleString()}봉</span>
