@@ -3874,6 +3874,16 @@ export default function ReplayChart() {
     const row3Buy = wma85 != null && sma100 != null && h1 != null && wma85 > sma100 && stochGolden === true && price != null && price > h1
     const row4Sell = wma85 != null && sma100 != null && h1 != null && wma85 < sma100 && stochGolden === false && price != null && price < h1
 
+    // 5,6번도 1,1-1,3,4번과 같은 방식으로 상태/준비/진입 세 단계로 분리(사용자 요청). HMA20 상승/하락중
+    // 조건은 일부러 뺌(사용자 확인 - 실제 발동 판정엔 포함되지만 이 표시들엔 안 넣음).
+    const prevH300 = twSeriesVal('h300', 1)
+    const row5State = wma85 != null && sma100 != null && wma85 < sma100 // 5번(내부row4) 상태: WMA85<5분중심
+    const row5Ready = price != null && h1 != null && price < h1 && h300 != null && prevH300 != null && h300 < prevH300 // 준비: 가격<HMA20, HMA300 하락중
+    const row5Entry = stochGolden === false // 진입: 1분스토 데드
+    const row6State = wma85 != null && sma100 != null && wma85 > sma100 // 6번(내부row3) 상태: WMA85>5분중심
+    const row6Ready = price != null && h1 != null && price > h1 && h300 != null && prevH300 != null && h300 > prevH300 // 준비: 가격>HMA20, HMA300 상승중
+    const row6Entry = stochGolden === true // 진입: 1분스토 골드
+
     const row5Golden = h3 != null && h100 != null && h3 > h100
     const row6Dead = h1 != null && h3 != null && h1 < h3
 
@@ -3981,9 +3991,10 @@ export default function ReplayChart() {
           {/* 3↔4 자리, 5↔6 자리를 각각 서로 맞바꿨다(사용자 요청 - "롱 셀 롱 셀"이던 순서를 "셀 롱 셀 롱"
               으로). 내부 checked/dir 키 값은 안 바꾸고, 화면 순서 + 라벨 숫자만 새 위치에 맞게 다시 붙였다:
               내부 row6(H1<H3, 셀/레드)이 이제 3번, 내부 row5(H3>H100, 롱/라임)가 이제 4번, 내부 row4
-              (하락추세, 셀/레드)가 이제 5번, 내부 row3(상승추세, 롱/라임)가 이제 6번. disabled 상호배타는
-              그대로 진짜 반대쌍(내부 row3↔4, WMA85 비교)에만 걸려있다(내부 번호 기준이라 위치가 바뀌어도
-              페어링 자체는 안 바뀜). */}
+              (하락추세, 셀/레드)가 이제 5번, 내부 row3(상승추세, 롱/라임)가 이제 6번. 체크박스 disabled
+              상호배타는 전부 뺐다(사용자 확인 - 그건 차트 아래 배지 표시용 로직 얘기였지, 체크박스
+              자체를 막을 필요는 없다고 함). 5,6번 조건(WMA85 비교)은 여전히 데이터상 동시에 참일 수
+              없지만, 체크(무장)는 사용자가 자유롭게 둘 다 할 수 있다. */}
           {/* "상태" 표시등 하나였던 걸 "준비"(배경 상태)+"진입"(그 상태에서 지금 크로스가 났는지) 두 개로
               세로로 나눔(사용자 요청) - 둘 다 평소엔 테두리만, 조건 맞으면 안쪽까지 채워짐(TwStatusDot 공용) */}
           {rowDef(6, { text: `3번: H1 < 1분중심\nH1 < H3\n${fmtTopBottom(h3, h1)}`, color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 6, () => toggleCheck(6),
@@ -3999,11 +4010,19 @@ export default function ReplayChart() {
             </div>,
             dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true))}
           {rowDef(4, { text: `5번: 하락추세\nWMA85 < 5분중심\n${fmtTopBottom(wma85, sma100)}`, color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 4, () => toggleCheck(4),
-            <TwStatusDot active={row4Sell} colorA={TW_STATUS_RED_A} colorB={TW_STATUS_RED_B} />,
-            dirBtn('SELL 🔴 매도', dir?.row === 4, () => pressDir(4, 'sell'), false), checked === 3)}
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
+              <TwStatusDot label="상태" active={row5State} colorA={TW_STATUS_RED_A} />
+              <TwStatusDot label="준비" active={row5Ready} colorA={TW_STATUS_RED_A} />
+              <TwStatusDot label="진입" active={row5Entry} colorA={TW_STATUS_RED_A} />
+            </div>,
+            dirBtn('SELL 🔴 매도', dir?.row === 4, () => pressDir(4, 'sell'), false))}
           {rowDef(3, { text: `6번: 상승추세\nWMA85 > 5분중심\n${fmtTopBottom(wma85, sma100)}`, color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 3, () => toggleCheck(3),
-            <TwStatusDot active={row3Buy} colorA={TW_STATUS_LIME_A} colorB={TW_STATUS_LIME_B} />,
-            dirBtn('BUY 🟢 매수', dir?.row === 3, () => pressDir(3, 'buy'), true), checked === 4)}
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
+              <TwStatusDot label="상태" active={row6State} colorA={TW_STATUS_LIME_A} />
+              <TwStatusDot label="준비" active={row6Ready} colorA={TW_STATUS_LIME_A} />
+              <TwStatusDot label="진입" active={row6Entry} colorA={TW_STATUS_LIME_A} />
+            </div>,
+            dirBtn('BUY 🟢 매수', dir?.row === 3, () => pressDir(3, 'buy'), true))}
         </CollapsibleCard>
 
         <button type="button" onClick={closeAllPositionsModal} style={{ width: '100%', marginTop: 10, background: '#FF5722', color: 'white', border: 'none', borderRadius: 5, padding: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>{bulkLabel}</button>
@@ -4015,8 +4034,8 @@ export default function ReplayChart() {
               {/* 라벨 번호를 위 반자동 예약 카드와 똑같이 화면 위치 기준으로 다시 붙였다(3↔4, 5↔6 자리
                   맞바꾼 것 반영). 본문 설명 내용은 안 건드림 - 번호만 교체. */}
               {[
-                checked === 1 && '1번: H1×H3 (매도 전용)\n   준비 - 가격이 5분볼린저(MA100 볼린저) 위에서 안쪽으로 재진입\n   진입 - 그 상태에서 H1×H3 데드크로스',
-                checked === 1.1 && '1-1번: H3×H5 (매수 전용)\n   준비 - 가격이 5분볼린저(MA100 볼린저) 아래에서 안쪽으로 재진입\n   진입 - 그 상태에서 H3×H5(H100) 골든크로스',
+                checked === 1 && '1번: H1×H3 (매도 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 위에서 안쪽으로 재진입\n   진입 - 그 상태에서 H1×H3 데드크로스',
+                checked === 1.1 && '1-1번: H3×H5 (매수 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 아래에서 안쪽으로 재진입\n   진입 - 그 상태에서 H3×H5(H100) 골든크로스',
                 checked === 2 && '2번: H3(HMA60) × 5분중심선(SMA100) 크로스',
                 checked === 6 && '3번: HMA20 < 1분 중심선(SMA20) (매도 전용)\n   준비 - HMA60<HMA100\n   진입 - 그 상태에서 HMA20 < 1분 중심선(SMA20) 데드크로스\n   청산 - HMA20×HMA60 골든크로스 (항상 감시)',
                 checked === 5 && '4번: HMA20 > 1분 중심선(SMA20) (매수 전용)\n   준비 - HMA60>HMA100\n   진입 - 그 상태에서 HMA20 > 1분 중심선(SMA20) 골든크로스\n   청산 - HMA20×HMA100 데드크로스 (항상 감시)',
