@@ -3926,13 +3926,12 @@ export default function ReplayChart() {
             style={{ flex: 1, height: 57, background: TW_LONG_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>BUY 🟢 매수</button>
         </div>
 
-        {/* 수동 매수/매도 버튼 바로 아래에 벌크 청산 하나 더(사용자 요청) - 아래쪽에도 이미 있는 것과
-            완전히 같은 함수(closeAllPositionsModal), 위치만 다르게 하나 더 둔 것. */}
-        <button type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
-          style={{
-            width: '100%', marginBottom: 8, background: '#FF5722', color: 'white', border: 'none', borderRadius: 5,
-            padding: 10, fontSize: 13.5, fontWeight: 700, cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
-          }}>🚨 벌크 청산</button>
+        {/* 수동 매수/매도 버튼 바로 아래에 벌크 청산 하나 더(사용자 요청) - 아래쪽에 원래 있던 것과
+            완전히 같은 함수(closeAllPositionsModal). 원래 버튼엔 disabled가 없는데 여기만 넣었던 게
+            불일치였음(사용자 지적) - 똑같이 disabled 없이 항상 눌리게 맞춤. */}
+        <button type="button" onClick={closeAllPositionsModal}
+          style={{ width: '100%', marginBottom: 8, background: '#FF5722', color: 'white', border: 'none', borderRadius: 5, padding: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}
+        >🚨 벌크 청산</button>
 
         <CollapsibleCard title="🎯 반자동 예약" maxWidth="none" defaultOpen={false}>
           {rowDef(1, { text: `1번: H1×H3\n${fmtTopBottom(h1, h3)}`, color: row1Color }, checked === 1, () => toggleCheck(1),
@@ -4161,13 +4160,13 @@ export default function ReplayChart() {
                   ? `${totalDollars >= 0 ? '+' : ''}$${totalDollars.toFixed(2)}`
                   : `${totalPoints >= 0 ? '+' : ''}${totalPoints.toFixed(2)}pt`}
               </span>
-              {/* 합계 옆에도 벌크 청산 바로가기(사용자 요청) - 아래 목록 끝에 있는 것과 완전히 같은 함수 */}
+              {/* 합계 옆에도 벌크 청산 바로가기(사용자 요청) - 아래 목록 끝에 있는 것과 완전히 같은 함수.
+                  disabled 없음(사용자 지적 - 다른 벌크청산 버튼들과 일관되게 항상 눌리게) */}
               <button
-                type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
+                type="button" onClick={closeAllPositionsModal}
                 style={{
                   width: 'auto', flexShrink: 0, fontSize: 11, padding: '5px 10px', borderRadius: 6, border: 'none',
-                  background: '#FF5722', color: '#fff', fontWeight: 700,
-                  cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
+                  background: '#FF5722', color: '#fff', fontWeight: 700, cursor: 'pointer',
                 }}
               >🚨 벌크 청산</button>
             </div>
@@ -4200,11 +4199,8 @@ export default function ReplayChart() {
           })
         )}
         <button
-          type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
-          style={{
-            width: '100%', marginTop: 10, background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
-            padding: '9px 16px', fontSize: 13, cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
-          }}
+          type="button" onClick={closeAllPositionsModal}
+          style={{ width: '100%', marginTop: 10, background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700, padding: '9px 16px', fontSize: 13, cursor: 'pointer' }}
         >🚨 벌크 청산</button>
       </div>
     </div>
@@ -5329,12 +5325,8 @@ export default function ReplayChart() {
                             : `${totalPoints >= 0 ? '+' : ''}${totalPoints.toFixed(2)}pt`}
                         </span>
                         <button
-                          type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
-                          style={{
-                            fontSize: 11, padding: '5px 10px', borderRadius: 6, border: 'none',
-                            background: '#FF5722', color: '#fff', fontWeight: 700,
-                            cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
-                          }}
+                          type="button" onClick={closeAllPositionsModal}
+                          style={{ fontSize: 11, padding: '5px 10px', borderRadius: 6, border: 'none', background: '#FF5722', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
                         >🚨 벌크 청산</button>
                       </div>
                     )
@@ -5366,11 +5358,8 @@ export default function ReplayChart() {
                     })
                   )}
                   <button
-                    type="button" onClick={closeAllPositionsModal} disabled={positions.length === 0}
-                    style={{
-                      width: '100%', marginTop: 10, background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
-                      padding: '9px 16px', fontSize: 13, cursor: positions.length === 0 ? 'not-allowed' : 'pointer', opacity: positions.length === 0 ? 0.5 : 1,
-                    }}
+                    type="button" onClick={closeAllPositionsModal}
+                    style={{ width: '100%', marginTop: 10, background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700, padding: '9px 16px', fontSize: 13, cursor: 'pointer' }}
                   >🚨 벌크 청산</button>
                 </div>
               )}
