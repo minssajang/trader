@@ -4078,7 +4078,7 @@ export default function ReplayChart() {
             title={`H1(HMA20)×${label.split('×')[1]} 골든크로스=숏 청산 / 데드크로스=롱 청산 - 무장 여부와 무관하게 항상 감시`}
             style={{
               flex: 1, padding: '8px 4px', fontSize: 12, fontWeight: 700, borderRadius: 5, cursor: 'pointer',
-              border: '1.5px solid #FF5722',
+              border: '1.5px solid white',
               background: twExitCrossPair === id ? 'white' : 'none',
               color: '#FF5722',
             }}
