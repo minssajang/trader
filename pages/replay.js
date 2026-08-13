@@ -664,6 +664,7 @@ const TW_MOVE_SL_OFF = '#BDBDBD', TW_MOVE_SL_ON = '#FF9800', TW_MOVE_SL_ON_HOVER
 //   가격 데이터만으로 결정되므로 전 구간을 한 번에 순차 계산 가능 - 아래 row1Armed 배열).
 function computeReservationSeries(fullRows) {
   const closes = fullRows.map(r => r.close)
+  const opens = fullRows.map(r => r.open) // 3,4번 진입(시가<S1/시가>S1)에 필요(사용자 요청)
   const h1 = rollingHMA(closes, 20)
   const h3 = rollingHMA(closes, 60)
   const h100 = rollingHMA(closes, 100)
@@ -693,7 +694,7 @@ function computeReservationSeries(fullRows) {
     row1Armed[i] = armed
   }
 
-  return { closes, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, stochGolden, row1Armed }
+  return { closes, opens, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, stochGolden, row1Armed }
 }
 
 // computeReservationSeries의 배열들을 훑어서 신호별 발생 이벤트를 dayRows 기준 idx(=i-startIdx)로
@@ -708,7 +709,7 @@ function computeReservationSeries(fullRows) {
 function computeReservationEvents(S, startIdx, endIdx) {
   const row1 = [], row2 = [], row3 = [], row4 = []
   const row5Entry = [], row5Exit = [], row6Entry = [], row6Exit = [], tp = []
-  const { h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, bbUp, bbLo, stochGolden, row1Armed, closes } = S
+  const { h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, bbUp, bbLo, stochGolden, row1Armed, closes, opens } = S
   for (let i = Math.max(1, startIdx); i < endIdx; i++) {
     const idx = i - startIdx
     // H1×H3 크로스 - 1번(매도)/6번 청산(항상 감시)/익절(tp) 공용
@@ -724,7 +725,7 @@ function computeReservationEvents(S, startIdx, endIdx) {
     if (h3[i - 1] != null && h100[i - 1] != null && h3[i] != null && h100[i] != null) {
       h3h100Golden = h3[i - 1] <= h100[i - 1] && h3[i] > h100[i]
     }
-    // H1×S20(1분중심) 크로스 - 3,4,5,6번 진입 트리거 공용
+    // H1×S20(1분중심) 크로스 - 5,6번 진입 트리거 공용
     let h1s20Golden = false, h1s20Dead = false
     if (h1[i - 1] != null && sma20_1m[i - 1] != null && h1[i] != null && sma20_1m[i] != null) {
       h1s20Golden = h1[i - 1] <= sma20_1m[i - 1] && h1[i] > sma20_1m[i]
@@ -735,10 +736,13 @@ function computeReservationEvents(S, startIdx, endIdx) {
     // 2번(매수): 5분볼린저 아래에서 재진입(무장) + H3×H100 골든크로스 + 주가>H3>H5(H100)(사용자 요청 추가)
     // (H1×H3 골든이 아님 - 사용자 지정)
     if (h3h100Golden && row1Armed[i] === 'below' && closes[i] > h3[i] && h3[i] > h100[i]) row1.push({ idx, side: 'buy' })
-    // 3번(매도): H3<5분중심(SMA100) 상태 + H1×S20 데드크로스
-    if (h3[i] != null && sma100[i] != null && h3[i] < sma100[i] && h1s20Dead) row2.push({ idx, side: 'sell' })
-    // 4번(매수): H3>5분중심(SMA100) 상태 + H1×S20 골든크로스
-    if (h3[i] != null && sma100[i] != null && h3[i] > sma100[i] && h1s20Golden) row2.push({ idx, side: 'buy' })
+    // 3번(매도): 주가<H1 & H1 하락중(준비) + 시가<S1/SMA20(진입) (사용자 요청 - 조건 전면 교체, 5,6번과
+    // 더는 크로스를 공유하지 않음)
+    if (closes[i] != null && h1[i] != null && h1[i - 1] != null && closes[i] < h1[i] && h1[i] < h1[i - 1] &&
+        opens[i] != null && sma20_1m[i] != null && opens[i] < sma20_1m[i]) row2.push({ idx, side: 'sell' })
+    // 4번(매수): 주가>H1 & H1 상승중(준비) + 시가>S1/SMA20(진입)
+    if (closes[i] != null && h1[i] != null && h1[i - 1] != null && closes[i] > h1[i] && h1[i] > h1[i - 1] &&
+        opens[i] != null && sma20_1m[i] != null && opens[i] > sma20_1m[i]) row2.push({ idx, side: 'buy' })
     // 7,8번: 상태 조건(WMA85 vs SMA100, 1분스토, 가격/HMA20, HMA300 방향)
     if (wma85[i] != null && sma100[i] != null && h1[i] != null && h1[i - 1] != null &&
         h300[i] != null && h300[i - 1] != null && stochGolden[i] != null) {
@@ -3806,6 +3810,7 @@ export default function ReplayChart() {
     const sma20 = seriesValAt('sma20_1m', i), sma100 = seriesValAt('sma100', i), wma85 = seriesValAt('wma85', i)
     const h300 = seriesValAt('h300', i), prevH300 = seriesValAt('h300', i, 1)
     const price = rowsRef.current[i - 1]?.close ?? null
+    const openPrice = rowsRef.current[i - 1]?.open ?? null
     const stochGolden = seriesValAt('stochGolden', i)
     const row1Armed = seriesValAt('row1Armed', i)
     const prevH1 = seriesValAt('h1', i, 1), prevH3 = seriesValAt('h3', i, 1), prevH100 = seriesValAt('h100', i, 1), prevSma20 = seriesValAt('sma20_1m', i, 1)
@@ -3813,8 +3818,8 @@ export default function ReplayChart() {
     const goldH1S20 = prevH1 != null && prevSma20 != null && h1 != null && sma20 != null && prevH1 <= prevSma20 && h1 > sma20
     if (row === 1) return row1Armed === 'above' && prevH1 != null && prevH3 != null && h1 != null && h3 != null && prevH1 >= prevH3 && h1 < h3 && price != null && price < h1
     if (row === 1.1) return row1Armed === 'below' && prevH3 != null && prevH100 != null && h3 != null && h100 != null && prevH3 <= prevH100 && h3 > h100 && price != null && price > h3
-    if (row === 2) return h3 != null && sma100 != null && h3 < sma100 && deadH1S20
-    if (row === 2.1) return h3 != null && sma100 != null && h3 > sma100 && goldH1S20
+    if (row === 2) return price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1 && openPrice != null && sma20 != null && openPrice < sma20
+    if (row === 2.1) return price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1 && openPrice != null && sma20 != null && openPrice > sma20
     if (row === 6) return h3 != null && h100 != null && h3 < h100 && deadH1S20
     if (row === 5) return h3 != null && h100 != null && h3 > h100 && goldH1S20
     if (row === 4) {
@@ -4010,13 +4015,13 @@ export default function ReplayChart() {
     const row3DeadCrossNow = prevH1 != null && prevSma20 != null && h1 != null && sma20 != null && prevH1 >= prevSma20 && h1 < sma20
     const row3Entry = row3Ready && row3DeadCrossNow
 
-    // 3번(매도 전용)/4번(매수 전용)도 같은 방식으로 분리(사용자 요청). 진입 크로스(H20×S20)는
-    // 5,6번과 완전히 같은 계산(row3DeadCrossNow/row4GoldenCrossNow)을 그대로 재사용 - 크로스 자체는
-    // 동일하고, 준비 상태(H3 vs 5분중심선)만 다르다.
-    const row2State = h3 != null && sma100 != null && h3 < sma100 // 3번 준비: H3(HMA60) < 5분중심선(SMA100)
-    const row2Entry = row2State && row3DeadCrossNow
-    const row2_1State = h3 != null && sma100 != null && h3 > sma100 // 4번 준비: H3(HMA60) > 5분중심선(SMA100)
-    const row2_1Entry = row2_1State && row4GoldenCrossNow
+    // 3번(매도 전용)/4번(매수 전용) 조건 전면 교체(사용자 요청) - 이전엔 5,6번과 크로스를 공유했지만,
+    // 이제 완전히 독립된 조건: 준비=주가 vs H1(HMA20) & H1 방향, 진입=시가(open) vs S1(SMA20).
+    const openPrice = playIndex > 0 ? rowsRef.current[playIndex - 1]?.open ?? null : null
+    const row2State = price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1 // 3번 준비: 주가<H1, H1 하락중
+    const row2Entry = row2State && openPrice != null && sma20 != null && openPrice < sma20 // 3번 진입: 시가<S1(SMA20)
+    const row2_1State = price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1 // 4번 준비: 주가>H1, H1 상승중
+    const row2_1Entry = row2_1State && openPrice != null && sma20 != null && openPrice > sma20 // 4번 진입: 시가>S1(SMA20)
 
     // 3,4,5,6번 "청산"(항상 감시, 무장 여부와 무관) 표시등 추가(사용자 요청). 3번/5번은 같은 청산
     // 조건(H1×H3 골든크로스), 4번/6번은 같은 청산 조건(H1×H100 데드크로스) - prevH1_1/prevH3_1/
@@ -4125,14 +4130,14 @@ export default function ReplayChart() {
             dirBtn('BUY 🟢 매수', dir?.row === 1.1, () => pressDir(1.1, 'buy'), true))}
           {/* 3번(셀 전용)/4번(롱 전용)으로 분리(사용자 요청) - 1,2번과 같은 방식, 진입 크로스는
               5,6번(H1×S20)과 완전히 동일한 계산을 재사용. 내부 체크/방향 상태 키는 그대로 2/2.1. */}
-          {rowDef(2, { text: `3번: H1 < 1분중심\nH3<5분중심\n${fmtTopBottom(h3, sma100)}`, color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 2, () => toggleCheck(2),
+          {rowDef(2, { text: `3번: 주가<H1\n시가<S1\n${fmtTopBottom(price, h1)}`, color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 2, () => toggleCheck(2),
             <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row2State} colorA={TW_STATUS_RED_A} />
               <TwStatusDot label="진입" active={row2Entry} colorA={TW_STATUS_RED_A} />
               <TwStatusDot label="청산" active={exitGoldenH1H3} colorA={TW_STATUS_RED_A} />
             </div>,
             dirBtn('SELL 🔴 매도', dir?.row === 2, () => pressDir(2, 'sell'), false))}
-          {rowDef(2.1, { text: `4번: H1 > 1분중심\nH3>5분중심\n${fmtTopBottom(h3, sma100)}`, color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 2.1, () => toggleCheck(2.1),
+          {rowDef(2.1, { text: `4번: 주가>H1\n시가>S1\n${fmtTopBottom(price, h1)}`, color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 2.1, () => toggleCheck(2.1),
             <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
               <TwStatusDot label="준비" active={row2_1State} colorA={TW_STATUS_LIME_A} />
               <TwStatusDot label="진입" active={row2_1Entry} colorA={TW_STATUS_LIME_A} />
@@ -4189,8 +4194,8 @@ export default function ReplayChart() {
               {[
                 checked === 1 && '1번: H1<H3 (매도 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 위에서 안쪽으로 재진입\n   진입 - 그 상태에서 H1<H3 데드크로스 & 주가<H1<H3',
                 checked === 1.1 && '2번: H3>H5 (매수 전용)\n   준비 - 가격이 5분볼린저(SMA100 볼린저) 아래에서 안쪽으로 재진입\n   진입 - 그 상태에서 H3>H5(H100) 골든크로스 & 주가>H3>H5',
-                checked === 2 && '3번: H3 < 5분중심선 (매도 전용)\n   준비 - H3(HMA60) < 5분중심선(SMA100)\n   진입 - 그 상태에서 HMA20 < 1분 중심선(SMA20) 데드크로스\n   청산 - HMA20>HMA60 골든크로스 (항상 감시)',
-                checked === 2.1 && '4번: H3 > 5분중심선 (매수 전용)\n   준비 - H3(HMA60) > 5분중심선(SMA100)\n   진입 - 그 상태에서 HMA20 > 1분 중심선(SMA20) 골든크로스\n   청산 - HMA20<HMA100 데드크로스 (항상 감시)',
+                checked === 2 && '3번: 주가<H1 (매도 전용)\n   준비 - 주가<H1(HMA20), H1 하락중\n   진입 - 시가<S1(SMA20)\n   청산 - HMA20>HMA60 골든크로스 (항상 감시)',
+                checked === 2.1 && '4번: 주가>H1 (매수 전용)\n   준비 - 주가>H1(HMA20), H1 상승중\n   진입 - 시가>S1(SMA20)\n   청산 - HMA20<HMA100 데드크로스 (항상 감시)',
                 checked === 6 && '5번: HMA20 < 1분 중심선(SMA20) (매도 전용)\n   준비 - HMA60<HMA100\n   진입 - 그 상태에서 HMA20 < 1분 중심선(SMA20) 데드크로스\n   청산 - HMA20>HMA60 골든크로스 (항상 감시)',
                 checked === 5 && '6번: HMA20 > 1분 중심선(SMA20) (매수 전용)\n   준비 - HMA60>HMA100\n   진입 - 그 상태에서 HMA20 > 1분 중심선(SMA20) 골든크로스\n   청산 - HMA20<HMA100 데드크로스 (항상 감시)',
                 checked === 4 && '7번: 하락추세 (매도 전용)\n   상태 - WMA85<5분중심\n   준비 - 가격<HMA20, HMA300 하락중\n   진입 - 1분스토 데드',
@@ -5307,6 +5312,7 @@ export default function ReplayChart() {
                   const stochGolden = twSeriesVal('stochGolden')
                   const row1Armed = twSeriesVal('row1Armed')
                   const price = playIndex > 0 ? rowsRef.current[playIndex - 1]?.close ?? null : null
+                  const prevH1 = twSeriesVal('h1', 1)
 
                   // "3롱/1셀"처럼 개수만 세면 어떤 번호가 롱인지 안 보인다는 지적(사용자) - 몇 번 신호가
                   // 롱인지/셀인지 번호 그대로 나열한다("1, 2, 3 롱" / "6 셀"). 번호는 분리매매창 반자동
@@ -5316,14 +5322,14 @@ export default function ReplayChart() {
                   // 8=8번(내부row3, 상승추세). 5↔6, 7↔8은 각각 같은 비교식의 반대 방향이라 절대 동시에
                   // 못 뜬다(5번은 원래 다른 변수쌍(H1 vs H3)을 잘못 쓰고 있던 걸 사용자 지적으로 발견해서
                   // row3Ready와 같은 식(H3 vs H100)으로 고쳤다 - 그전엔 5,6이 동시에 뜰 수 있었는데,
-                  // 그건 5번 쪽 조건이 잘못돼 있었기 때문이었다). 3↔4는 서로 다른 변수쌍(H3 vs 5분중심은
-                  // 같지만 크로스 트리거가 다름)이 아니라 그냥 반대 방향이라 이것도 동시엔 못 뜬다.
+                  // 그건 5번 쪽 조건이 잘못돼 있었기 때문이었다). 3↔4도 같은 변수쌍(주가 vs H1)의 반대
+                  // 방향이라(사용자 요청으로 조건 전면 교체 - 원래는 H3 vs 5분중심이었음) 동시엔 못 뜬다.
                   const longRows = [], shortRows = []
                   if (row1Armed === 'above') shortRows.push(1) // 1번(매도 전용): 준비 상태(위에서 재진입)
                   if (row1Armed === 'below') longRows.push(2) // 2번(매수 전용): 준비 상태(아래에서 재진입)
-                  // 3번(매도 전용)/4번(매수 전용) - 3번 준비: H3<5분중심선, 4번 준비: H3>5분중심선
-                  if (h3 != null && sma100 != null && h3 < sma100) shortRows.push(3)
-                  if (h3 != null && sma100 != null && h3 > sma100) longRows.push(4)
+                  // 3번(매도 전용)/4번(매수 전용) - 3번 준비: 주가<H1 & H1 하락중, 4번 준비: 주가>H1 & H1 상승중
+                  if (price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1) shortRows.push(3)
+                  if (price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1) longRows.push(4)
                   if (h3 != null && h100 != null && h3 < h100) shortRows.push(5) // 5번(화면 위치, 내부row6): H3 < H100(row3Ready)
                   if (h3 != null && h100 != null && h3 > h100) longRows.push(6) // 6번(화면 위치, 내부row5): H3 > H100
                   if (wma85 != null && sma100 != null && h1 != null && wma85 < sma100 && stochGolden === false && price != null && price < h1) shortRows.push(7) // 7번(화면 위치, 내부row4): 하락추세
