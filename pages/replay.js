@@ -4516,6 +4516,17 @@ export default function ReplayChart() {
           }}>✕</button>
       </div>
       <div style={{ padding: 14, overflowX: 'auto' }}>
+        {/* 진입 랏수/손절/목표 설정값 / 보유 포지션 개수를 맨 위에 요약(사용자 요청) - 지금 몇 랏으로
+            진입되는지, 손절/목표가 몇 포인트로 잡혀있는지(분리매매창 twSl/twTp와 동일한 설정), 포지션이
+            몇 개 열려있는지 버튼 누르기 전에 바로 보이게. */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 4, fontSize: 12, color: '#9aa0ab', flexWrap: 'wrap' }}>
+          <span>진입 랏수 <b style={{ color: '#e8eaed' }}>{lotSize}</b></span>
+          <span>포지션 <b style={{ color: positions.length > 0 ? '#4CAF50' : '#e8eaed' }}>{positions.length}</b>개</span>
+        </div>
+        <div style={{ display: 'flex', gap: 12, marginBottom: 10, fontSize: 12, color: '#9aa0ab', flexWrap: 'wrap' }}>
+          <span>손절 <b style={{ color: twUseSl ? '#F44336' : '#5a5f6a' }}>{twUseSl ? `${twSl}pt` : '미사용'}</b></span>
+          <span>목표 <b style={{ color: twUseTp ? '#4CAF50' : '#5a5f6a' }}>{twUseTp ? `${twTp}pt` : '미사용'}</b></span>
+        </div>
         {/* BUY/SELL도 여기서 바로(사용자 요청) - 메인 차트의 openPosition/lotSize 그대로 재사용 */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
           <button
@@ -5755,6 +5766,16 @@ export default function ReplayChart() {
                     <div style={{ fontSize: 13, fontWeight: 700 }}>매매진입 현황 {positions.length > 0 && `(${positions.length})`}</div>
                     <button type="button" onClick={() => setPositionPanelFloating(true)} title="떠다니는 패널로 분리"
                       style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 14, cursor: 'pointer', lineHeight: 1 }}>🗗</button>
+                  </div>
+                  {/* 진입 랏수/손절/목표 설정값 / 보유 포지션 개수를 맨 위에 요약(사용자 요청) - 위 떠다니는
+                      패널(renderPositionPanel)과 동일한 요약, twSl/twTp는 분리매매창 설정과 같은 값. */}
+                  <div style={{ display: 'flex', gap: 12, marginBottom: 4, fontSize: 12, color: '#9aa0ab', flexWrap: 'wrap' }}>
+                    <span>진입 랏수 <b style={{ color: '#e8eaed' }}>{lotSize}</b></span>
+                    <span>포지션 <b style={{ color: positions.length > 0 ? '#4CAF50' : '#e8eaed' }}>{positions.length}</b>개</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, marginBottom: 10, fontSize: 12, color: '#9aa0ab', flexWrap: 'wrap' }}>
+                    <span>손절 <b style={{ color: twUseSl ? '#F44336' : '#5a5f6a' }}>{twUseSl ? `${twSl}pt` : '미사용'}</b></span>
+                    <span>목표 <b style={{ color: twUseTp ? '#4CAF50' : '#5a5f6a' }}>{twUseTp ? `${twTp}pt` : '미사용'}</b></span>
                   </div>
                   {/* BUY/SELL도 여기서 바로(사용자 요청) */}
                   <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
