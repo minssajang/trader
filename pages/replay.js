@@ -4625,7 +4625,7 @@ export default function ReplayChart() {
         </header>
 
         <main style={{ maxWidth: 1500, margin: '0 auto', padding: '28px 20px 60px' }}>
-          <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>캔들 시뮬레이션 차트</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>백테스트 리플레이</h1>
           <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>달력에서 데이터가 있는 날짜를 골라서, 그날 시세를 순서대로 재생해볼 수 있어요.</p>
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>

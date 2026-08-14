@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createChart, CrosshairMode, CandlestickSeries, LineSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts'
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
-import { parseCandleCsv, toLocalDateStr, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
+import { parseCandleCsv, toLocalDateStr, toUnixSeconds, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
 import { BOLLINGER_BANDS, rollingBollinger, DONCHIAN_CHANNELS, rollingDonchian, MOVING_AVERAGES, MADRID_RIBBON, computeMA, rollingRSI, rollingMACD, rollingStochastic, rollingHMA, rollingWMA, rollingSMA } from '../lib/indicators'
 
 // 이평선 데이터 계산/토글 파이프라인(maDataRef/maSeriesRef/enabledMA 등)은 id로만 구분하므로
@@ -897,14 +897,15 @@ function PairSelect({ value, onChange, options, placeholder = '-' }) {
   )
 }
 
-// 다른 페이지 갔다가 돌아왔을 때(뒤로가기 등, 컴포넌트가 완전히 언마운트/리마운트됨) 심볼·선택한 날짜·
-// 재생 위치가 리셋되던 문제 - 탭을 닫기 전까진 유지되는 sessionStorage에 저장해두고 마운트 시 복원한다.
-// (새로고침에도 유지되길 원하면 localStorage로 바꾸면 되지만, 여긴 "이 세션 동안만" 기준으로 sessionStorage 사용)
-const REPLAY_STATE_KEY = 'replayChartState'
+// 다른 페이지 갔다가 돌아왔을 때(뒤로가기 등, 컴포넌트가 완전히 언마운트/리마운트됨) 심볼이 리셋되던
+// 문제 - 탭을 닫기 전까진 유지되는 sessionStorage에 저장해두고 마운트 시 복원한다. replay.js와 키를
+// 공유하면 같은 탭에서 리플레이↔라이브를 오가는 동안 서로의 세션(특히 날짜)을 잘못 복원하는 버그가
+// 있었다(실사용 중 발견 - 라이브 페이지가 리플레이의 마지막 날짜를 그대로 불러오려다 실패) - 그래서
+// 라이브 전용 키로 분리했다.
+const LIVE_STATE_KEY = 'liveChartState'
 // 지표/색상/굵기/모양 등 "차트 표시 설정" 전체는 localStorage에 저장(사용자 요청) - 새로고침은 물론
-// 브라우저를 완전히 닫았다 열어도 유지된다(위 REPLAY_STATE_KEY는 심볼/날짜/재생위치 같은 "지금 뭘
-// 보고 있었는지" 세션 복귀용이라 성격이 달라서 별도 키로 분리 유지).
-const REPLAY_SETTINGS_KEY = 'replayChartSettings'
+// 브라우저를 완전히 닫았다 열어도 유지된다. 위와 같은 이유로 replay.js와 다른 키를 쓴다.
+const LIVE_SETTINGS_KEY = 'liveChartSettings'
 
 export default function ReplayChart() {
   // 마운트 시 딱 한 번만 sessionStorage를 읽어서 ref에 담아둔다(렌더 중 계산이라 useEffect보다 먼저 값이 준비됨).
@@ -913,7 +914,7 @@ export default function ReplayChart() {
     restoreRef.current = null
     if (typeof window !== 'undefined') {
       try {
-        const raw = window.sessionStorage.getItem(REPLAY_STATE_KEY)
+        const raw = window.sessionStorage.getItem(LIVE_STATE_KEY)
         if (raw) restoreRef.current = JSON.parse(raw)
       } catch { /* 저장된 값이 깨져있으면 그냥 무시하고 기본값으로 시작 */ }
     }
@@ -925,7 +926,7 @@ export default function ReplayChart() {
     settingsRestoreRef.current = null
     if (typeof window !== 'undefined') {
       try {
-        const raw = window.localStorage.getItem(REPLAY_SETTINGS_KEY)
+        const raw = window.localStorage.getItem(LIVE_SETTINGS_KEY)
         if (raw) settingsRestoreRef.current = JSON.parse(raw)
       } catch { /* 저장된 값이 깨져있으면 무시하고 기본값으로 시작 */ }
     }
@@ -941,6 +942,9 @@ export default function ReplayChart() {
   // 브로커 서머타임 여부 - 겨울엔 서버시간이 1시간 밀려서(EEST→EET) 한국시간 환산 오프셋이 6→7시간으로 바뀐다.
   // 자동판별할 방법이 없어서 버튼으로 직접 전환하게 함(기본값: 서머타임 켜짐)
   const [summerTime, setSummerTime] = useState(true)
+  // 라이브 폴링 setInterval 클로저 안에서 최신 summerTime을 읽으려면 ref 미러링이 필요하다(symbolRef와 같은 이유).
+  const summerTimeRef = useRef(true)
+  useEffect(() => { summerTimeRef.current = summerTime }, [summerTime])
   const [datasets, setDatasets] = useState([])
   const [viewDate, setViewDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState('')
@@ -1174,6 +1178,13 @@ export default function ReplayChart() {
   const sessionBandRefs = useRef({})         // sessionId -> BackgroundBandsPrimitive 인스턴스
   const sessionSegmentsRef = useRef({})      // sessionId -> [{startIdx,endIdx,startTime,endTime}]
   const rowsRef = useRef([])
+  // 라이브 폴링 상태 - liveRowsRef는 이 심볼로 지금까지 받은 캔들 전체(변환된 {id,time,open,high,low,close}),
+  // liveLastIdRef는 폴링 커서(마지막으로 받은 id). 진행 중인 캔들은 EA가 같은 id로 계속 upsert하므로,
+  // 매 폴링마다 커서를 1 낮춰서 요청해 그 캔들의 최신 갱신도 놓치지 않는다(pollLiveOnce 참고).
+  const liveRowsRef = useRef([])
+  const liveLastIdRef = useRef(0)
+  const livePollTimerRef = useRef(null)
+  const [liveStatus, setLiveStatus] = useState('connecting') // 'connecting' | 'live' | 'error'
   const intervalRef = useRef(null)
   const nextCandleAtRef = useRef(0)   // 다음 캔들이 그려질 예정 시각(Date.now() 기준 ms) - 캔들 타이머 표시용
   const timerTickRef = useRef(null)   // 캔들 타이머 숫자를 화면에 부드럽게 카운트다운시키는 별도의 짧은 인터벌
@@ -1240,23 +1251,15 @@ export default function ReplayChart() {
     return colors
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedTradeCount, uploadedTradeFile])
-  // 심볼 바뀌면 그 심볼의 데이터셋 목록을 불러온다
+  // 심볼이 바뀌면 그 심볼의 라이브 폴링을 새로 시작한다(과거 CSV 날짜 목록을 불러오던 로직은 라이브
+  // 페이지엔 안 맞아서 제거 - 대신 아래 startLivePolling이 /api/live-price를 폴링한다).
   useEffect(() => {
-    // 심볼을 빠르게 연속 전환하면(예: 골드→나스닥) 두 fetch가 동시에 날아가고, 먼저 보낸
-    // 쪽(골드)의 응답이 네트워크 지연으로 나스닥 응답보다 "나중에" 도착할 수 있다.
-    // ignore 플래그 없이 그대로 setDatasets를 부르면, 이미 나스닥으로 전환된 화면에
-    // 뒤늦게 도착한 골드 목록이 덮어써서 "나스닥을 선택해도 반영이 안 되는" 것처럼 보이는
-    // 버그가 생긴다. cleanup에서 ignore를 true로 만들어 그 시점 이후의 setState를 막는다.
-    let ignore = false
     stopPlayback()
-    setSelectedDate('')
-    setSelectedDateTo('')
-    rangeAnchorRef.current = ''
     setError('')
     rowsRef.current = []
     indexRef.current = 0
     drawnUpToRef.current = 0 // 새 데이터 로드 시 "실제로 그려진 지점"도 반드시 같이 리셋 - 안 하면 이전
-    // 날짜에서 남은 값이 새 날짜의 캔들 인덱스와 안 맞아서 update() 크래시로 이어졌다(실사용 중 재현됨).
+    // 심볼에서 남은 값이 새 심볼의 캔들 인덱스와 안 맞아서 update() 크래시로 이어졌다(실사용 중 재현됨).
     setPlayIndex(0)
     setTotal(0)
     setBluePos(0)
@@ -1288,34 +1291,11 @@ export default function ReplayChart() {
     markersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
     setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
-    fetch(`/api/backtest-datasets-public?symbol=${symbol}`)
-      .then(r => r.json())
-      .then(async d => {
-        if (ignore) return
-        const rows = d.rows || []
-        setDatasets(rows)
-        // 데이터가 있는 가장 최근 달을 기본으로 보여준다
-        const latest = rows.reduce((max, r) => (r.date_to && r.date_to > max ? r.date_to : max), '')
-        if (latest) {
-          const [y, m] = latest.split('-').map(Number)
-          setViewDate(new Date(y, m - 1, 1))
-        }
-        // 세션 복원 - 마운트 직후 딱 한 번만, 저장된 심볼이 지금 심볼과 같을 때만 그 날짜/재생위치를 이어서 불러온다
-        if (!hasAutoRestoredRef.current) {
-          hasAutoRestoredRef.current = true
-          const saved = restoreRef.current
-          if (saved && saved.symbol === symbol && saved.selectedDate) {
-            const [y2, m2] = saved.selectedDate.split('-').map(Number)
-            if (!Number.isNaN(y2) && !Number.isNaN(m2)) setViewDate(new Date(y2, m2 - 1, 1))
-            await loadRange(saved.selectedDate, saved.selectedDateTo || saved.selectedDate, rows)
-            if (!ignore && typeof saved.playIndex === 'number' && saved.playIndex > 0) {
-              applyIndex(Math.min(saved.playIndex, rowsRef.current.length))
-            }
-          }
-        }
-      })
-      .catch(() => { if (!ignore) setDatasets([]) })
-    return () => { ignore = true }
+    startLivePolling(symbol)
+    return () => {
+      if (livePollTimerRef.current) clearInterval(livePollTimerRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol])
 
   // 스토캐스틱 pane이 메인 캔들 pane의 6분의 1 높이가 되도록 비율 고정(사용자 요청 - 스토캐스틱이 너무 높았음)
@@ -2436,6 +2416,61 @@ export default function ReplayChart() {
 
   const loadDate = (dateStr) => loadRange(dateStr, dateStr)
 
+  // ── 라이브 폴링 ──────────────────────────────────────────────────────────
+  // 과거 CSV를 날짜로 골라 불러오던 위 loadRange/loadDate 대신, 라이브 페이지는 /api/live-price를
+  // 초기 1회 전체 조회 + 주기적 폴링으로 계속 이어붙인다. computeIndicatorsForRange/applyIndex는
+  // "fullRows 전체를 그 구간 그대로 보여준다"는 동작이 그대로 맞아떨어져서 손대지 않고 재사용한다 -
+  // fromStr/toStr을 항상 liveRowsRef 전체의 첫/마지막 날짜로 주면 "날짜 필터"가 사실상 전체 통과가 된다.
+  const LIVE_POLL_MS = 3000
+
+  const refreshLiveChart = () => {
+    const fullRows = liveRowsRef.current
+    if (!fullRows.length) return
+    const fromStr = toLocalDateStr(fullRows[0].time)
+    const toStr = toLocalDateStr(fullRows[fullRows.length - 1].time)
+    const dayRows = computeIndicatorsForRange(fullRows, fromStr, toStr)
+    if (uploadedTradesRef.current.length > 0) recomputeUploadedTradeMarkers()
+    applyIndex(dayRows.length)
+  }
+
+  const pollLiveOnce = async (sym) => {
+    try {
+      const sinceId = Math.max(0, liveLastIdRef.current - 1) // 진행 중인 캔들의 최신 갱신도 받기 위해 1 낮춰서 요청
+      const res = await fetch(`/api/live-price?symbol=${sym}&sinceId=${sinceId}`)
+      if (!res.ok) throw new Error(`API 오류(${res.status})`)
+      const data = await res.json()
+      if (sym !== symbolRef.current) return // 응답 오는 사이 심볼이 바뀌었으면 버림
+      const incoming = data.rows || []
+      if (incoming.length > 0) {
+        const offsetSeconds = summerTimeRef.current ? BROKER_OFFSET_SECONDS.summer : BROKER_OFFSET_SECONDS.winter
+        const byId = new Map(liveRowsRef.current.map(r => [r.id, r]))
+        for (const r of incoming) {
+          byId.set(r.id, {
+            id: r.id,
+            time: toUnixSeconds(r.date, r.time, offsetSeconds),
+            open: r.open, high: r.high, low: r.low, close: r.close,
+          })
+          if (r.id > liveLastIdRef.current) liveLastIdRef.current = r.id
+        }
+        liveRowsRef.current = Array.from(byId.values()).sort((a, b) => a.time - b.time)
+        refreshLiveChart()
+      }
+      setLiveStatus('live')
+    } catch {
+      setLiveStatus('error')
+    }
+  }
+
+  // 심볼이 바뀌거나 페이지를 뜰 때 호출 - 그 심볼의 폴링을 새로 시작한다(이전 심볼의 폴링/버퍼는 정리).
+  const startLivePolling = (sym) => {
+    if (livePollTimerRef.current) clearInterval(livePollTimerRef.current)
+    liveRowsRef.current = []
+    liveLastIdRef.current = 0
+    setLiveStatus('connecting')
+    pollLiveOnce(sym)
+    livePollTimerRef.current = setInterval(() => pollLiveOnce(symbolRef.current), LIVE_POLL_MS)
+  }
+
   // 매매내역 CSV 업로드 - 파일 하나를 고르면 그걸로 통째로 교체(여러 개 겹쳐 올리는 기능 아님).
   // 클릭 선택(input onChange)과 드래그앤드롭이 공유하는 실제 처리 로직
   const processTradeCsvFile = async (file) => {
@@ -2558,29 +2593,33 @@ export default function ReplayChart() {
 
   const toggleSummerTime = () => setSummerTime(prev => !prev)
 
-  // 서머타임 상태가 바뀌면 캐시된 rows엔 예전 오프셋이 이미 반영돼 있어서 그대로 두면 안 바뀐다.
-  // 캐시를 통째로 비우고, 지금 보고 있던 날짜가 있으면 새 오프셋으로 다시 불러온다.
-  // (setSummerTime 콜백 안에서 바로 loadDate를 부르면 summerTime이 아직 안 바뀐 값이라 한 번 밀리므로 effect로 분리)
+  // 서머타임 상태가 바뀌면 liveRowsRef에 이미 변환해둔 time엔 예전 오프셋이 반영돼 있어서 그대로 두면
+  // 안 바뀐다 - 원본 브로커 date/time 문자열은 따로 안 들고 있으므로, 폴링을 새로 시작해서(sinceId=0부터)
+  // 새 오프셋으로 처음부터 다시 변환한다(라이브 세션 데이터라 다시 받아도 가벼움).
+  // (setSummerTime 콜백 안에서 바로 부르면 summerTime이 아직 안 바뀐 값이라 한 번 밀리므로 effect로 분리)
+  const summerTimeMountedRef = useRef(false)
   useEffect(() => {
-    datasetCacheRef.current = {}
-    if (selectedDate) loadRange(selectedDate, selectedDateTo || selectedDate)
+    if (!summerTimeMountedRef.current) { summerTimeMountedRef.current = true; return } // 마운트 시엔 심볼 effect가 이미 폴링을 시작하므로 중복 호출 방지
+    startLivePolling(symbolRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summerTime])
 
-  // 심볼/날짜/재생위치가 바뀔 때마다 sessionStorage에 저장 - 다른 페이지 갔다가 돌아와도 이어서 볼 수 있게.
+  // candleVisible이 바뀔 때마다 sessionStorage에 저장 - 다른 페이지 갔다가 돌아와도 유지되게(마운트 시
+  // restoreRef가 읽어서 복원). 라이브는 항상 골드로 시작하고(사용자 요청) 날짜/재생위치 개념이 없어서
+  // replay.js와 달리 candleVisible 하나만 저장한다.
   useEffect(() => {
     if (typeof window === 'undefined') return
     try {
-      window.sessionStorage.setItem(REPLAY_STATE_KEY, JSON.stringify({ symbol, selectedDate, selectedDateTo, playIndex, candleVisible }))
+      window.sessionStorage.setItem(LIVE_STATE_KEY, JSON.stringify({ candleVisible }))
     } catch { /* 저장 실패해도(예: 프라이빗 모드 용량제한) 기능엔 영향 없음 - 그냥 다음번엔 복원 안 될 뿐 */ }
-  }, [symbol, selectedDate, selectedDateTo, playIndex, candleVisible])
+  }, [candleVisible])
 
   // 차트 표시 설정(체크박스/색상/두께/시간/투명도/모양/크기/슬롯 선택 전부) 저장 - localStorage라 브라우저를
-  // 완전히 닫았다 열어도 유지된다. "초기화" 버튼을 눌렀을 때만 REPLAY_SETTINGS_KEY를 지우고 새로고침한다.
+  // 완전히 닫았다 열어도 유지된다. "초기화" 버튼을 눌렀을 때만 LIVE_SETTINGS_KEY를 지우고 새로고침한다.
   useEffect(() => {
     if (typeof window === 'undefined') return
     try {
-      window.localStorage.setItem(REPLAY_SETTINGS_KEY, JSON.stringify({
+      window.localStorage.setItem(LIVE_SETTINGS_KEY, JSON.stringify({
         enabledBands, lineVisibility, bandColors,
         enabledMA, maColors, maWidths, maUpColors, maDownColors,
         ribbonEnabled, ribbonOpacity,
@@ -2622,16 +2661,9 @@ export default function ReplayChart() {
   // 새로고침으로 기존 마운트 로직이 처음부터 다시 실행되게 하는 쪽이 훨씬 안전하다)
   const resetChartSettings = () => {
     if (typeof window === 'undefined') return
-    if (!window.confirm('차트 설정을 전부 기본값으로 초기화할까요? (심볼/재생위치는 유지되고, 날짜는 오늘로 돌아갑니다)')) return
+    if (!window.confirm('차트 설정을 전부 기본값으로 초기화할까요? (심볼은 유지되고, 라이브 데이터는 새로 다시 불러옵니다)')) return
     try {
-      window.localStorage.removeItem(REPLAY_SETTINGS_KEY)
-      // 날짜도 초기화(사용자 요청) - 세션 복원값 중 날짜/재생위치만 오늘/0으로 덮어써서, 새로고침 후
-      // 마운트 시 세션 복원 로직이 오늘 날짜를 자동으로 불러오게 한다(심볼은 그대로 유지).
-      const raw = window.sessionStorage.getItem(REPLAY_STATE_KEY)
-      const prev = raw ? JSON.parse(raw) : {}
-      window.sessionStorage.setItem(REPLAY_STATE_KEY, JSON.stringify({
-        ...prev, selectedDate: toLocalDateStr(Math.floor(Date.now() / 1000)), selectedDateTo: '', playIndex: 0,
-      }))
+      window.localStorage.removeItem(LIVE_SETTINGS_KEY)
     } catch { /* ignore */ }
     window.location.reload()
   }
@@ -4625,11 +4657,11 @@ export default function ReplayChart() {
         </header>
 
         <main style={{ maxWidth: 1500, margin: '0 auto', padding: '28px 20px 60px' }}>
-          <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>캔들 시뮬레이션 차트</h1>
-          <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>달력에서 데이터가 있는 날짜를 골라서, 그날 시세를 순서대로 재생해볼 수 있어요.</p>
+          <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>실시간 차트</h1>
+          <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>MT5에 붙여둔 EA가 보내는 시세를 그대로 이어서 보여드려요.</p>
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-            {/* 왼쪽 컬럼: 심볼버튼 / 달력 / 볼린저 리스트가 서로 붙어서 쌓인다 (오른쪽 차트 높이랑 무관하게) */}
+            {/* 왼쪽 컬럼: 심볼버튼 / 지표 설정 카드들이 서로 붙어서 쌓인다 (오른쪽 차트 높이랑 무관하게) */}
             <div style={{ width: 170, display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
@@ -5273,17 +5305,14 @@ export default function ReplayChart() {
                 사라지지 않게 뷰포트 높이에 sticky로 고정하고, 자체 높이가 화면보다 크면 내부에서만 스크롤되게 함 */}
             <div style={{ flex: 1, minWidth: 280, position: 'sticky', top: 20, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto', overflowX: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', minHeight: 38 }}>
-                {!selectedDate && <div style={{ color: '#9aa0ab', fontSize: 13 }}>왼쪽 달력에서 초록색으로 표시된 날짜를 눌러보세요.</div>}
-                {selectedDate && (
-                  <div style={{ color: '#e8eaed', fontSize: 14, fontWeight: 700 }}>
-                    {selectedDateTo ? `${selectedDate} ~ ${selectedDateTo}` : selectedDate}
-                    {multiSelectMode && !selectedDateTo && rangeAnchorRef.current && (
-                      <span style={{ color: '#9aa0ab', fontWeight: 400, fontSize: 12, marginLeft: 8 }}>끝 날짜를 눌러주세요</span>
-                    )}
+                {liveStatus === 'connecting' && <div style={{ color: '#9aa0ab', fontSize: 13 }}>⏳ 연결 중...</div>}
+                {liveStatus === 'live' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4CAF50', fontSize: 13, fontWeight: 700 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4CAF50', display: 'inline-block', flexShrink: 0 }} />
+                    실시간 연결됨{total ? ` · 캔들 ${total}개` : ' · 첫 캔들 대기 중'}
                   </div>
                 )}
-                {error && <div style={{ color: '#F44336', fontSize: 13, marginLeft: 12 }}>❌ {error}</div>}
-                {loadingCsv && <div style={{ color: '#9aa0ab', fontSize: 13, marginLeft: 12 }}>불러오는 중...</div>}
+                {liveStatus === 'error' && <div style={{ color: '#F44336', fontSize: 13 }}>❌ 서버 연결 실패 - 잠시 후 자동으로 다시 시도합니다</div>}
                 <button
                   type="button"
                   onClick={toggleSummerTime}
@@ -5417,12 +5446,7 @@ export default function ReplayChart() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
-                <span style={{ color: '#9aa0ab', fontSize: 13 }}>{playIndex.toLocaleString()} / {total.toLocaleString()}봉</span>
-                {selectedDate && (
-                  <span style={{ color: '#e8eaed', fontSize: 13, fontWeight: 700 }}>
-                    {selectedDateTo ? `${selectedDate} ~ ${selectedDateTo}` : selectedDate}
-                  </span>
-                )}
+                <span style={{ color: '#9aa0ab', fontSize: 13 }}>총 {total.toLocaleString()}봉</span>
               </div>
               {/* 라이브 페이지는 재생 개념이 없어서(사용자 요청) 빨간 바/파란 바/재생·처음부터/배속
                   버튼을 전부 뺐다 - 스샷 버튼만 남김. */}
