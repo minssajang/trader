@@ -1184,7 +1184,11 @@ export default function ReplayChart() {
   const liveRowsRef = useRef([])
   const liveLastIdRef = useRef(0)
   const livePollTimerRef = useRef(null)
-  const [liveStatus, setLiveStatus] = useState('connecting') // 'connecting' | 'live' | 'error'
+  // EA가 멈춰도 폴링 요청 자체는 계속 200으로 성공해서 "연결됨"으로 보이는 문제가 있었다(사용자 지적 -
+  // 자동매매가 꺼져서 EA가 멈췄는데도 페이지는 계속 초록불이었음) - 요청 성공 여부 대신 "마지막 캔들의
+  // 실제 시각이 지금과 얼마나 벌어졌는지"로 끊김을 감지한다(pollLiveOnce 참고).
+  const [liveStatus, setLiveStatus] = useState('connecting') // 'connecting' | 'live' | 'stale' | 'error'
+  const [liveStaleSec, setLiveStaleSec] = useState(0)
   const intervalRef = useRef(null)
   const nextCandleAtRef = useRef(0)   // 다음 캔들이 그려질 예정 시각(Date.now() 기준 ms) - 캔들 타이머 표시용
   const timerTickRef = useRef(null)   // 캔들 타이머 숫자를 화면에 부드럽게 카운트다운시키는 별도의 짧은 인터벌
@@ -2452,6 +2456,8 @@ export default function ReplayChart() {
     liveRowsRef.current = Array.from(byId.values()).sort((a, b) => a.time - b.time)
   }
 
+  const LIVE_STALE_SEC = 90 // 마지막 캔들 시각이 지금으로부터 이만큼(초) 넘게 지나면 "끊김"으로 본다(M1이라 정상이면 60초 안쪽)
+
   const pollLiveOnce = async (sym) => {
     try {
       const sinceId = Math.max(0, liveLastIdRef.current - 1) // 진행 중인 캔들의 최신 갱신도 받기 위해 1 낮춰서 요청
@@ -2464,7 +2470,18 @@ export default function ReplayChart() {
         mergeLiveRows(incoming)
         refreshLiveChart()
       }
-      setLiveStatus('live')
+      // 폴링 요청 자체는 계속 200으로 성공해도(위 incoming엔 항상 마지막으로 알던 캔들이 다시 잡힘 -
+      // sinceId를 1 낮춰서 요청하기 때문), EA가 멈추면 그 캔들 내용이 그대로 멈춰있게 된다 - 그래서
+      // "요청 성공 여부"가 아니라 "마지막 캔들의 실제 시각이 지금과 얼마나 벌어졌는지"로 판단한다.
+      const rows = liveRowsRef.current
+      const lastBarTime = rows.length ? rows[rows.length - 1].time : null
+      const ageSec = lastBarTime != null ? Math.floor(Date.now() / 1000) - lastBarTime : Infinity
+      if (lastBarTime != null && ageSec > LIVE_STALE_SEC) {
+        setLiveStatus('stale')
+        setLiveStaleSec(ageSec)
+      } else {
+        setLiveStatus('live')
+      }
     } catch {
       setLiveStatus('error')
     }
@@ -5311,6 +5328,12 @@ export default function ReplayChart() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4CAF50', fontSize: 13, fontWeight: 700 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4CAF50', display: 'inline-block', flexShrink: 0 }} />
                     실시간 연결됨{total ? ` · 캔들 ${total}개` : ' · 첫 캔들 대기 중'}
+                  </div>
+                )}
+                {liveStatus === 'stale' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#FF9800', fontSize: 13, fontWeight: 700 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#FF9800', display: 'inline-block', flexShrink: 0 }} />
+                    ⚠ 데이터 끊김 - 마지막 캔들 {liveStaleSec}초 전(MT5 EA/자동매매 상태 확인해주세요)
                   </div>
                 )}
                 {liveStatus === 'error' && <div style={{ color: '#F44336', fontSize: 13 }}>❌ 서버 연결 실패 - 잠시 후 자동으로 다시 시도합니다</div>}
