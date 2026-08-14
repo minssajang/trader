@@ -1196,10 +1196,14 @@ export default function ReplayChart() {
   const sessionSegmentsRef = useRef({})      // sessionId -> [{startIdx,endIdx,startTime,endTime}]
   const rowsRef = useRef([])
   // 라이브 폴링 상태 - liveRowsRef는 이 심볼로 지금까지 받은 캔들 전체(변환된 {id,time,open,high,low,close}),
-  // liveLastIdRef는 폴링 커서(마지막으로 받은 id). 진행 중인 캔들은 EA가 같은 id로 계속 upsert하므로,
-  // 매 폴링마다 커서를 1 낮춰서 요청해 그 캔들의 최신 갱신도 놓치지 않는다(pollLiveOnce 참고).
+  // liveLastCursorRef는 폴링 커서(마지막으로 받은 캔들의 실제 시각 {date,time} - bar_date/bar_time 원본
+  // 문자열 그대로). 예전엔 id(auto increment)를 커서로 썼는데, 진행 중인 캔들을 EA가 500ms마다 같은
+  // 행에 upsert해도 Postgres 시퀀스는 매번 소모돼서 id가 실제 캔들 수보다 훨씬 빨리 늘어나 최근 구간
+  // 페이징이 극도로 느려지는 문제가 있었다(사용자가 직접 API를 수백 번 두드려 확인) - bar_date/bar_time
+  // 자체를 커서로 쓰면 진짜 캔들 개수에 정확히 비례해서 늘어나므로 이 문제가 없다. sinceTime과 "같은"
+  // 시각도 포함해서(>=) 요청해 그 캔들의 최신 갱신도 놓치지 않는다(pollLiveOnce 참고).
   const liveRowsRef = useRef([])
-  const liveLastIdRef = useRef(0)
+  const liveLastCursorRef = useRef(null) // {date, time} | null(아직 아무것도 못 받음)
   const livePollTimerRef = useRef(null)
   const liveRealtimeChannelRef = useRef(null) // Supabase Realtime 구독 채널 - 폴링 대신 DB 변경을 즉시 밀어받는 용도
   const hasLiveCenteredRef = useRef(false) // 새로고침/심볼전환 후 카메라를 딱 한 번만 중앙 정렬하기 위한 플래그
@@ -2524,13 +2528,18 @@ export default function ReplayChart() {
   const mergeLiveRows = (incoming) => {
     const offsetSeconds = summerTimeRef.current ? BROKER_OFFSET_SECONDS.summer : BROKER_OFFSET_SECONDS.winter
     const byId = new Map(liveRowsRef.current.map(r => [r.id, r]))
+    // bar_date/bar_time은 자릿수 고정 텍스트라 문자열 비교(> )가 시간순 비교와 정확히 일치한다.
+    const isNewer = (d, t) => {
+      const cur = liveLastCursorRef.current
+      return !cur || d > cur.date || (d === cur.date && t >= cur.time)
+    }
     for (const r of incoming) {
       byId.set(r.id, {
         id: r.id,
         time: toUnixSeconds(r.date, r.time, offsetSeconds),
         open: r.open, high: r.high, low: r.low, close: r.close,
       })
-      if (r.id > liveLastIdRef.current) liveLastIdRef.current = r.id
+      if (isNewer(r.date, r.time)) liveLastCursorRef.current = { date: r.date, time: r.time }
     }
     let merged = Array.from(byId.values()).sort((a, b) => a.time - b.time)
     if (merged.length > LIVE_ROWS_MAX) merged = merged.slice(-LIVE_ROWS_MAX)
@@ -2559,23 +2568,34 @@ export default function ReplayChart() {
   // Realtime(웹소켓)이 탭 백그라운드/절전모드 등으로 조용히 끊기면, 그동안 서버엔 계속 정상으로
   // 쌓이는데 브라우저만 놓친다 - 돌아왔을 때 밀린 게 한 번의 요청으로 못 받을 만큼 많으면, "옛날 값 →
   // 뚝 끊기고 → 훨씬 나중 값"으로 튀어 보이는 버그가 있었다(사용자가 실제로 겪음 - 서버 데이터 자체는
-  // 끊김 없었다고 직접 확인함). 그래서 원래는 응답 개수가 pages/api/live-price.js의 .limit(5000)에
-  // 꽉 찼는지로 "더 밀렸는지"를 판단했는데, Supabase(PostgREST)가 프로젝트 기본 max-rows 설정 때문에
-  // 코드가 요청한 5000과 무관하게 응답을 훨씬 적게(관찰상 1000개) 자르고 있었다 - 그래서 실제로는
-  // 수천 개가 더 남아있어도 "1000<5000이니 다 받았다"고 오판하고 첫 페이지에서 멈춰버렸다(=지표 워밍업
-  // 데이터가 통째로 부족해지는 원인, 사용자 지적). 서버가 실제로 몇 개까지 자르는지 코드가 알 필요가
-  // 없도록, "빈 응답이 올 때까지" 반복하는 방식으로 바꿔서 이 문제 자체를 없앤다.
+  // 끊김 없었다고 직접 확인함). 처음엔 sinceId(auto increment) 기준으로 "응답이 꽉 찼으면 더 있다"고
+  // 판단했는데 두 가지 문제가 겹쳐 있었다: (1) Supabase가 코드의 .limit(5000)과 무관하게 실제로는
+  // 1000개로 응답을 잘라서, "1000<5000이니 다 받았다"고 오판하고 첫 페이지에서 멈춰버림, (2) id는 EA가
+  // 진행 중인 캔들을 500ms마다 같은 행에 upsert해도 Postgres 시퀀스가 매번 소모돼서 실제 캔들 수보다
+  // 훨씬 빨리 늘어나 - "빈 응답 올 때까지 반복"으로 고쳐도, 최근 구간은 id가 텅 비어서 새 캔들 1개
+  // 받는 데 요청 수십~수백 번이 걸리는 새 문제가 생겼다(전부 사용자가 직접 API로 검증).
+  // 근본 원인은 "id를 커서로 쓴 것" 자체였다 - pages/api/live-price.js를 sinceDate/sinceTime(캔들의
+  // 실제 시각, bar_date/bar_time) 커서로 바꿔서, 진짜 캔들 개수에 정확히 비례해 진행되게 했다. 이제는
+  // 안전하게 "빈 응답이 올 때까지" 반복해도 된다(대량 백필 기준으로도 충분한 guard만 걸어둠).
   const pollLiveOnce = async (sym) => {
     try {
-      for (let guard = 0; guard < 200; guard++) { // 무한루프 방지용 안전장치(사실상 도달 안 함)
-        const sinceId = Math.max(0, liveLastIdRef.current - 1) // 진행 중인 캔들의 최신 갱신도 받기 위해 1 낮춰서 요청
-        const res = await fetch(`/api/live-price?symbol=${sym}&sinceId=${sinceId}`)
+      for (let guard = 0; guard < 50; guard++) { // 대량 백필(수천 개)도 페이지당 1000개면 몇 페이지면 끝남 - 넉넉한 여유
+        const cur = liveLastCursorRef.current
+        const qs = cur
+          ? `symbol=${sym}&sinceDate=${encodeURIComponent(cur.date)}&sinceTime=${encodeURIComponent(cur.time)}`
+          : `symbol=${sym}`
+        const res = await fetch(`/api/live-price?${qs}`)
         if (!res.ok) throw new Error(`API 오류(${res.status})`)
         const data = await res.json()
         if (sym !== symbolRef.current) return // 응답 오는 사이 심볼이 바뀌었으면 버림
         const incoming = data.rows || []
-        if (incoming.length === 0) break // 빈 응답이 온 시점이 진짜로 다 받은 것
+        if (incoming.length === 0) break // (cur가 null인 첫 요청만 해당 - 데이터가 아예 없는 경우)
+        // sinceTime을 >=로 요청해서 마지막으로 받은 캔들 자기 자신은 매번 다시 포함되므로, 응답 길이가
+        // 0이 되는 일은 사실상 없다 - 대신 "커서가 실제로 더 전진했는지"로 진짜 새 데이터 유무를 본다.
+        const cursorBefore = liveLastCursorRef.current
         mergeLiveRows(incoming)
+        const cursorAfter = liveLastCursorRef.current
+        if (cursorBefore && cursorAfter && cursorBefore.date === cursorAfter.date && cursorBefore.time === cursorAfter.time) break
       }
       refreshLiveChart()
       // 폴링 요청 자체는 계속 200으로 성공해도 EA가 멈추면 캔들 내용이 그대로 멈춰있으니, "요청 성공
@@ -2631,7 +2651,7 @@ export default function ReplayChart() {
     if (liveRealtimeChannelRef.current) { supabaseClient.removeChannel(liveRealtimeChannelRef.current); liveRealtimeChannelRef.current = null }
     if (livePollTimerRef.current) clearInterval(livePollTimerRef.current)
     liveRowsRef.current = []
-    liveLastIdRef.current = 0
+    liveLastCursorRef.current = null
     hasLiveCenteredRef.current = false
     setLiveConnected(true) // 심볼을 바꾸면 수동으로 끊어뒀던 것도 다시 연결(새로 시작하는 거니까)
     setLiveStatus('connecting')
@@ -2778,8 +2798,8 @@ export default function ReplayChart() {
   const toggleSummerTime = () => setSummerTime(prev => !prev)
 
   // 서머타임 상태가 바뀌면 liveRowsRef에 이미 변환해둔 time엔 예전 오프셋이 반영돼 있어서 그대로 두면
-  // 안 바뀐다 - 원본 브로커 date/time 문자열은 따로 안 들고 있으므로, 폴링을 새로 시작해서(sinceId=0부터)
-  // 새 오프셋으로 처음부터 다시 변환한다(라이브 세션 데이터라 다시 받아도 가벼움).
+  // 안 바뀐다 - 원본 브로커 date/time 문자열은 따로 안 들고 있으므로, 폴링을 새로 시작해서(커서 초기화 후
+  // 처음부터) 새 오프셋으로 처음부터 다시 변환한다(라이브 세션 데이터라 다시 받아도 가벼움).
   // (setSummerTime 콜백 안에서 바로 부르면 summerTime이 아직 안 바뀐 값이라 한 번 밀리므로 effect로 분리)
   const summerTimeMountedRef = useRef(false)
   useEffect(() => {
