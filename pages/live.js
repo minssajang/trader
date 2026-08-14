@@ -1212,6 +1212,10 @@ export default function ReplayChart() {
   // 실제 시각이 지금과 얼마나 벌어졌는지"로 끊김을 감지한다(pollLiveOnce 참고).
   const [liveStatus, setLiveStatus] = useState('connecting') // 'connecting' | 'live' | 'stale' | 'error' | 'disconnected'
   const [liveStaleSec, setLiveStaleSec] = useState(0)
+  // Realtime이 지금 막 들어온 캔들 하나만 먼저 밀어주는 경우, 그 이전 구간이 아직 안 채워진 상태로
+  // 화면에 붙으면 "시간이 붕 뜨는" 점프처럼 보인다(사용자 지적) - 그 구간을 REST로 마저 채우는 동안은
+  // 차트를 갱신하지 않고 이 플래그로 "갱신 중"임을 보여준다(pollLiveOnce 참고).
+  const [liveCatchingUp, setLiveCatchingUp] = useState(false)
   const [liveConnected, setLiveConnected] = useState(true) // 사용자가 "연결 끊기" 버튼으로 직접 끈 상태(사용자 요청)
   const intervalRef = useRef(null)
   const nextCandleAtRef = useRef(0)   // 다음 캔들이 그려질 예정 시각(Date.now() 기준 ms) - 캔들 타이머 표시용
@@ -2596,12 +2600,17 @@ export default function ReplayChart() {
         mergeLiveRows(incoming)
         const cursorAfter = liveLastCursorRef.current
         if (cursorBefore && cursorAfter && cursorBefore.date === cursorAfter.date && cursorBefore.time === cursorAfter.time) break
+        // 1페이지로 안 끝나고 더 받아야 한다는 뜻 - 여러 페이지를 마저 받는 동안은 화면을 아직 안
+        // 갱신했으니(refreshLiveChart는 루프가 끝난 뒤 한 번만 호출) "갱신 중" 표시를 띄운다.
+        if (guard === 0) setLiveCatchingUp(true)
       }
+      setLiveCatchingUp(false)
       refreshLiveChart()
       // 폴링 요청 자체는 계속 200으로 성공해도 EA가 멈추면 캔들 내용이 그대로 멈춰있으니, "요청 성공
       // 여부"가 아니라 "마지막 캔들의 실제 시각이 지금과 얼마나 벌어졌는지"로 끊김을 판단한다.
       refreshLiveStaleStatus()
     } catch {
+      setLiveCatchingUp(false)
       setLiveStatus('error')
     }
   }
@@ -2612,24 +2621,28 @@ export default function ReplayChart() {
   // EA가 재시작되면 3일치 백필이 통째로 다시 들어가는데, 그 수천 개 행이 각각 개별 이벤트로 밀려오면
   // 이벤트마다 매번 다시 그리느라 화면이 잠깐 뒤죽박죽 보였다(사용자 지적 - "시간이 붕 떠버림") - 그래서
   // 짧은 시간(300ms) 안에 몰려온 이벤트를 모았다가 한 번에만 반영한다.
+  // 원래는 여기서 밀려온 행을 mergeLiveRows에 바로 넣었는데, 그러면 그 행의 (date,time)이 커서보다
+  // 훨씬 앞서 있어도(예: REST 캐치업이 아직 못 따라온 구간을 건너뛰고 "지금 막 들어온 캔들"이 먼저
+  // 도착) 커서가 그 값으로 그냥 전진해버려서, 그 사이 안 받아온 구간을 영영 건너뛰게 되는 버그가
+  // 있었다(사용자가 스샷으로 실제 확인 - "19:55에서 02:56으로 점프"). Realtime은 "뭔가 바뀌었다"는
+  // 신호로만 쓰고, 실제 반영은 항상 pollLiveOnce의 정렬된 REST 캐치업을 통해서만 하도록 바꿔서
+  // 커서가 구간을 건너뛸 수 없게 한다 - 그 사이엔 liveCatchingUp으로 "갱신 중"을 보여준다.
   const REALTIME_DEBOUNCE_MS = 300
-  const realtimeBufferRef = useRef([])
+  const realtimeSymRef = useRef(null)
   const realtimeFlushTimerRef = useRef(null)
 
   const flushRealtimeBuffer = () => {
     realtimeFlushTimerRef.current = null
-    if (realtimeBufferRef.current.length === 0) return
-    const rows = realtimeBufferRef.current
-    realtimeBufferRef.current = []
-    mergeLiveRows(rows)
-    refreshLiveChart()
-    refreshLiveStaleStatus()
+    const sym = realtimeSymRef.current
+    realtimeSymRef.current = null
+    if (!sym) return
+    pollLiveOnce(sym)
   }
 
   const handleRealtimeChange = (sym, payload) => {
     const row = payload.new
     if (!row || sym !== symbolRef.current) return
-    realtimeBufferRef.current.push({ id: row.id, date: row.bar_date, time: row.bar_time, open: row.open, high: row.high, low: row.low, close: row.close })
+    realtimeSymRef.current = sym
     if (!realtimeFlushTimerRef.current) {
       realtimeFlushTimerRef.current = setTimeout(flushRealtimeBuffer, REALTIME_DEBOUNCE_MS)
     }
@@ -5645,8 +5658,10 @@ export default function ReplayChart() {
                 사라지지 않게 뷰포트 높이에 sticky로 고정하고, 자체 높이가 화면보다 크면 내부에서만 스크롤되게 함 */}
             <div style={{ flex: 1, minWidth: 280, position: 'sticky', top: 20, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto', overflowX: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', minHeight: 38 }}>
-                {liveStatus === 'connecting' && <div style={{ color: '#9aa0ab', fontSize: 13 }}>⏳ 데이터 불러오는 중...</div>}
-                {liveStatus === 'live' && (
+                {liveCatchingUp ? (
+                  <div style={{ color: '#9aa0ab', fontSize: 13 }}>🔄 빠진 구간 채우는 중...</div>
+                ) : liveStatus === 'connecting' && <div style={{ color: '#9aa0ab', fontSize: 13 }}>⏳ 데이터 불러오는 중...</div>}
+                {!liveCatchingUp && liveStatus === 'live' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4CAF50', fontSize: 13, fontWeight: 700 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4CAF50', display: 'inline-block', flexShrink: 0 }} />
                     실시간 연결됨{total ? ` · 캔들 ${total}개` : ' · 첫 캔들 대기 중'}
