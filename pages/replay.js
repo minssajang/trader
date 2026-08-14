@@ -635,6 +635,10 @@ const STOCH3_PARAMS = [70, 15, 15]
 // EasyTrade_MT5 데스크톱 앱의 "분리매매창" 골드/나스닥 탭 반자동 예약(3/4번 신호)이 쓰는
 // 1분 스토캐스틱 - _MarketDataWorker의 _ta.stoch(k=5, d=3, smooth_k=3)와 동일 (kPeriod,kSmooth,dPeriod 순)
 const STOCH_RESERVE_PARAMS = [5, 3, 3]
+// 9,10번(사용자 요청)용 스토캐스틱 2세트 - 반자동 예약 카드 전용(차트에 그리는 stoch3와 파라미터는
+// 같지만(70,15,15) 별도로 다시 계산함 - computeReservationSeries는 차트 렌더링 코드와 분리돼 있음).
+const STOCH_RESERVE2_PARAMS = [70, 15, 15]
+const STOCH_RESERVE3_PARAMS = [210, 45, 45]
 
 // 분리매매창(PyQt "매매 실행" 창) 색상 팔레트 - EasyTrade_MT5 1_1_trading_window.py /
 // trading_window_tabs/{strategy1_tab,hma_reservation_tab,nas100_tab}.py의 setStyleSheet 값 그대로.
@@ -677,6 +681,11 @@ function computeReservationSeries(fullRows) {
   const { ups: bbUp, lows: bbLo } = rollingBollinger(closes, 100)
   const stoch = rollingStochastic(fullRows, ...STOCH_RESERVE_PARAMS)
   const stochGolden = closes.map((_, i) => (stoch.k[i] != null && stoch.d[i] != null) ? stoch.k[i] > stoch.d[i] : null)
+  // 9,10번(사용자 요청) - 스토(70,15,15)/(210,45,45) 두 세트의 골든/데드 상태
+  const stoch70 = rollingStochastic(fullRows, ...STOCH_RESERVE2_PARAMS)
+  const stoch70Golden = closes.map((_, i) => (stoch70.k[i] != null && stoch70.d[i] != null) ? stoch70.k[i] > stoch70.d[i] : null)
+  const stoch210 = rollingStochastic(fullRows, ...STOCH_RESERVE3_PARAMS)
+  const stoch210Golden = closes.map((_, i) => (stoch210.k[i] != null && stoch210.d[i] != null) ? stoch210.k[i] > stoch210.d[i] : null)
 
   // 1번 신호 무장 상태 - 가격이 5분 볼린저(SMA100) 바깥에서 안쪽으로 재진입하면 무장, 다시 벗어나면 해제.
   // 순수하게 가격 이력만으로 정해지는 값이라 체크박스/재생 여부와 무관하게 구간 전체를 한 번에 계산해둔다.
@@ -693,7 +702,7 @@ function computeReservationSeries(fullRows) {
     row1Armed[i] = armed
   }
 
-  return { closes, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, stochGolden, row1Armed }
+  return { closes, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, stochGolden, row1Armed, stoch70Golden, stoch210Golden }
 }
 
 // computeReservationSeries의 배열들을 훑어서 신호별 발생 이벤트를 dayRows 기준 idx(=i-startIdx)로
@@ -3860,9 +3869,18 @@ export default function ReplayChart() {
       const ready = price != null && h1 != null && price > h1 && h300 != null && prevH300 != null && h300 > prevH300
       return state && ready && stochGolden === true
     }
+    // 새 9,10번(스토 2세트, checked=7/7.1) - 둘 다 데드/골든이 이 캔들에 새로 갖춰진 순간(edge)만.
+    if (row === 7 || row === 7.1) {
+      const s70 = seriesValAt('stoch70Golden', i), s210 = seriesValAt('stoch210Golden', i)
+      const prevS70 = seriesValAt('stoch70Golden', i, 1), prevS210 = seriesValAt('stoch210Golden', i, 1)
+      const wantGolden = row === 7.1
+      const nowBoth = s70 === wantGolden && s210 === wantGolden
+      const prevBoth = prevS70 === wantGolden && prevS210 === wantGolden
+      return nowBoth && !prevBoth
+    }
     return false
   }
-  const twSignalSide = (row) => [1, 2, 6, 4].includes(row) ? 'sell' : 'buy' // 1,3,5,7번(화면번호)=매도, 2,4,6,8번=매수
+  const twSignalSide = (row) => [1, 2, 6, 4, 7].includes(row) ? 'sell' : 'buy' // 1,3,5,7,9번(화면번호)=매도, 2,4,6,8,10번=매수
   // 🔍 찾기 버튼 - 체크된 신호가 불러온 구간(dayRows 1~total) 안에서 실제로 "진입"했던 캔들을 전부
   // 훑어서 순서대로 모은다. 결과는 재생 바(빨간 바) 위에 번호로 표시되고, 클릭하면 그 캔들로 이동한다.
   const findSignalPositions = () => {
@@ -4038,6 +4056,14 @@ export default function ReplayChart() {
     const row3Buy = wma85 != null && sma100 != null && h1 != null && wma85 > sma100 && stochGolden === true && price != null && price > h1
     const row4Sell = wma85 != null && sma100 != null && h1 != null && wma85 < sma100 && stochGolden === false && price != null && price < h1
 
+    // 새 9,10번(사용자 요청) - 스토(70,15,15)/(210,45,45) 두 세트 상태 표시등. 9번=둘 다 데드, 10번=둘 다 골든(반대).
+    const stoch70Golden = twSeriesVal('stoch70Golden')
+    const stoch210Golden = twSeriesVal('stoch210Golden')
+    const row9State1 = stoch70Golden === false // 9번: 스토(70,15,15) 데드
+    const row9State2 = stoch210Golden === false // 9번: 스토(210,45,45) 데드
+    const row10State1 = stoch70Golden === true // 10번: 스토(70,15,15) 골든
+    const row10State2 = stoch210Golden === true // 10번: 스토(210,45,45) 골든
+
     // 1,2번 상태만 남김(사용자 요청 - 준비/진입은 삭제)
     const row5State = wma85 != null && sma100 != null && wma85 < sma100 // 1번(내부row4) 상태: WMA85<5분중심
     const row6State = wma85 != null && sma100 != null && wma85 > sma100 // 2번(내부row3) 상태: WMA85>5분중심
@@ -4209,8 +4235,9 @@ export default function ReplayChart() {
               내부row2.1(주가>H1)=6번, 내부row6(H1<1분중심)=7번, 내부row5(H1>1분중심)=8번. */}
           {/* 1,2번은 상태만 남기고 준비/진입 표시등 + 매수매도 버튼 삭제(사용자 요청) - 체크박스 자체는
               그대로 둠(🔍 찾기 등에서 여전히 checked를 씀). 왼쪽=1번(하락추세)/오른쪽=2번(상승추세)
-              나란히 배치(사용자 지정), rowDef 대신 절반폭 전용 레이아웃. */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+              나란히 배치(사용자 지정), rowDef 대신 절반폭 전용 레이아웃. "버튼 위치 변경"(twSwapped)에
+              같이 좌우가 뒤바뀐다(사용자 요청 - 1~6번도 7,8번과 동일하게). */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 4} onChange={() => toggleCheck(4)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
               <span style={{ color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`1번: 하락추세\nWMA85 < 5분중심\n${fmtTopBottom(wma85, sma100)}`}</span>
@@ -4223,8 +4250,8 @@ export default function ReplayChart() {
             </label>
           </div>
           {/* 새 3,4번(사용자 요청) - HMA300(15분) 방향 상태만, 1,2번과 같은 스타일. 내부 체크 키는
-              삭제됐던 2/2.1 재사용. */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              삭제됐던 2/2.1 재사용. twSwapped에 좌우 같이 뒤바뀜(사용자 요청). */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
               <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: HMA15(HMA300) 하락중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
@@ -4237,8 +4264,8 @@ export default function ReplayChart() {
             </label>
           </div>
           {/* 옛 3,4번(5Bol 돌파)은 5,6번으로 밀림(사용자 요청) - "돌파"(=예전 준비)+"진입" 표시등 세로,
-              왼쪽=5번(상단돌파)/오른쪽=6번(하단돌파) 나란히 배치. */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              왼쪽=5번(상단돌파)/오른쪽=6번(하단돌파) 나란히 배치. twSwapped에 좌우 같이 뒤바뀜(사용자 요청). */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1} onChange={() => toggleCheck(1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
               <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`5번: 5Bol 상단 돌파후 진입\n${bbUp != null ? bbUp.toFixed(2) : '-'}`}</span>
@@ -4259,19 +4286,54 @@ export default function ReplayChart() {
             </label>
           </div>
           {/* 옛 5,6번(H1<1분중심/H1>1분중심)은 7,8번으로 밀리면서 조건도 전면 교체(사용자 요청) - 상태=
-              주가 vs H1 & H1 방향, 진입=주가 자체가 S1(SMA20)을 크로스하는 순간. */}
-          {rowDef(6, { text: `7번: 주가 < H1\nH1 하락중`, color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY }, checked === 6, () => toggleCheck(6),
-            <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
-              <TwStatusDot label="상태" active={row3Ready} colorA={TW_STATUS_RED_A} />
-              <TwStatusDot label="진입" active={row3Entry} colorA={TW_STATUS_RED_A} />
-            </div>,
-            dirBtn('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false))}
-          {rowDef(5, { text: `8번: 주가 > H1\nH1 상승중`, color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY }, checked === 5, () => toggleCheck(5),
-            <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
-              <TwStatusDot label="상태" active={row4Ready} colorA={TW_STATUS_LIME_A} />
-              <TwStatusDot label="진입" active={row4Entry} colorA={TW_STATUS_LIME_A} />
-            </div>,
-            dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true))}
+              주가 vs H1 & H1 방향, 진입=주가 자체가 S1(SMA20)을 크로스하는 순간. 버튼을 표시등 옆이 아니라
+              아래로 옮기고 7번=왼쪽/8번=오른쪽 나란히 배치(사용자 요청) - rowDef 대신 전용 레이아웃.
+              "버튼 위치 변경"(twSwapped)을 누르면 위 수동 매수/매도처럼 이 7,8번 박스도 좌우가 같이
+              뒤바뀐다(사용자 요청). */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
+            <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', marginBottom: 6 }}>
+                <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: 주가 < H1\nH1 하락중`}</span>
+                <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
+                  <TwStatusDot label="상태" active={row3Ready} colorA={TW_STATUS_RED_A} />
+                  <TwStatusDot label="진입" active={row3Entry} colorA={TW_STATUS_RED_A} />
+                </div>
+              </label>
+              <div style={{ display: 'flex', gap: 4 }}>{dirBtn('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false)}</div>
+            </div>
+            <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', marginBottom: 6 }}>
+                <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: 주가 > H1\nH1 상승중`}</span>
+                <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
+                  <TwStatusDot label="상태" active={row4Ready} colorA={TW_STATUS_LIME_A} />
+                  <TwStatusDot label="진입" active={row4Entry} colorA={TW_STATUS_LIME_A} />
+                </div>
+              </label>
+              <div style={{ display: 'flex', gap: 4 }}>{dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true)}</div>
+            </div>
+          </div>
+          {/* 새 9,10번(사용자 요청) - 스토캐스틱 2세트(70,15,15 / 210,45,45) 상태만, 9번=둘 다 데드,
+              10번=둘 다 골든(반대). 내부 체크 키는 새로 7/7.1 씀. twSwapped에 좌우 같이 뒤바뀜. */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
+            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
+              <input type="checkbox" checked={checked === 7} onChange={() => toggleCheck(7)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+              <span style={{ color: (row9State1 && row9State2) ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`9번: 스토 데드크로스\n(70,15,15) / (210,45,45)`}</span>
+              <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
+                <TwStatusDot label="70" active={row9State1} colorA={TW_STATUS_RED_A} />
+                <TwStatusDot label="210" active={row9State2} colorA={TW_STATUS_RED_A} />
+              </div>
+            </label>
+            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
+              <input type="checkbox" checked={checked === 7.1} onChange={() => toggleCheck(7.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+              <span style={{ color: (row10State1 && row10State2) ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`10번: 스토 골든크로스\n(70,15,15) / (210,45,45)`}</span>
+              <div style={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
+                <TwStatusDot label="70" active={row10State1} colorA={TW_STATUS_LIME_A} />
+                <TwStatusDot label="210" active={row10State2} colorA={TW_STATUS_LIME_A} />
+              </div>
+            </label>
+          </div>
         </CollapsibleCard>
 
         {/* 하단 청산목표 위에 상단과 동일한 수동 매수/매도 버튼 추가(사용자 요청) - 위쪽 것과 완전히
@@ -4304,6 +4366,8 @@ export default function ReplayChart() {
                 checked === 1.1 && '6번: 5Bol 하단 돌파\n   슈팅 - 5분볼린저(SMA100 볼린저) 하단을 저가가 뚫었지만 꼬리 달고 종가는 안쪽에서 마감\n   돌파 - 5분볼린저 하단을 캔들 종가가 나감\n   진입 - 5분볼린저 하단을 종가까지 들어옴',
                 checked === 6 && '7번: 주가 < H1 (매도 전용)\n   상태 - 주가<H1(HMA20), H1 하락중\n   진입 - 주가가 S1(SMA20)을 데드크로스',
                 checked === 5 && '8번: 주가 > H1 (매수 전용)\n   상태 - 주가>H1(HMA20), H1 상승중\n   진입 - 주가가 S1(SMA20)을 골든크로스',
+                checked === 7 && '9번: 스토 데드크로스\n   상태 - 스토캐스틱(70,15,15) 데드 & 스토캐스틱(210,45,45) 데드',
+                checked === 7.1 && '10번: 스토 골든크로스\n   상태 - 스토캐스틱(70,15,15) 골든 & 스토캐스틱(210,45,45) 골든',
               ].filter(Boolean).join('\n\n') || '체크된 신호가 없습니다'}
             </div>
           </CollapsibleCard>
@@ -5449,15 +5513,16 @@ export default function ReplayChart() {
                   const price = playIndex > 0 ? rowsRef.current[playIndex - 1]?.close ?? null : null
                   const h300 = twSeriesVal('h300'), prevH300 = twSeriesVal('h300', 1)
                   const prevH1 = twSeriesVal('h1', 1)
+                  const stoch70Golden = twSeriesVal('stoch70Golden'), stoch210Golden = twSeriesVal('stoch210Golden')
 
                   // "3롱/1셀"처럼 개수만 세면 어떤 번호가 롱인지 안 보인다는 지적(사용자) - 몇 번 신호가
                   // 롱인지/셀인지 번호 그대로 나열한다("1, 2, 3 롱" / "6 셀"). 번호는 분리매매창 반자동
-                  // 예약 카드의 "화면에 보이는 순서"를 그대로 따른다 - 새 3,4번(HMA300 방향) 추가, 옛
-                  // 3,4번(5Bol)은 5,6번으로, 옛 5,6번(H3 vs H100)은 7,8번으로 밀리면서 조건도 교체(주가 vs
-                  // H1 상태): 1=1번(내부row4, 하락추세)/2=2번(내부row3, 상승추세)/3=3번(HMA300 하락중)/
-                  // 4=4번(HMA300 상승중)/5=5번(내부row1)/6=6번(내부row1.1)/7=7번(내부row6, 주가<H1)/
-                  // 8=8번(내부row5, 주가>H1). 1↔2, 3↔4, 7↔8은 각각 같은 비교식의 반대 방향이라 절대
-                  // 동시에 못 뜬다.
+                  // 예약 카드의 "화면에 보이는 순서"를 그대로 따른다 - 새 3,4번(HMA300 방향), 새 9,10번
+                  // (스토캐스틱 2세트) 추가, 옛 3,4번(5Bol)은 5,6번으로, 옛 5,6번(H3 vs H100)은 7,8번으로
+                  // 밀리면서 조건도 교체(주가 vs H1 상태): 1=1번(내부row4, 하락추세)/2=2번(내부row3,
+                  // 상승추세)/3=3번(HMA300 하락중)/4=4번(HMA300 상승중)/5=5번(내부row1)/6=6번(내부row1.1)/
+                  // 7=7번(내부row6, 주가<H1)/8=8번(내부row5, 주가>H1)/9=9번(스토 데드)/10=10번(스토 골든).
+                  // 1↔2, 3↔4, 7↔8, 9↔10은 각각 같은 비교식의 반대 방향이라 절대 동시에 못 뜬다.
                   const longRows = [], shortRows = []
                   if (wma85 != null && sma100 != null && h1 != null && wma85 < sma100 && stochGolden === false && price != null && price < h1) shortRows.push(1) // 1번(화면 위치, 내부row4): 하락추세
                   if (wma85 != null && sma100 != null && h1 != null && wma85 > sma100 && stochGolden === true && price != null && price > h1) longRows.push(2) // 2번(화면 위치, 내부row3): 상승추세
@@ -5467,6 +5532,8 @@ export default function ReplayChart() {
                   if (row1Armed === 'below') longRows.push(6) // 6번(매수 전용): 5Bol 하단 밖(row1Armed 진입 전)
                   if (price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1) shortRows.push(7) // 7번: 주가<H1, H1 하락중
                   if (price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1) longRows.push(8) // 8번: 주가>H1, H1 상승중
+                  if (stoch70Golden === false && stoch210Golden === false) shortRows.push(9) // 9번: 스토(70,15,15)+(210,45,45) 둘 다 데드
+                  if (stoch70Golden === true && stoch210Golden === true) longRows.push(10) // 10번: 스토(70,15,15)+(210,45,45) 둘 다 골든
 
                   if (longRows.length === 0 && shortRows.length === 0) return null
                   return (
