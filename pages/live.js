@@ -1200,11 +1200,13 @@ export default function ReplayChart() {
   const liveRowsRef = useRef([])
   const liveLastIdRef = useRef(0)
   const livePollTimerRef = useRef(null)
+  const hasLiveCenteredRef = useRef(false) // 새로고침/심볼전환 후 카메라를 딱 한 번만 중앙 정렬하기 위한 플래그
   // EA가 멈춰도 폴링 요청 자체는 계속 200으로 성공해서 "연결됨"으로 보이는 문제가 있었다(사용자 지적 -
   // 자동매매가 꺼져서 EA가 멈췄는데도 페이지는 계속 초록불이었음) - 요청 성공 여부 대신 "마지막 캔들의
   // 실제 시각이 지금과 얼마나 벌어졌는지"로 끊김을 감지한다(pollLiveOnce 참고).
-  const [liveStatus, setLiveStatus] = useState('connecting') // 'connecting' | 'live' | 'stale' | 'error'
+  const [liveStatus, setLiveStatus] = useState('connecting') // 'connecting' | 'live' | 'stale' | 'error' | 'disconnected'
   const [liveStaleSec, setLiveStaleSec] = useState(0)
+  const [liveConnected, setLiveConnected] = useState(true) // 사용자가 "연결 끊기" 버튼으로 직접 끈 상태(사용자 요청)
   const intervalRef = useRef(null)
   const nextCandleAtRef = useRef(0)   // 다음 캔들이 그려질 예정 시각(Date.now() 기준 ms) - 캔들 타이머 표시용
   const timerTickRef = useRef(null)   // 캔들 타이머 숫자를 화면에 부드럽게 카운트다운시키는 별도의 짧은 인터벌
@@ -2445,19 +2447,55 @@ export default function ReplayChart() {
   // computeIndicatorsForRange/applyIndex는 "fullRows 전체를 그 구간 그대로 보여준다"는 동작이 그대로
   // 맞아떨어져서 손대지 않고 재사용한다.
   const LIVE_POLL_MS = 3000
+  // 지표 재계산은 매 폴링(3초)마다 통째로 다시 도는데(rowsRef 전체를 O(n)으로 훑는 롤링계산 여러 개),
+  // 백필된 3일치+계속 쌓이는 라이브봉을 다 넣고 돌리면 미장 시작처럼 캔들이 빠르게 들어올 때 그 계산
+  // 자체가 오래 걸려서 화면이 실제 가격을 못 따라가는 지연이 있었다(사용자 지적). 지표 최대 워밍업이
+  // 1200개(SMA1200 등)뿐이라, 매번 넘겨주는 배열을 넉넉히 2500개로 잘라서 계산량을 고정시킨다 -
+  // 스크롤로 더 먼 과거를 보는 용도가 아니라 "현재 값"만 정확하면 되는 라이브 화면이라 문제없음.
+  const LIVE_COMPUTE_WINDOW = 2500
 
   const refreshLiveChart = () => {
-    const fullRows = liveRowsRef.current
+    const fullRows = liveRowsRef.current.length > LIVE_COMPUTE_WINDOW
+      ? liveRowsRef.current.slice(-LIVE_COMPUTE_WINDOW)
+      : liveRowsRef.current
     if (!fullRows.length) return
     const fromStr = toLocalDateStr(fullRows[0].time)
     const toStr = toLocalDateStr(fullRows[fullRows.length - 1].time)
     const dayRows = computeIndicatorsForRange(fullRows, fromStr, toStr)
     if (uploadedTradesRef.current.length > 0) recomputeUploadedTradeMarkers()
     applyIndex(dayRows.length)
+
+    // 새로고침/심볼전환 직후 딱 한 번만 - 지금 그려지는 지점(최신 캔들)이 화면 좌우 중앙에 오도록
+    // 카메라를 맞춘다(사용자 요청 - "새 캔들 그리는 곳이 중간에 와있어야 함"). loadRange가 재생 시작
+    // 지점을 중앙에 두는 것과 완전히 같은 방식 - 이후 폴링(hasLiveCenteredRef=true)에서는 사용자가
+    // 스크롤/줌해둔 걸 존중해서 다시 안 건드린다.
+    if (!hasLiveCenteredRef.current && dayRows.length > 0) {
+      hasLiveCenteredRef.current = true
+      const chart = chartRef.current
+      if (chart) {
+        const boundary = dayRows.length
+        const ts = chart.timeScale()
+        ts.setVisibleLogicalRange({ from: boundary - INITIAL_VISIBLE_CANDLES / 2, to: boundary + INITIAL_VISIBLE_CANDLES / 2 })
+        const ps = seriesRef.current?.priceScale()
+        const priceRange = ps?.getVisibleRange()
+        if (ps && priceRange) {
+          const span = priceRange.to - priceRange.from
+          const centerPrice = dayRows[boundary - 1]?.close ?? (priceRange.from + priceRange.to) / 2
+          ps.applyOptions({ autoScale: false })
+          ps.setVisibleRange({ from: centerPrice - span / 2, to: centerPrice + span / 2 })
+        }
+      }
+    }
   }
 
   // 한 번의 폴링에서 새로 받은 rows를 liveRowsRef에 반영한다(id 기준 병합 - 진행 중인 캔들은 같은
   // id로 갱신되어 들어옴).
+  // liveRowsRef 자체도 탭을 오래 켜두면 계속 불어나서(하루치+백필분) 이 merge의 Map 재구성/정렬
+  // 비용까지 같이 늘어난다 - 화면엔 최근 몇십 개만 보이지만, SMA1200/HMA1200처럼 제일 긴 지표가
+  // 1200개 워밍업을 필요로 해서 그보다는 넉넉해야 한다(사용자 지적으로 재확인 - 필요 이상 크게
+  // 잡았던 6000을 계산 창(LIVE_COMPUTE_WINDOW=2500)에 딱 맞춰 줄임).
+  const LIVE_ROWS_MAX = 3000
+
   const mergeLiveRows = (incoming) => {
     const offsetSeconds = summerTimeRef.current ? BROKER_OFFSET_SECONDS.summer : BROKER_OFFSET_SECONDS.winter
     const byId = new Map(liveRowsRef.current.map(r => [r.id, r]))
@@ -2469,7 +2507,9 @@ export default function ReplayChart() {
       })
       if (r.id > liveLastIdRef.current) liveLastIdRef.current = r.id
     }
-    liveRowsRef.current = Array.from(byId.values()).sort((a, b) => a.time - b.time)
+    let merged = Array.from(byId.values()).sort((a, b) => a.time - b.time)
+    if (merged.length > LIVE_ROWS_MAX) merged = merged.slice(-LIVE_ROWS_MAX)
+    liveRowsRef.current = merged
   }
 
   const LIVE_STALE_SEC = 90 // 마지막 캔들 시각이 지금으로부터 이만큼(초) 넘게 지나면 "끊김"으로 본다(M1이라 정상이면 60초 안쪽)
@@ -2508,8 +2548,23 @@ export default function ReplayChart() {
     if (livePollTimerRef.current) clearInterval(livePollTimerRef.current)
     liveRowsRef.current = []
     liveLastIdRef.current = 0
+    hasLiveCenteredRef.current = false
+    setLiveConnected(true) // 심볼을 바꾸면 수동으로 끊어뒀던 것도 다시 연결(새로 시작하는 거니까)
     setLiveStatus('connecting')
     pollLiveOnce(sym)
+    livePollTimerRef.current = setInterval(() => pollLiveOnce(symbolRef.current), LIVE_POLL_MS)
+  }
+
+  // "연결 끊기/연결하기" 버튼(사용자 요청) - 폴링만 멈추고 지금까지 그려진 차트는 그대로 둔다(데이터
+  // 초기화 안 함). 다시 연결하면 그 시점 이후 새 캔들부터 이어서 받아온다(liveLastIdRef를 안 지우므로).
+  const disconnectLive = () => {
+    if (livePollTimerRef.current) { clearInterval(livePollTimerRef.current); livePollTimerRef.current = null }
+    setLiveConnected(false)
+    setLiveStatus('disconnected')
+  }
+  const reconnectLive = () => {
+    setLiveConnected(true)
+    pollLiveOnce(symbolRef.current)
     livePollTimerRef.current = setInterval(() => pollLiveOnce(symbolRef.current), LIVE_POLL_MS)
   }
 
@@ -4880,8 +4935,9 @@ export default function ReplayChart() {
               {/* 연결 방식 설명(사용자 요청) - 서버가 계좌에 로그인하는 게 아니라 이용자 본인 PC의 MT5가
                   직접 주문을 내는 구조라는 걸 오해 없이 먼저 알려준다. 항상 보이게(체크 여부와 무관). */}
               <div style={{ fontSize: 10.5, color: '#6b7280', lineHeight: 1.6 }}>
-                ℹ 이 기능은 본인 PC의 MT5에 직접 로그인되어 있어야 동작해요. 저희 서버가 계좌에 로그인하는
-                게 아니라, MT5에 붙여둔 EA가 신호를 받아 그 자리에서 직접 주문을 넣는 방식이에요.
+                ℹ 이 기능은 본인 PC의 MT5 계좌에 직접 로그인되어 있어야 동작을 합니다.<br />
+                그 어떤 계좌도 비번도 입력을 받지 않습니다.<br />
+                사용자가 MT5에 로그인을 해둔 계좌에 주문을 전달할 뿐입니다.
               </div>
               {realTradingUnlocked && (
                 <div style={{ background: 'rgba(244,67,54,0.1)', border: '1px solid #F44336', borderRadius: 8, padding: '8px 10px', fontSize: 11, color: '#F44336', lineHeight: 1.5 }}>
@@ -5496,6 +5552,23 @@ export default function ReplayChart() {
                   </div>
                 )}
                 {liveStatus === 'error' && <div style={{ color: '#F44336', fontSize: 13 }}>❌ 서버 연결 실패 - 잠시 후 자동으로 다시 시도합니다</div>}
+                {liveStatus === 'disconnected' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#6b7280', fontSize: 13, fontWeight: 700 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#6b7280', display: 'inline-block', flexShrink: 0 }} />
+                    🔌 연결 끊김 (수동)
+                  </div>
+                )}
+                {/* 연결 끊기/연결하기 버튼(사용자 요청) - 폴링만 멈추고 지금 그려진 차트는 그대로 유지됨 */}
+                <button
+                  type="button"
+                  onClick={liveConnected ? disconnectLive : reconnectLive}
+                  style={{
+                    marginLeft: 12, fontSize: 12, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontWeight: 700,
+                    border: `1px solid ${liveConnected ? '#2a2e38' : '#4CAF50'}`,
+                    background: liveConnected ? 'none' : 'rgba(76,175,80,0.15)',
+                    color: liveConnected ? '#9aa0ab' : '#4CAF50',
+                  }}
+                >{liveConnected ? '🔌 연결 끊기' : '▶ 연결하기'}</button>
                 <button
                   type="button"
                   onClick={toggleSummerTime}
