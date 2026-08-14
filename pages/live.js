@@ -1323,6 +1323,22 @@ export default function ReplayChart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol])
 
+  // 탭이 백그라운드로 갔다가 다시 보이게 되면(브라우저가 그동안 웹소켓/타이머를 조여뒀을 수 있음)
+  // 즉시 한 번 따라잡기 폴링을 돈다 - 20초 안전망 폴링만 믿고 기다리지 않게(사용자가 실제로 겪은
+  // "탭 백그라운드 중 놓친 데이터가 나중에 한꺼번에 튀어 보이는" 문제의 재발 방지).
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && liveConnected) pollLiveOnce(symbolRef.current)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveConnected])
+
   // 스토캐스틱 pane이 메인 캔들 pane의 6분의 1 높이가 되도록 비율 고정(사용자 요청 - 스토캐스틱이 너무 높았음)
   function applyStochPaneRatio(chart, stochPaneIndex) {
     try {
@@ -2455,11 +2471,23 @@ export default function ReplayChart() {
   // 1200개(SMA1200 등)뿐이라, 매번 넘겨주는 배열을 넉넉히 2500개로 잘라서 계산량을 고정시킨다 -
   // 스크롤로 더 먼 과거를 보는 용도가 아니라 "현재 값"만 정확하면 되는 라이브 화면이라 문제없음.
   const LIVE_COMPUTE_WINDOW = 2500
+  // EA가 잠깐 멈췄다 재시작하면(재컴파일 등) 그 사이 데이터가 통째로 비어서, 차트에 옛날 구간과 새
+  // 구간이 시각적으로 붙어 있는 것처럼 보이는 "시간 점프"가 생겼다(사용자 지적). M1이라 정상이면 캔들
+  // 간격이 60초를 넘을 일이 없으니, 5분 넘게 비는 지점을 찾아서 그 이전(오래된) 데이터는 아예 버리고
+  // 가장 최근에 끊김없이 이어진 구간만 보여준다 - 라이브 화면은 "지금"만 정확하면 되므로 문제없음.
+  const LIVE_GAP_TRIM_SEC = 5 * 60
+  const trimToLatestContinuousRun = (rows) => {
+    for (let i = rows.length - 1; i > 0; i--) {
+      if (rows[i].time - rows[i - 1].time > LIVE_GAP_TRIM_SEC) return rows.slice(i)
+    }
+    return rows
+  }
 
   const refreshLiveChart = () => {
-    const fullRows = liveRowsRef.current.length > LIVE_COMPUTE_WINDOW
+    let fullRows = liveRowsRef.current.length > LIVE_COMPUTE_WINDOW
       ? liveRowsRef.current.slice(-LIVE_COMPUTE_WINDOW)
       : liveRowsRef.current
+    fullRows = trimToLatestContinuousRun(fullRows)
     if (!fullRows.length) return
     const fromStr = toLocalDateStr(fullRows[0].time)
     const toStr = toLocalDateStr(fullRows[fullRows.length - 1].time)
@@ -2533,18 +2561,26 @@ export default function ReplayChart() {
   // REST로 한 번에 받아오는 경로 - 최초 로드(백필분 포함 전체)와, Realtime이 놓쳤을까봐 도는 가벼운
   // 안전망 폴링(LIVE_FALLBACK_POLL_MS) 둘 다 이걸 쓴다. 평소엔 아래 Realtime 구독이 갱신을 즉시
   // 처리하므로, 이 함수가 새로 받아올 게 있는 경우는 자주 없다(있으면 그것도 정상 처리됨).
+  const LIVE_API_LIMIT = 5000 // pages/api/live-price.js의 .limit(5000)과 동일 - 한 번에 이 개수까지만 옴
+
+  // Realtime(웹소켓)이 탭 백그라운드/절전모드 등으로 조용히 끊기면, 그동안 서버엔 계속 정상으로
+  // 쌓이는데 브라우저만 놓친다 - 돌아왔을 때 밀린 게 API 한도(5000개)보다 많으면 한 번의 요청으론
+  // 다 못 받아서, "옛날 값 → 뚝 끊기고 → 훨씬 나중 값"으로 튀어 보이는 버그가 있었다(사용자가 실제로
+  // 겪음 - 서버 데이터 자체는 끊김 없었다고 직접 확인함). 그래서 응답이 한도(5000)로 꽉 찼으면 "아직
+  // 더 밀렸을 수 있다"고 보고, 다 받을 때까지(꽉 안 찬 응답이 올 때까지) 반복해서 이어받는다.
   const pollLiveOnce = async (sym) => {
     try {
-      const sinceId = Math.max(0, liveLastIdRef.current - 1) // 진행 중인 캔들의 최신 갱신도 받기 위해 1 낮춰서 요청
-      const res = await fetch(`/api/live-price?symbol=${sym}&sinceId=${sinceId}`)
-      if (!res.ok) throw new Error(`API 오류(${res.status})`)
-      const data = await res.json()
-      if (sym !== symbolRef.current) return // 응답 오는 사이 심볼이 바뀌었으면 버림
-      const incoming = data.rows || []
-      if (incoming.length > 0) {
-        mergeLiveRows(incoming)
-        refreshLiveChart()
+      for (let guard = 0; guard < 50; guard++) { // 무한루프 방지용 안전장치(사실상 도달 안 함)
+        const sinceId = Math.max(0, liveLastIdRef.current - 1) // 진행 중인 캔들의 최신 갱신도 받기 위해 1 낮춰서 요청
+        const res = await fetch(`/api/live-price?symbol=${sym}&sinceId=${sinceId}`)
+        if (!res.ok) throw new Error(`API 오류(${res.status})`)
+        const data = await res.json()
+        if (sym !== symbolRef.current) return // 응답 오는 사이 심볼이 바뀌었으면 버림
+        const incoming = data.rows || []
+        if (incoming.length > 0) mergeLiveRows(incoming)
+        if (incoming.length < LIVE_API_LIMIT) break // 꽉 안 찼으면 다 받은 것 - 그만
       }
+      refreshLiveChart()
       // 폴링 요청 자체는 계속 200으로 성공해도 EA가 멈추면 캔들 내용이 그대로 멈춰있으니, "요청 성공
       // 여부"가 아니라 "마지막 캔들의 실제 시각이 지금과 얼마나 벌어졌는지"로 끊김을 판단한다.
       refreshLiveStaleStatus()
@@ -2556,12 +2592,30 @@ export default function ReplayChart() {
   // Supabase Realtime(웹소켓)으로 live_candles 변경을 즉시 받는다 - 폴링(몇 초 간격)과 달리 DB에
   // 새 행이 생기거나 갱신되는 그 순간 브라우저로 바로 밀려온다(사용자 요청 - "틱마다 따라가야 함",
   // 3초 폴링으로는 실시간 매매에 못 씀). EA가 보내는 만큼(SendEveryMs)이 사실상의 속도 한계가 된다.
+  // EA가 재시작되면 3일치 백필이 통째로 다시 들어가는데, 그 수천 개 행이 각각 개별 이벤트로 밀려오면
+  // 이벤트마다 매번 다시 그리느라 화면이 잠깐 뒤죽박죽 보였다(사용자 지적 - "시간이 붕 떠버림") - 그래서
+  // 짧은 시간(300ms) 안에 몰려온 이벤트를 모았다가 한 번에만 반영한다.
+  const REALTIME_DEBOUNCE_MS = 300
+  const realtimeBufferRef = useRef([])
+  const realtimeFlushTimerRef = useRef(null)
+
+  const flushRealtimeBuffer = () => {
+    realtimeFlushTimerRef.current = null
+    if (realtimeBufferRef.current.length === 0) return
+    const rows = realtimeBufferRef.current
+    realtimeBufferRef.current = []
+    mergeLiveRows(rows)
+    refreshLiveChart()
+    refreshLiveStaleStatus()
+  }
+
   const handleRealtimeChange = (sym, payload) => {
     const row = payload.new
     if (!row || sym !== symbolRef.current) return
-    mergeLiveRows([{ id: row.id, date: row.bar_date, time: row.bar_time, open: row.open, high: row.high, low: row.low, close: row.close }])
-    refreshLiveChart()
-    refreshLiveStaleStatus()
+    realtimeBufferRef.current.push({ id: row.id, date: row.bar_date, time: row.bar_time, open: row.open, high: row.high, low: row.low, close: row.close })
+    if (!realtimeFlushTimerRef.current) {
+      realtimeFlushTimerRef.current = setTimeout(flushRealtimeBuffer, REALTIME_DEBOUNCE_MS)
+    }
   }
 
   const subscribeLiveRealtime = (sym) => {
