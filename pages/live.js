@@ -2471,23 +2471,18 @@ export default function ReplayChart() {
   // 1200개(SMA1200 등)뿐이라, 매번 넘겨주는 배열을 넉넉히 2500개로 잘라서 계산량을 고정시킨다 -
   // 스크롤로 더 먼 과거를 보는 용도가 아니라 "현재 값"만 정확하면 되는 라이브 화면이라 문제없음.
   const LIVE_COMPUTE_WINDOW = 2500
-  // EA가 잠깐 멈췄다 재시작하면(재컴파일 등) 그 사이 데이터가 통째로 비어서, 차트에 옛날 구간과 새
-  // 구간이 시각적으로 붙어 있는 것처럼 보이는 "시간 점프"가 생겼다(사용자 지적). M1이라 정상이면 캔들
-  // 간격이 60초를 넘을 일이 없으니, 5분 넘게 비는 지점을 찾아서 그 이전(오래된) 데이터는 아예 버리고
-  // 가장 최근에 끊김없이 이어진 구간만 보여준다 - 라이브 화면은 "지금"만 정확하면 되므로 문제없음.
-  const LIVE_GAP_TRIM_SEC = 5 * 60
-  const trimToLatestContinuousRun = (rows) => {
-    for (let i = rows.length - 1; i > 0; i--) {
-      if (rows[i].time - rows[i - 1].time > LIVE_GAP_TRIM_SEC) return rows.slice(i)
-    }
-    return rows
-  }
+  // 예전엔 여기서 5분 넘게 비는 지점을 찾아 그 이전 데이터를 통째로 버렸다("EA 재시작 시 시간 점프"
+  // 대응용). 그런데 그 진짜 원인은 클라이언트가 탭 백그라운드/Realtime 재연결 때 밀린 데이터를 다
+  // 못 받아온 것이었고(pollLiveOnce가 백로그를 끝까지 못 비우던 버그) 이미 따로 고쳤다(가득 찰 때까지
+  // 반복해서 받아오는 루프 + 포커스 복귀 시 즉시 캐치업). 이 트림은 그 대응이 아니라 "주말/장마감처럼
+  // 정상적으로 몇 시간~며칠 비는 구간"까지 전부 걸려서, 장이 다시 열릴 때마다 과거 데이터를 통째로
+  // 날려버리고 방금 들어온 캔들 1~2개만 남기는 부작용이 있었다(사용자 지적 - "캔들이 안 그려짐").
+  // 원인이 이미 해결된 안전장치라 완전히 제거.
 
   const refreshLiveChart = () => {
-    let fullRows = liveRowsRef.current.length > LIVE_COMPUTE_WINDOW
+    const fullRows = liveRowsRef.current.length > LIVE_COMPUTE_WINDOW
       ? liveRowsRef.current.slice(-LIVE_COMPUTE_WINDOW)
       : liveRowsRef.current
-    fullRows = trimToLatestContinuousRun(fullRows)
     if (!fullRows.length) return
     const fromStr = toLocalDateStr(fullRows[0].time)
     const toStr = toLocalDateStr(fullRows[fullRows.length - 1].time)
@@ -2561,24 +2556,26 @@ export default function ReplayChart() {
   // REST로 한 번에 받아오는 경로 - 최초 로드(백필분 포함 전체)와, Realtime이 놓쳤을까봐 도는 가벼운
   // 안전망 폴링(LIVE_FALLBACK_POLL_MS) 둘 다 이걸 쓴다. 평소엔 아래 Realtime 구독이 갱신을 즉시
   // 처리하므로, 이 함수가 새로 받아올 게 있는 경우는 자주 없다(있으면 그것도 정상 처리됨).
-  const LIVE_API_LIMIT = 5000 // pages/api/live-price.js의 .limit(5000)과 동일 - 한 번에 이 개수까지만 옴
-
   // Realtime(웹소켓)이 탭 백그라운드/절전모드 등으로 조용히 끊기면, 그동안 서버엔 계속 정상으로
-  // 쌓이는데 브라우저만 놓친다 - 돌아왔을 때 밀린 게 API 한도(5000개)보다 많으면 한 번의 요청으론
-  // 다 못 받아서, "옛날 값 → 뚝 끊기고 → 훨씬 나중 값"으로 튀어 보이는 버그가 있었다(사용자가 실제로
-  // 겪음 - 서버 데이터 자체는 끊김 없었다고 직접 확인함). 그래서 응답이 한도(5000)로 꽉 찼으면 "아직
-  // 더 밀렸을 수 있다"고 보고, 다 받을 때까지(꽉 안 찬 응답이 올 때까지) 반복해서 이어받는다.
+  // 쌓이는데 브라우저만 놓친다 - 돌아왔을 때 밀린 게 한 번의 요청으로 못 받을 만큼 많으면, "옛날 값 →
+  // 뚝 끊기고 → 훨씬 나중 값"으로 튀어 보이는 버그가 있었다(사용자가 실제로 겪음 - 서버 데이터 자체는
+  // 끊김 없었다고 직접 확인함). 그래서 원래는 응답 개수가 pages/api/live-price.js의 .limit(5000)에
+  // 꽉 찼는지로 "더 밀렸는지"를 판단했는데, Supabase(PostgREST)가 프로젝트 기본 max-rows 설정 때문에
+  // 코드가 요청한 5000과 무관하게 응답을 훨씬 적게(관찰상 1000개) 자르고 있었다 - 그래서 실제로는
+  // 수천 개가 더 남아있어도 "1000<5000이니 다 받았다"고 오판하고 첫 페이지에서 멈춰버렸다(=지표 워밍업
+  // 데이터가 통째로 부족해지는 원인, 사용자 지적). 서버가 실제로 몇 개까지 자르는지 코드가 알 필요가
+  // 없도록, "빈 응답이 올 때까지" 반복하는 방식으로 바꿔서 이 문제 자체를 없앤다.
   const pollLiveOnce = async (sym) => {
     try {
-      for (let guard = 0; guard < 50; guard++) { // 무한루프 방지용 안전장치(사실상 도달 안 함)
+      for (let guard = 0; guard < 200; guard++) { // 무한루프 방지용 안전장치(사실상 도달 안 함)
         const sinceId = Math.max(0, liveLastIdRef.current - 1) // 진행 중인 캔들의 최신 갱신도 받기 위해 1 낮춰서 요청
         const res = await fetch(`/api/live-price?symbol=${sym}&sinceId=${sinceId}`)
         if (!res.ok) throw new Error(`API 오류(${res.status})`)
         const data = await res.json()
         if (sym !== symbolRef.current) return // 응답 오는 사이 심볼이 바뀌었으면 버림
         const incoming = data.rows || []
-        if (incoming.length > 0) mergeLiveRows(incoming)
-        if (incoming.length < LIVE_API_LIMIT) break // 꽉 안 찼으면 다 받은 것 - 그만
+        if (incoming.length === 0) break // 빈 응답이 온 시점이 진짜로 다 받은 것
+        mergeLiveRows(incoming)
       }
       refreshLiveChart()
       // 폴링 요청 자체는 계속 200으로 성공해도 EA가 멈추면 캔들 내용이 그대로 멈춰있으니, "요청 성공
