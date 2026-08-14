@@ -4617,11 +4617,12 @@ export default function ReplayChart() {
           .bt-page button { width: auto; margin-top: 0; }
         `}</style>
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 28px', borderBottom: '1px solid #2a2e38' }}>
-          <BrandLogo label="리플레이" />
+          <BrandLogo label="라이브" />
           <nav style={{ display: 'flex', gap: 6 }}>
             <Link href="/backtest-chart" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>학습</Link>
             <Link href="/backtest-intraday" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>📈 일중 패턴</Link>
-            <span style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: 'rgba(76,175,80,0.15)', color: '#4CAF50', border: '1px solid #4CAF50' }}>🔁 리플레이</span>
+            <Link href="/replay" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>🔁 리플레이</Link>
+            <span style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: 'rgba(76,175,80,0.15)', color: '#4CAF50', border: '1px solid #4CAF50' }}>🔴 라이브</span>
           </nav>
         </header>
 
@@ -4682,141 +4683,8 @@ export default function ReplayChart() {
                 )}
               </div>
 
-              <CollapsibleCard title="달력" maxWidth={170}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', marginBottom: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={multiSelectMode}
-                    onChange={() => {
-                      setMultiSelectMode(m => !m)
-                      rangeAnchorRef.current = ''
-                    }}
-                    style={{ width: 13, height: 13, margin: 0, flexShrink: 0 }}
-                  />
-                  <span>여러 날 선택</span>
-                </label>
-                <MonthCalendar
-                  viewDate={viewDate}
-                  onNavigate={navigateMonth}
-                  availableDates={availableDates}
-                  selectedDate={selectedDate}
-                  selectedDateTo={selectedDateTo}
-                  onSelect={handleCalendarSelect}
-                  maxWidth={170}
-                  dateColors={uploadedTradeDateColors}
-                  bare
-                />
-              </CollapsibleCard>
-
-              <CollapsibleCard title="📤 매매내역 업로드" maxWidth={170} defaultOpen={true}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label
-                    onDragOver={e => { e.preventDefault(); setTradeDragOver(true) }}
-                    onDragLeave={() => setTradeDragOver(false)}
-                    onDrop={handleTradeCsvDrop}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                      fontSize: 11, padding: '8px 6px', borderRadius: 8, cursor: 'pointer',
-                      border: `1px dashed ${tradeDragOver ? '#4CAF50' : '#2a2e38'}`,
-                      background: tradeDragOver ? 'rgba(76,175,80,0.08)' : 'transparent',
-                      color: '#9aa0ab', textAlign: 'center', transition: 'all 0.15s',
-                    }}
-                  >
-                    📥 CSV 선택 또는 드래그
-                    <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleTradeCsvUpload} />
-                  </label>
-                  {uploadedTradeFile && (
-                    <>
-                      <div style={{ fontSize: 11, color: '#9aa0ab', wordBreak: 'break-all' }}>{uploadedTradeFile} ({uploadedTradeCount}건)</div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa0ab', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={showUploadedTrades}
-                          onChange={e => toggleShowUploadedTrades(e.target.checked)}
-                          style={{ width: 12, height: 12, margin: 0, flexShrink: 0 }}
-                        />
-                        차트에 표시
-                      </label>
-                      <button
-                        type="button"
-                        onClick={clearUploadedTrades}
-                        style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#F44336', cursor: 'pointer' }}
-                      >지우기</button>
-                      <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.6 }}>
-                        <span style={{ color: '#C6FF00' }}>▲</span>롱진입&nbsp;
-                        <span style={{ color: '#AB47BC' }}>▼</span>숏진입<br />
-                        <span style={{ color: '#FFFFFF' }}>●</span>손절&nbsp;
-                        <span style={{ color: '#26A69A' }}>●</span>익절&nbsp;
-                        <span style={{ color: '#FF9800' }}>●</span>전환&nbsp;
-                        <span style={{ color: '#FFC107' }}>●</span>볼린저 이탈<br />
-                        <span style={{ color: '#FFC107' }}>■</span>달력에 매매 있는 날<br />
-                        ⚠ 나쁜 조합(1차/2차/3차 분류상 건당평균 마이너스)
-                      </div>
-                      {uploadedTradeRows.length > 0 ? (
-                        <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
-                          {uploadedTradeRows.map((r, i) => (
-                            <div
-                              key={i}
-                              onClick={() => goToTradeEntry(r)}
-                              title="클릭하면 진입 시점으로 이동 (다른 날짜면 그 날짜를 새로 불러옴, 재생 위치는 그대로 유지)"
-                              style={{
-                                fontSize: 10.5, padding: '5px 6px', borderRadius: 6, cursor: 'pointer',
-                                background: r.comboLabel === '나쁜' ? 'rgba(244,67,54,0.10)' : '#0f1115',
-                                border: r.comboLabel === '나쁜' ? '1px solid #F44336' : '1px solid #2a2e38',
-                                lineHeight: 1.6,
-                              }}
-                            >
-                              <div>
-                                <span style={{ color: r.dir === 'long' ? '#C6FF00' : '#AB47BC', fontWeight: 700 }}>
-                                  {r.dir === 'long' ? '▲롱' : '▼숏'}
-                                </span>
-                                {' / '}
-                                <span style={{ color: '#6b7280' }}>{r.pnl > 0 ? '+' : ''}{r.pnl.toFixed(1)}pt</span>
-                              </div>
-                              {r.comboLabel && (
-                                <div style={{ color: r.comboLabel === '나쁜' ? '#F44336' : '#4CAF50', marginTop: 1, fontWeight: r.comboLabel === '나쁜' ? 700 : 400 }}>
-                                  {r.comboLabel === '나쁜' ? '⚠ 나쁜조합' : '좋은조합'}
-                                </div>
-                              )}
-                              {r.combo && (
-                                <div style={{ color: r.comboLabel === '나쁜' ? '#F44336' : '#4CAF50', marginTop: 1 }}>
-                                  ({r.combo})
-                                </div>
-                              )}
-                              {r.pattern && (
-                                <div style={{ color: '#e8eaed', marginTop: 1, fontWeight: 700 }}>
-                                  {r.pattern}
-                                </div>
-                              )}
-                              <div style={{ marginTop: 1 }}>
-                                {r.entryIdx != null ? `${tradeNumLabel(r.num, r.entryIdx)}(${fmtHm(r.entryTime)})` : '이전구간'}
-                                {' → '}
-                                <span style={{ color: uploadedExitColor(r.exitReason) }}>
-                                  {r.exitIdx != null ? `${tradeNumLabel(r.num, r.exitIdx)}(${fmtHm(r.exitTime)})` : '다음구간'}
-                                </span>
-                              </div>
-                              <div style={{ color: r.breakoutTime != null ? '#FFC107' : '#6b7280', marginTop: 1 }}>
-                                {r.breakoutTime != null
-                                  ? `${r.breakoutDir || ''}이탈: ${r.breakoutIdx != null ? `${tradeNumLabel(r.num, r.breakoutIdx)}(${fmtHm(r.breakoutTime)})` : fmtHm(r.breakoutTime)}`
-                                  : '이탈: 크로스전환(새 돌파 없음)'}
-                              </div>
-                              <div style={{ color: '#6b7280', marginTop: 1 }}>
-                                진입가 {r.entryPrice != null ? r.entryPrice.toFixed(2) : '-'}
-                              </div>
-                              <div style={{ color: '#6b7280', marginTop: 1 }}>
-                                청산가 {r.exitPrice != null ? r.exitPrice.toFixed(2) : '-'}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: 10.5, color: '#6b7280', marginTop: 4 }}>이 구간엔 해당 파일의 매매가 없어요 — 노란 날짜를 먼저 불러오세요.</div>
-                      )}
-                    </>
-                  )}
-                  {uploadedTradeError && <div style={{ fontSize: 11, color: '#F44336' }}>{uploadedTradeError}</div>}
-                </div>
-              </CollapsibleCard>
+              {/* 라이브 페이지는 재생할 과거 구간이 없어서(사용자 요청) 달력/매매내역 업로드 카드를
+                  뺐다 - 둘 다 "날짜를 골라 그 구간을 불러온다"는 재생 전제 기능이라 실시간 모드랑 안 맞음. */}
 
               <CollapsibleCard title="횡보" maxWidth={170} defaultOpen={false}>
                 <div style={{ padding: '1px 0' }}>
@@ -5558,108 +5426,13 @@ export default function ReplayChart() {
                   </span>
                 )}
               </div>
-              {/* 빨간 바를 파란 바보다 위로 옮김(사용자 요청) - 🔍 찾기 번호가 빨간 바 위(-15px)로
-                  떠서 클릭할 때, 바로 위에 파란 바가 있으면 자꾸 그게 눌렸다(사용자 지적). 순서를
-                  바꿔서 빨간 바 위쪽엔 아무 드래그 영역도 없게 만들었다.
-                  빨간 바 - 재생 버튼과만 연동(재생하면 자동으로 채워짐), 파란 바와는 완전히 독립.
-                  드래그하면 화면(카메라)만 그 시점으로 옮기고(scrubView, 이미 드러난 캔들은 안 사라짐)
-                  재생 위치(playIndex) 자체도 그 자리로 같이 옮겨둔다 - 손을 떼도 스냅백 없이 그
-                  자리에 그대로 있고, 다음 ▶재생은 거기서부터 이어진다. */}
-              <div
-                ref={scrubBarRef}
-                onMouseDown={onScrubBarMouseDown}
-                title="드래그하면 그 자리로 재생 위치가 옮겨갑니다(캔들은 안 사라짐) - 손을 떼도 그 자리에 그대로 있고, 다음 재생은 여기서부터 이어집니다"
-                style={{
-                  position: 'relative', width: '100%', height: 16, marginTop: 8,
-                  background: '#2a2e38', borderRadius: 8, overflow: 'visible',
-                  cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
-                }}
-              >
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 8,
-                  width: `${total ? Math.min(100, (redPos / total) * 100) : 0}%`,
-                  background: '#F44336', pointerEvents: 'none', transition: playing ? 'width 0.15s linear' : 'none',
-                }} />
-                <div style={{
-                  position: 'absolute', top: '50%', left: `${total ? Math.min(100, (redPos / total) * 100) : 0}%`,
-                  width: 18, height: 18, marginLeft: -9, marginTop: -9, borderRadius: '50%',
-                  background: '#F44336', border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.5)', pointerEvents: 'none',
-                }} />
-                {/* 🔍 찾기 결과 - 재생 바 위에 순번을 얹는다(사용자 요청, 차트 위 마커 대신). 클릭하면
-                    그 캔들로 이동(빨간 바를 그 지점으로 드래그한 것과 동일하게 stopPlayback+scrubView+
-                    applyIndex). stopPropagation 안 하면 부모의 onMouseDown(드래그 시작)이 같이 발동한다. */}
-                {total > 0 && twFoundPositions.map((f, n) => (
-                  <div
-                    key={f.idx}
-                    onMouseDown={(e) => { e.stopPropagation(); stopPlayback(); scrubView(f.idx); applyIndex(f.idx) }}
-                    title={`${n + 1}번째 (${f.idx}봉) - 클릭 시 이동`}
-                    style={{
-                      position: 'absolute', top: -15, left: `${Math.min(100, (f.idx / total) * 100)}%`,
-                      transform: 'translateX(-50%)', fontSize: 9, fontWeight: 700, lineHeight: '12px',
-                      padding: '0 3px', borderRadius: 3, cursor: 'pointer', whiteSpace: 'nowrap', zIndex: 6,
-                      background: '#171a21', color: f.side === 'sell' ? '#ef5350' : '#26a69a',
-                      border: `1px solid ${f.side === 'sell' ? '#ef5350' : '#26a69a'}`,
-                    }}
-                  >{n + 1}</div>
-                ))}
-              </div>
-
-              {/* 파란 바 - 재생 버튼/재생 위치(빨간 바)와는 완전히 무관, 사용자가 직접 드래그할 때만
-                  움직인다(그 외엔 항상 맨 끝). 드래그하면 화면(카메라)만 그 지점으로 옮기고, 재생 위치나
-                  이미 그려진 캔들은 그대로 유지된다. */}
-              <div
-                ref={blueBarRef}
-                onMouseDown={onBlueBarMouseDown}
-                title="드래그하면 화면만 그 캔들로 이동합니다 (재생 위치는 그대로 유지됩니다)"
-                style={{
-                  position: 'relative', width: '100%', height: 16, marginTop: 8,
-                  background: '#2a2e38', borderRadius: 8, overflow: 'visible',
-                  cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
-                }}
-              >
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 8,
-                  width: `${total ? Math.min(100, (bluePos / total) * 100) : 0}%`,
-                  background: '#4FC3F7', pointerEvents: 'none',
-                }} />
-                <div style={{
-                  position: 'absolute', top: '50%', left: `${total ? Math.min(100, (bluePos / total) * 100) : 0}%`,
-                  width: 18, height: 18, marginLeft: -9, marginTop: -9, borderRadius: '50%',
-                  background: '#4FC3F7', border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.5)', pointerEvents: 'none',
-                }} />
-              </div>
-
+              {/* 라이브 페이지는 재생 개념이 없어서(사용자 요청) 빨간 바/파란 바/재생·처음부터/배속
+                  버튼을 전부 뺐다 - 스샷 버튼만 남김. */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-                <button onClick={playing ? stopPlayback : play} disabled={!total} style={{
-                  background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 9,
-                  padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
-                }}>{playing ? '⏸ 일시정지' : '▶ 재생'}</button>
-
-                <button onClick={reset} disabled={!total} style={{
-                  background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
-                  padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
-                }}>⏮ 처음부터</button>
-
                 <button onClick={captureScreenshot} disabled={!total} title="지금 보이는 상태 그대로 PNG로 저장" style={{
                   background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
                   padding: '10px 16px', fontSize: 14, cursor: total ? 'pointer' : 'not-allowed',
                 }}>📸 스샷</button>
-
-                {SPEEDS.map(s => {
-                  const secs = REALTIME_MS / s / 1000
-                  const secsLabel = secs >= 60 ? `${(secs / 60).toFixed(secs % 60 === 0 ? 0 : 1)}분` : `${secs.toFixed(secs % 1 === 0 ? 0 : 1)}초`
-                  // 버튼에 배속마다 캔들 1개 그려지는 데 몇 초 걸리는지 바로 보이게(사용자 요청) - 예: x1 (60s), x3 (20s)
-                  const secDisplay = secs % 1 === 0 ? `${secs}` : secs.toFixed(1)
-                  return (
-                    <button key={s} onClick={() => setSpeed(s)} title={`캔들 1개 = ${secsLabel}`} style={{
-                      background: speed === s ? '#2a2e38' : 'none', color: speed === s ? '#e8eaed' : '#9aa0ab',
-                      border: '1px solid #2a2e38', borderRadius: 9, padding: '8px 12px', fontSize: 13, cursor: 'pointer',
-                    }}>x{s} ({secDisplay}s)</button>
-                  )
-                })}
-              </div>
-              <div style={{ fontSize: 12.5, color: '#c8ccd4', marginTop: 6, fontWeight: 500 }}>
-                x1 = 1분당 캔들 1개(실제 시세 속도). 배속은 그 배수 — x2=30초/캔들, x60=1초/캔들
               </div>
 
               {/* 왼쪽: 매매 컨트롤(폭 절반) / 오른쪽: 매매진입 현황 - 기본은 원래 자리(인라인)에 있고,
@@ -5855,102 +5628,11 @@ export default function ReplayChart() {
                 )}
               </div>
 
-              <div style={{ marginTop: 16 }}>
-                <CollapsibleCard title="⚙ 반자동" maxWidth="none" defaultOpen={false}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
-                    <input
-                      type="checkbox" checked={semiAutoEnabled}
-                      onChange={e => setSemiAutoEnabled(e.target.checked)}
-                      style={{ width: 15, height: 15, accentColor: '#4CAF50' }}
-                    />
-                    반자동 사용하기
-                  </label>
-
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (왼쪽 "크로스" 표시와는 슬롯이 따로지만, 같은 조합을 골라두면 마커가 뜨는 캔들에 그대로 진입됩니다)
-                    </div>
-                    {renderPairSlots(autoCrossPairs, setAutoCrossPair, MOVING_AVERAGES, '크로스')}
-                  </div>
-
-                </CollapsibleCard>
-              </div>
-
-              {/* 시뮬레이션 - 반자동과 조건 구성/계산 로직은 동일하고, 켜고 끄는 체크와 진입 타임라인만 별도라
-                  반자동과 동시에 켜두고 서로 다른 조건 조합을 비교해볼 수 있다. 날짜 선택/재생은 위 차트 컨트롤 그대로 공용으로 쓴다. */}
-              <div style={{ marginTop: 16 }}>
-                <CollapsibleCard title="🧪 시뮬레이션" maxWidth="none" defaultOpen={false}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
-                    <input
-                      type="checkbox" checked={simulationEnabled}
-                      onChange={e => setSimulationEnabled(e.target.checked)}
-                      style={{ width: 15, height: 15, accentColor: '#4CAF50' }}
-                    />
-                    시뮬레이션 사용하기
-                  </label>
-
-                  {/* 화면에 노출되는 "분석" 기능은 아니고, 청산된 시뮬레이션 거래를 DB에 쌓아뒀다가
-                      나중에 대화 중 요청하면 그 기록을 조회해서 분석해주는 용도의 저장 버튼 */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '8px 10px', background: '#0f1115', borderRadius: 8 }}>
-                    <span style={{ fontSize: 12, color: '#9aa0ab' }}>청산된 시뮬레이션 거래 {closedTradesCount}건</span>
-                    <button
-                      type="button"
-                      onClick={saveSimulationResults}
-                      disabled={savingResults}
-                      style={{
-                        fontSize: 12, padding: '5px 12px', borderRadius: 6, cursor: savingResults ? 'default' : 'pointer',
-                        border: '1px solid #4CAF50', background: '#4CAF5022', color: '#4CAF50', fontWeight: 700,
-                        opacity: savingResults ? 0.6 : 1,
-                      }}
-                    >{savingResults ? '저장 중...' : '결과 저장'}</button>
-                  </div>
-
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11.5, color: '#9aa0ab', marginBottom: 6 }}>
-                      조건: 크로스 — 골든크로스 매수 / 데드크로스 매도 (반자동과 별개로 켜고 끌 수 있는 시뮬레이션 전용 슬롯입니다)
-                    </div>
-                    {renderPairSlots(simCrossPairs, setSimCrossPair, MOVING_AVERAGES, '크로스')}
-                  </div>
-
-                </CollapsibleCard>
-              </div>
+              {/* 라이브 페이지는 "반자동"/"시뮬레이션" 카드도 필요 없어서 뺐다(사용자 요청) - 둘 다
+                  재생 구간을 전제로 한 기능이라 실시간 모드랑 안 맞음. */}
             </div>
           </div>
 
-          <div style={{ marginTop: 40, background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 24 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>📤 매매내역 업로드 — CSV 형식 안내</h2>
-            <p style={{ color: '#9aa0ab', fontSize: 13.5, lineHeight: 1.7, marginBottom: 12 }}>
-              직접 돌린 백테스트 결과(진입/청산 시각·가격·손익)를 CSV로 만들어 왼쪽 "📤 매매내역 업로드" 카드에 올리면,
-              이 캔들 차트 위에 진입(▲롱 / ▼숏)·청산(●손절 빨강 / ●익절 초록 / ●크로스전환 주황) 마커로 겹쳐서 볼 수 있어요.
-              날짜 범위를 불러오면 재생하지 않아도 그 안의 매매가 바로 전부 표시됩니다.
-            </p>
-            <p style={{ color: '#9aa0ab', fontSize: 13.5, lineHeight: 1.7, marginBottom: 12 }}>
-              CSV는 아래 10개 컬럼을 헤더 그대로 가진 형식이어야 해요(뒤에 컬럼이 더 있어도 무시하고 앞 10개만 읽어요):
-            </p>
-            <div style={{ background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: '#e8eaed', overflowX: 'auto', marginBottom: 14, fontFamily: 'monospace' }}>
-              진입날짜,진입시간,방향,진입가,청산날짜,청산시간,청산가,보유시간(분),청산사유,손익(pt)
-              <span style={{ color: '#6b7280' }}>[,이탈날짜,이탈시각,이탈방향]</span>
-            </div>
-            <ul style={{ color: '#9aa0ab', fontSize: 13, lineHeight: 1.8, marginBottom: 16, paddingLeft: 20 }}>
-              <li><b style={{ color: '#e8eaed' }}>진입날짜/청산날짜</b>: YYYY-MM-DD</li>
-              <li><b style={{ color: '#e8eaed' }}>진입시간/청산시간</b>: HH:MM:SS (한국시간 기준)</li>
-              <li><b style={{ color: '#e8eaed' }}>방향</b>: 롱 또는 숏</li>
-              <li><b style={{ color: '#e8eaed' }}>청산사유</b>: <code>SL</code>로 시작하면 손절(빨강), <code>TP</code>로 시작하면 익절(초록), <code>flip</code>으로 시작하면 크로스전환(주황)으로 표시돼요</li>
-              <li><b style={{ color: '#e8eaed' }}>이탈날짜/이탈시각/이탈방향</b>(선택): 이 진입을 만든 5분B 볼린저 이탈 시점 — 새 돌파 없이 크로스만으로 전환된 진입은 비어있어요. 화면 표시엔 안 쓰고 CSV 안에서 참고용으로만 남겨둬요.</li>
-            </ul>
-            <a
-              href="/sample-trades.csv"
-              download="sample-trades.csv"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 9,
-                background: '#4CAF50', color: '#fff', fontWeight: 700, fontSize: 13.5, textDecoration: 'none',
-              }}
-            >📥 샘플 CSV 다운로드</a>
-            <p style={{ color: '#6b7280', fontSize: 12, marginTop: 10 }}>
-              실제 백테스트 결과 6건(롱 익절·롱 손절·숏 익절·숏 손절·크로스전환 2건)이 담긴 샘플이에요. 다운로드한 파일을 그대로 왼쪽 업로드 카드에 올려서
-              동작을 먼저 확인해본 뒤, 자신의 결과 CSV로 바꿔 올리면 됩니다. 업로드하면 달력에서 매매가 있는 날짜가 노란색으로 표시되니, 그 날짜를 눌러 불러오면 왼쪽 카드에 캔들 번호와 함께 목록이 뜨고 클릭하면 그 위치로 바로 이동해요.
-            </p>
-          </div>
         </main>
 
         {/* document.body에 포탈로 그린다(사용자 지적 - "항상 제일 위" 요청) - 이전엔 페이지 트리 안에
