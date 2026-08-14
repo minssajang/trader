@@ -6,6 +6,7 @@ import { createChart, CrosshairMode, CandlestickSeries, LineSeries, HistogramSer
 import BrandLogo from '../components/BrandLogo'
 import { MonthCalendar, CollapsibleCard, buildAvailableDates } from '../components/BacktestCalendar'
 import { parseCandleCsv, toLocalDateStr, toUnixSeconds, BROKER_OFFSET_SECONDS } from '../lib/candleCsv'
+import { supabaseClient } from '../lib/supabaseClient'
 import { BOLLINGER_BANDS, rollingBollinger, DONCHIAN_CHANNELS, rollingDonchian, MOVING_AVERAGES, MADRID_RIBBON, computeMA, rollingRSI, rollingMACD, rollingStochastic, rollingHMA, rollingWMA, rollingSMA } from '../lib/indicators'
 
 // 이평선 데이터 계산/토글 파이프라인(maDataRef/maSeriesRef/enabledMA 등)은 id로만 구분하므로
@@ -1200,6 +1201,7 @@ export default function ReplayChart() {
   const liveRowsRef = useRef([])
   const liveLastIdRef = useRef(0)
   const livePollTimerRef = useRef(null)
+  const liveRealtimeChannelRef = useRef(null) // Supabase Realtime 구독 채널 - 폴링 대신 DB 변경을 즉시 밀어받는 용도
   const hasLiveCenteredRef = useRef(false) // 새로고침/심볼전환 후 카메라를 딱 한 번만 중앙 정렬하기 위한 플래그
   // EA가 멈춰도 폴링 요청 자체는 계속 200으로 성공해서 "연결됨"으로 보이는 문제가 있었다(사용자 지적 -
   // 자동매매가 꺼져서 EA가 멈췄는데도 페이지는 계속 초록불이었음) - 요청 성공 여부 대신 "마지막 캔들의
@@ -1316,6 +1318,7 @@ export default function ReplayChart() {
     startLivePolling(symbol)
     return () => {
       if (livePollTimerRef.current) clearInterval(livePollTimerRef.current)
+      if (liveRealtimeChannelRef.current) { supabaseClient.removeChannel(liveRealtimeChannelRef.current); liveRealtimeChannelRef.current = null }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol])
@@ -2438,16 +2441,15 @@ export default function ReplayChart() {
 
   const loadDate = (dateStr) => loadRange(dateStr, dateStr)
 
-  // ── 라이브 폴링 ──────────────────────────────────────────────────────────
-  // 과거 CSV를 날짜로 골라 불러오던 위 loadRange/loadDate 대신, 라이브 페이지는 /api/live-price를
-  // 초기 1회 전체 조회 + 주기적 폴링으로 계속 이어붙인다. 지표 워밍업용 과거봉은 이제 MT5 EA가 시작
-  // 시 직접 live_candles에 백필해두므로(EasyTrade_LivePriceSender.mq5), 여기선 그냥 서버에 있는 걸
-  // 전부 받아오기만 하면 된다 - 별도 CSV 조회 로직 불필요(리플레이용 히스토리 CSV는 최신 상태를
-  // 보장하지 않는 별개 기능 데이터라 워밍업 소스로 부적절했음, 사용자 지적으로 이 방식으로 바꿈).
-  // computeIndicatorsForRange/applyIndex는 "fullRows 전체를 그 구간 그대로 보여준다"는 동작이 그대로
-  // 맞아떨어져서 손대지 않고 재사용한다.
-  const LIVE_POLL_MS = 3000
-  // 지표 재계산은 매 폴링(3초)마다 통째로 다시 도는데(rowsRef 전체를 O(n)으로 훑는 롤링계산 여러 개),
+  // ── 라이브 연결 ──────────────────────────────────────────────────────────
+  // 과거 CSV를 날짜로 골라 불러오던 위 loadRange/loadDate 대신, 라이브 페이지는 /api/live-price로 초기
+  // 1회 전체 조회(백필분 포함) 후, 이후 갱신은 Supabase Realtime(웹소켓)으로 즉시 받는다 - 폴링(몇 초
+  // 간격으로 물어보기)은 "실시간 매매엔 너무 느리다"는 사용자 지적으로 Realtime 푸시로 바꿨고, 폴링은
+  // 연결이 끊겼을 때 대비한 뜸한 안전망(LIVE_FALLBACK_POLL_MS)으로만 남겨뒀다. 지표 워밍업용 과거봉은
+  // MT5 EA가 시작 시 직접 live_candles에 백필해두므로(EasyTrade_LivePriceSender.mq5), 여기선 그냥
+  // 서버에 있는 걸 받아오기만 하면 된다. computeIndicatorsForRange/applyIndex는 "fullRows 전체를 그
+  // 구간 그대로 보여준다"는 동작이 그대로 맞아떨어져서 손대지 않고 재사용한다.
+  // 지표 재계산은 갱신이 올 때마다 통째로 다시 도는데(rowsRef 전체를 O(n)으로 훑는 롤링계산 여러 개),
   // 백필된 3일치+계속 쌓이는 라이브봉을 다 넣고 돌리면 미장 시작처럼 캔들이 빠르게 들어올 때 그 계산
   // 자체가 오래 걸려서 화면이 실제 가격을 못 따라가는 지연이 있었다(사용자 지적). 지표 최대 워밍업이
   // 1200개(SMA1200 등)뿐이라, 매번 넘겨주는 배열을 넉넉히 2500개로 잘라서 계산량을 고정시킨다 -
@@ -2514,6 +2516,23 @@ export default function ReplayChart() {
 
   const LIVE_STALE_SEC = 90 // 마지막 캔들 시각이 지금으로부터 이만큼(초) 넘게 지나면 "끊김"으로 본다(M1이라 정상이면 60초 안쪽)
 
+  // 마지막 캔들의 "실제 시각"으로 끊김 여부를 판단해서 상태를 갱신한다 - pollLiveOnce/Realtime 이벤트
+  // 양쪽에서 공유해서 쓴다(중복 제거).
+  const refreshLiveStaleStatus = () => {
+    const rows = liveRowsRef.current
+    const lastBarTime = rows.length ? rows[rows.length - 1].time : null
+    const ageSec = lastBarTime != null ? Math.floor(Date.now() / 1000) - lastBarTime : Infinity
+    if (lastBarTime != null && ageSec > LIVE_STALE_SEC) {
+      setLiveStatus('stale')
+      setLiveStaleSec(ageSec)
+    } else {
+      setLiveStatus('live')
+    }
+  }
+
+  // REST로 한 번에 받아오는 경로 - 최초 로드(백필분 포함 전체)와, Realtime이 놓쳤을까봐 도는 가벼운
+  // 안전망 폴링(LIVE_FALLBACK_POLL_MS) 둘 다 이걸 쓴다. 평소엔 아래 Realtime 구독이 갱신을 즉시
+  // 처리하므로, 이 함수가 새로 받아올 게 있는 경우는 자주 없다(있으면 그것도 정상 처리됨).
   const pollLiveOnce = async (sym) => {
     try {
       const sinceId = Math.max(0, liveLastIdRef.current - 1) // 진행 중인 캔들의 최신 갱신도 받기 위해 1 낮춰서 요청
@@ -2526,38 +2545,54 @@ export default function ReplayChart() {
         mergeLiveRows(incoming)
         refreshLiveChart()
       }
-      // 폴링 요청 자체는 계속 200으로 성공해도(위 incoming엔 항상 마지막으로 알던 캔들이 다시 잡힘 -
-      // sinceId를 1 낮춰서 요청하기 때문), EA가 멈추면 그 캔들 내용이 그대로 멈춰있게 된다 - 그래서
-      // "요청 성공 여부"가 아니라 "마지막 캔들의 실제 시각이 지금과 얼마나 벌어졌는지"로 판단한다.
-      const rows = liveRowsRef.current
-      const lastBarTime = rows.length ? rows[rows.length - 1].time : null
-      const ageSec = lastBarTime != null ? Math.floor(Date.now() / 1000) - lastBarTime : Infinity
-      if (lastBarTime != null && ageSec > LIVE_STALE_SEC) {
-        setLiveStatus('stale')
-        setLiveStaleSec(ageSec)
-      } else {
-        setLiveStatus('live')
-      }
+      // 폴링 요청 자체는 계속 200으로 성공해도 EA가 멈추면 캔들 내용이 그대로 멈춰있으니, "요청 성공
+      // 여부"가 아니라 "마지막 캔들의 실제 시각이 지금과 얼마나 벌어졌는지"로 끊김을 판단한다.
+      refreshLiveStaleStatus()
     } catch {
       setLiveStatus('error')
     }
   }
 
-  // 심볼이 바뀌거나 페이지를 뜰 때 호출 - 그 심볼의 폴링을 새로 시작한다(이전 심볼의 폴링/버퍼는 정리).
+  // Supabase Realtime(웹소켓)으로 live_candles 변경을 즉시 받는다 - 폴링(몇 초 간격)과 달리 DB에
+  // 새 행이 생기거나 갱신되는 그 순간 브라우저로 바로 밀려온다(사용자 요청 - "틱마다 따라가야 함",
+  // 3초 폴링으로는 실시간 매매에 못 씀). EA가 보내는 만큼(SendEveryMs)이 사실상의 속도 한계가 된다.
+  const handleRealtimeChange = (sym, payload) => {
+    const row = payload.new
+    if (!row || sym !== symbolRef.current) return
+    mergeLiveRows([{ id: row.id, date: row.bar_date, time: row.bar_time, open: row.open, high: row.high, low: row.low, close: row.close }])
+    refreshLiveChart()
+    refreshLiveStaleStatus()
+  }
+
+  const subscribeLiveRealtime = (sym) => {
+    if (liveRealtimeChannelRef.current) supabaseClient.removeChannel(liveRealtimeChannelRef.current)
+    liveRealtimeChannelRef.current = supabaseClient
+      .channel(`live_candles_${sym}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_candles', filter: `symbol=eq.${sym}` },
+        (payload) => handleRealtimeChange(sym, payload))
+      .subscribe()
+  }
+
+  const LIVE_FALLBACK_POLL_MS = 20000 // Realtime이 평소 처리하므로, 폴링은 연결이 끊겼을 때 대비한 안전망 정도로만 뜸하게
+
+  // 심볼이 바뀌거나 페이지를 뜰 때 호출 - 그 심볼의 연결을 새로 시작한다(이전 심볼의 구독/버퍼는 정리).
   const startLivePolling = (sym) => {
+    if (liveRealtimeChannelRef.current) { supabaseClient.removeChannel(liveRealtimeChannelRef.current); liveRealtimeChannelRef.current = null }
     if (livePollTimerRef.current) clearInterval(livePollTimerRef.current)
     liveRowsRef.current = []
     liveLastIdRef.current = 0
     hasLiveCenteredRef.current = false
     setLiveConnected(true) // 심볼을 바꾸면 수동으로 끊어뒀던 것도 다시 연결(새로 시작하는 거니까)
     setLiveStatus('connecting')
-    pollLiveOnce(sym)
-    livePollTimerRef.current = setInterval(() => pollLiveOnce(symbolRef.current), LIVE_POLL_MS)
+    pollLiveOnce(sym) // 초기 전체 로드(백필분 포함) - 이후 갱신은 Realtime이 담당
+    subscribeLiveRealtime(sym)
+    livePollTimerRef.current = setInterval(() => pollLiveOnce(symbolRef.current), LIVE_FALLBACK_POLL_MS)
   }
 
-  // "연결 끊기/연결하기" 버튼(사용자 요청) - 폴링만 멈추고 지금까지 그려진 차트는 그대로 둔다(데이터
-  // 초기화 안 함). 다시 연결하면 그 시점 이후 새 캔들부터 이어서 받아온다(liveLastIdRef를 안 지우므로).
+  // "연결 끊기/연결하기" 버튼(사용자 요청) - Realtime 구독/폴링 다 멈추고 지금까지 그려진 차트는
+  // 그대로 둔다(데이터 초기화 안 함). 다시 연결하면 그 시점 이후 새 캔들부터 이어서 받아온다.
   const disconnectLive = () => {
+    if (liveRealtimeChannelRef.current) { supabaseClient.removeChannel(liveRealtimeChannelRef.current); liveRealtimeChannelRef.current = null }
     if (livePollTimerRef.current) { clearInterval(livePollTimerRef.current); livePollTimerRef.current = null }
     setLiveConnected(false)
     setLiveStatus('disconnected')
@@ -2565,7 +2600,8 @@ export default function ReplayChart() {
   const reconnectLive = () => {
     setLiveConnected(true)
     pollLiveOnce(symbolRef.current)
-    livePollTimerRef.current = setInterval(() => pollLiveOnce(symbolRef.current), LIVE_POLL_MS)
+    subscribeLiveRealtime(symbolRef.current)
+    livePollTimerRef.current = setInterval(() => pollLiveOnce(symbolRef.current), LIVE_FALLBACK_POLL_MS)
   }
 
   // 매매내역 CSV 업로드 - 파일 하나를 고르면 그걸로 통째로 교체(여러 개 겹쳐 올리는 기능 아님).
