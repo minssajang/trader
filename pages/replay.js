@@ -4310,9 +4310,7 @@ export default function ReplayChart() {
                 <TwStatusDot label="돌파" active={row1BelowBreakout} colorA={TW_STATUS_LIME_A} />
                 <TwStatusDot label="진입" active={row1BelowReady} colorA={TW_STATUS_LIME_A} />
               </div>
-              </label>
-              <div style={{ display: 'flex', gap: 4 }}>{dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true)}</div>
-            </div>
+            </label>
           </div>
           {/* 새 9,10번(사용자 요청) - 스토캐스틱 2세트(70,15,15 / 210,45,45) 상태만, 9번=둘 다 데드,
               10번=둘 다 골든(반대). 내부 체크 키는 새로 7/7.1 씀. twSwapped에 좌우 같이 뒤바뀜. */}
