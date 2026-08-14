@@ -1053,10 +1053,14 @@ export default function ReplayChart() {
   const [pnlDisplay, setPnlDisplay] = useState(rs.pnlDisplay ?? 'dollar') // 'dollar' | 'point'
 
   // 실주문(진짜 MT5 주문) 관련 상태 - 위의 랏수/포지션은 전부 웹 안에서만 도는 가상매매고, 이건 실제
-  // 돈이 움직이는 별개 기능이라 일부러 랏수도 따로 둔다(가상매매 설정과 안 섞이게). 비밀번호는 새로고침하면
-  // 사라지게 세션 state로만 두고 저장 안 함(보안 - 실제 계좌 비밀번호 성격의 값이라 localStorage에도 안 남김).
-  const [tradePassword, setTradePassword] = useState('')
+  // 돈이 움직이는 별개 기능이라 일부러 랏수도 따로 둔다(가상매매 설정과 안 섞이게). tradeAccountLabel
+  // 자체가 각 이용자만 아는 비밀값 역할이라(자기 EA에도 똑같이 입력해두는 값) 별도 비밀번호는 안 둔다
+  // (사용자 지적 - 중복이었음). 새로고침하면 사라지게 세션 state로만 두고 저장 안 함(공유 PC 등 대비).
   const [tradeAccountLabel, setTradeAccountLabel] = useState('') // 기본값 없음(사용자 요청) - 안 정하면 전송 버튼 비활성
+  // 실주문 카드 자체를 기본적으로 숨겨두는 마스터 스위치(사용자 요청) - 체크해야 아래 실주문 카드가
+  // 나타나고 경고 문구도 뜬다. 이것도 새로고침하면 꺼지게 세션에만 둔다(계속 켜진 채 남지 않게).
+  const [realTradingUnlocked, setRealTradingUnlocked] = useState(false)
+  const [showTradeGuideModal, setShowTradeGuideModal] = useState(false)
   const [tradeLot, setTradeLot] = useState(0.01)
   const [tradeCommands, setTradeCommands] = useState([]) // 최근 보낸 명령들 [{id, direction, status, message}] - 화면에 체결 결과 보여주는 용도
   const [tradeSending, setTradeSending] = useState(false)
@@ -3631,7 +3635,7 @@ export default function ReplayChart() {
   }
 
   const sendTradeCommand = async (direction) => {
-    if (!tradePassword || !tradeAccountLabel || tradeSending) return
+    if (!tradeAccountLabel || tradeSending) return
     const actionLabel = direction === 'buy' ? '매수' : direction === 'sell' ? '매도' : '전체 청산'
     const lotLabel = direction === 'close' ? '' : ` ${tradeLot}랏`
     if (!window.confirm(`정말로 계좌 "${tradeAccountLabel}"에 ${symbol} ${actionLabel}${lotLabel} 실주문을 넣을까요? 실제 돈이 움직입니다.`)) return
@@ -3641,7 +3645,7 @@ export default function ReplayChart() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          password: tradePassword, account_label: tradeAccountLabel, symbol, direction,
+          account_label: tradeAccountLabel, symbol, direction,
           lot: direction === 'close' ? null : tradeLot,
         }),
       })
@@ -4568,6 +4572,51 @@ export default function ReplayChart() {
     </>
   )
 
+  // 실제 매매(MT5 실주문) 사용법 안내 모달 - 정보 표시용이라 드래그/리사이즈 없이 단순 중앙 오버레이로 충분함.
+  const renderTradeGuideModal = () => (
+    <div
+      onClick={() => setShowTradeGuideModal(false)}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 24, maxWidth: 560, maxHeight: '85vh', overflowY: 'auto', color: '#e8eaed' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>이지트레이더 차트로 MT5 실제 매매하는 방법</div>
+          <button type="button" onClick={() => setShowTradeGuideModal(false)} style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+        </div>
+
+        <div style={{ fontSize: 13, lineHeight: 1.9 }}>
+          <div style={{ fontWeight: 700, color: '#4CAF50', marginBottom: 4 }}>① MT5에 EA 붙이기</div>
+          <ol style={{ paddingLeft: 20, margin: '0 0 14px', color: '#c8ccd4' }}>
+            <li>MT5를 열고 매매할 계좌(데모 또는 실계좌)로 로그인</li>
+            <li>매매할 종목 차트를 열기 (골드=XAUUSD+, 나스닥=NAS100 등)</li>
+            <li>탐색기에서 <b>EasyTrade_LivePriceSender</b>를 그 차트 위로 드래그</li>
+            <li>설정창에서 <b>EnableRealTrading</b>을 true로 체크</li>
+            <li><b>AccountLabel</b>에 나만 아는 이름을 정해서 입력 (예: my_gold_01) — <span style={{ color: '#F44336' }}>이 값이 곧 비밀번호 역할이라 남에게 알려주면 안 됨</span></li>
+            <li><b>MaxLotSize</b>를 이 계좌에서 허용할 최대 랏수로 설정</li>
+            <li>확인 → 상단 툴바의 "자동매매(AutoTrading)"가 켜져 있는지 확인(초록불)</li>
+          </ol>
+
+          <div style={{ fontWeight: 700, color: '#4CAF50', marginBottom: 4 }}>② 웹에서 주문 보내기</div>
+          <ol style={{ paddingLeft: 20, margin: '0 0 14px', color: '#c8ccd4' }}>
+            <li>이 라이브 페이지에서 매매할 심볼(골드/나스닥) 선택</li>
+            <li>왼쪽의 "🔴 실제 매매" 체크박스 켜기 — 경고 문구가 뜸</li>
+            <li>아래 나타난 "🔴 실주문" 카드의 계좌 라벨 칸에 ①에서 정한 값을 <b>정확히 똑같이</b> 입력</li>
+            <li>랏수 정하고 실매수 / 실매도 / 전체 청산 버튼 클릭 → 확인창에서 한 번 더 확인</li>
+            <li>몇 초 안에 MT5에서 실제로 체결되고, 카드 하단에 처리 결과(체결/실패)가 표시됨</li>
+          </ol>
+
+          <div style={{ background: 'rgba(244,67,54,0.1)', border: '1px solid #F44336', borderRadius: 8, padding: '10px 12px', color: '#F44336', fontSize: 12, lineHeight: 1.7 }}>
+            ⚠ 실제 돈이 움직이는 기능입니다. 처음엔 반드시 <b>데모 계좌</b>로 충분히 테스트한 뒤 실계좌에 연결하세요.
+            계좌 라벨은 그 자체가 비밀번호이니 남과 공유하지 마세요.
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
   // 페이지 안 모달 - 드래그로 위치 이동 + 우측 하단 모서리로 좌우/상하 크기 조절(CSS resize) 가능.
   const renderTwEmbedded = () => (
     <div style={{
@@ -4711,7 +4760,7 @@ export default function ReplayChart() {
 
   return (
     <>
-      <Head><title>리플레이 차트 시뮬레이션 — EasyTrade</title></Head>
+      <Head><title>실시간 차트 — EasyTrade</title></Head>
       <div className="bt-page" style={{ minHeight: '100vh', background: '#0f1115', color: '#e8eaed', fontFamily: '-apple-system, "Segoe UI", "Malgun Gothic", sans-serif' }}>
         <style>{`
           /* styles/site.css의 전역 button { width:100%; margin-top:20px }이
@@ -4784,6 +4833,26 @@ export default function ReplayChart() {
                   >↺</button>
                 )}
               </div>
+
+              {/* 실제 매매(실주문) 마스터 스위치 - 기본 꺼짐, 체크해야 하단의 "🔴 실주문" 카드가 나타나고
+                  경고 문구도 뜬다(사용자 요청 - 실수로 그 카드를 건드릴 일이 없게 기본적으로 숨겨둠). */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: realTradingUnlocked ? '#F44336' : '#9aa0ab', cursor: 'pointer', fontWeight: realTradingUnlocked ? 700 : 400 }}>
+                  <input type="checkbox" checked={realTradingUnlocked} onChange={e => setRealTradingUnlocked(e.target.checked)} />
+                  🔴 실제 매매
+                </label>
+                <button
+                  type="button" onClick={() => setShowTradeGuideModal(true)}
+                  title="MT5 실제 매매 사용법 보기"
+                  style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
+                >❓ 사용법</button>
+              </div>
+              {realTradingUnlocked && (
+                <div style={{ background: 'rgba(244,67,54,0.1)', border: '1px solid #F44336', borderRadius: 8, padding: '8px 10px', fontSize: 11, color: '#F44336', lineHeight: 1.5 }}>
+                  ⚠ 이제부터 아래 "실주문" 카드에서 누르는 매수/매도는 시뮬레이션이 아니라 MT5에 연결된
+                  실제 계좌에 진짜 주문이 나갑니다. 실제 돈이 움직이니 계좌 라벨과 랏수를 꼭 확인하세요.
+                </div>
+              )}
 
               {/* 라이브 페이지는 재생할 과거 구간이 없어서(사용자 요청) 달력/매매내역 업로드 카드를
                   뺐다 - 둘 다 "날짜를 골라 그 구간을 불러온다"는 재생 전제 기능이라 실시간 모드랑 안 맞음. */}
@@ -5622,19 +5691,16 @@ export default function ReplayChart() {
 
               {/* 실주문(진짜 MT5 주문) - 위 매매 컨트롤은 전부 웹 안에서만 도는 가상매매고, 이건 별개
                   기능이라 일부러 카드도 분리해뒀다(사용자 요청 - 실제 돈이 걸린 기능이라 안전장치 필요).
-                  비밀번호/계좌라벨을 안 정하면 버튼이 막힌다 - EA 쪽에도 같은 안전장치가 이중으로 있음. */}
+                  계좌라벨 자체가 비밀값 역할이라(자기 EA에도 똑같이 입력해두는 값) 이것만 안 정하면
+                  버튼이 막힌다 - EA 쪽 EnableRealTrading/AccountLabel 이중 확인도 별개로 있음. */}
+              {realTradingUnlocked && (
               <div style={{ background: '#171a21', border: '1px solid #F44336', borderRadius: 14, padding: 16, flex: '1 1 100%' }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#F44336', marginBottom: 10 }}>🔴 실주문 (MT5에 실제로 체결됩니다)</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
                   <input
-                    type="password" placeholder="MT5 비번" value={tradePassword}
-                    onChange={e => setTradePassword(e.target.value)}
-                    style={{ width: 120, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '7px 8px', fontSize: 13 }}
-                  />
-                  <input
-                    type="text" placeholder="계좌 라벨 (예: live1)" value={tradeAccountLabel}
+                    type="password" placeholder="계좌 라벨 (자기 EA와 동일하게)" value={tradeAccountLabel}
                     onChange={e => setTradeAccountLabel(e.target.value)}
-                    style={{ width: 140, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '7px 8px', fontSize: 13 }}
+                    style={{ width: 200, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '7px 8px', fontSize: 13 }}
                   />
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     <span style={{ fontSize: 12, color: '#9aa0ab' }}>랏수</span>
@@ -5647,7 +5713,7 @@ export default function ReplayChart() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   {(() => {
-                    const disabled = !tradePassword || !tradeAccountLabel || tradeSending
+                    const disabled = !tradeAccountLabel || tradeSending
                     return (
                       <>
                         <button
@@ -5665,7 +5731,7 @@ export default function ReplayChart() {
                       </>
                     )
                   })()}
-                  {!tradeAccountLabel && <span style={{ fontSize: 11, color: '#6b7280' }}>비번/계좌 라벨을 입력해야 버튼이 활성화됩니다</span>}
+                  {!tradeAccountLabel && <span style={{ fontSize: 11, color: '#6b7280' }}>계좌 라벨을 입력해야 버튼이 활성화됩니다</span>}
                 </div>
                 {tradeCommands.length > 0 && (
                   <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -5680,6 +5746,7 @@ export default function ReplayChart() {
                   </div>
                 )}
               </div>
+              )}
 
               {/* 매매진입 현황 - 원래 있던 자리(인라인). 분리하면(positionPanelFloating=true) 여기선
                   안 그리고 renderPositionPanel()이 떠다니는 패널로 대신 그린다. 벌크 청산 버튼도
@@ -5804,6 +5871,7 @@ export default function ReplayChart() {
         {/* positionPanelFloating 기본값이 false라 SSR에서 document.body에 안 닿지만, 혹시를 대비해
             (예전 showPositionPanel=true 기본값 때 실제로 배포 에러가 났던 전례) typeof 가드는 유지한다. */}
         {positionPanelFloating && typeof document !== 'undefined' && createPortal(renderPositionPanel(), document.body)}
+        {showTradeGuideModal && typeof document !== 'undefined' && createPortal(renderTradeGuideModal(), document.body)}
       </div>
     </>
   )

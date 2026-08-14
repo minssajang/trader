@@ -1,9 +1,9 @@
 import { supabase } from '../../lib/supabase'
 
 // 라이브 페이지의 실주문 기능용. 세 가지 메서드:
-//   POST  - 웹에서 매수/매도 버튼을 누르면 여기로 명령을 만든다. TRADE_PASSWORD(사용자가 직접 정한
-//           "MT5 비번" 스타일 별도 비밀번호, /admin 비밀번호와 다름 - 진짜 돈이 걸린 기능이라 노출된
-//           라이브 페이지에 아무나 못 누르게 별도로 잠갔다)를 맞혀야 명령이 생성된다.
+//   POST  - 웹에서 매수/매도 버튼을 누르면 여기로 명령을 만든다. account_label 자체가 각 이용자만
+//           아는 비밀값 역할을 한다(자기 EA에도 똑같이 입력해두는 값) - 그 위에 별도 공용 비밀번호를
+//           더 두는 건 중복이라 뺐다(사용자 지적). account_label을 모르면 그 사람 계좌로 명령을 못 보냄.
 //   GET   - 두 가지 쓰임:
 //           1) ?account_label=X (x-admin-token 필요) - MT5 EA가 자기 계좌의 pending 명령을 가져간다
 //              (claim). status를 'pending'에서 'claimed'로 원자적으로 바꾸면서 가져가므로, 여러 번
@@ -13,10 +13,7 @@ import { supabase } from '../../lib/supabase'
 //   PATCH - EA가 주문 실행 결과(성공/실패)를 보고한다. x-admin-token 필요.
 export default async function handler(req, res) {
   if (req.method === 'POST') {
-    const { password, account_label, symbol, direction, lot } = req.body || {}
-    if (!process.env.TRADE_PASSWORD || password !== process.env.TRADE_PASSWORD) {
-      return res.status(401).json({ error: '비밀번호가 틀렸습니다' })
-    }
+    const { account_label, symbol, direction, lot } = req.body || {}
     if (!account_label || !symbol || !['buy', 'sell', 'close'].includes(direction)) {
       return res.status(400).json({ error: '필수 값 누락(account_label, symbol, direction)' })
     }
