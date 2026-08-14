@@ -2418,9 +2418,12 @@ export default function ReplayChart() {
 
   // ── 라이브 폴링 ──────────────────────────────────────────────────────────
   // 과거 CSV를 날짜로 골라 불러오던 위 loadRange/loadDate 대신, 라이브 페이지는 /api/live-price를
-  // 초기 1회 전체 조회 + 주기적 폴링으로 계속 이어붙인다. computeIndicatorsForRange/applyIndex는
-  // "fullRows 전체를 그 구간 그대로 보여준다"는 동작이 그대로 맞아떨어져서 손대지 않고 재사용한다 -
-  // fromStr/toStr을 항상 liveRowsRef 전체의 첫/마지막 날짜로 주면 "날짜 필터"가 사실상 전체 통과가 된다.
+  // 초기 1회 전체 조회 + 주기적 폴링으로 계속 이어붙인다. 지표 워밍업용 과거봉은 이제 MT5 EA가 시작
+  // 시 직접 live_candles에 백필해두므로(EasyTrade_LivePriceSender.mq5), 여기선 그냥 서버에 있는 걸
+  // 전부 받아오기만 하면 된다 - 별도 CSV 조회 로직 불필요(리플레이용 히스토리 CSV는 최신 상태를
+  // 보장하지 않는 별개 기능 데이터라 워밍업 소스로 부적절했음, 사용자 지적으로 이 방식으로 바꿈).
+  // computeIndicatorsForRange/applyIndex는 "fullRows 전체를 그 구간 그대로 보여준다"는 동작이 그대로
+  // 맞아떨어져서 손대지 않고 재사용한다.
   const LIVE_POLL_MS = 3000
 
   const refreshLiveChart = () => {
@@ -2433,6 +2436,22 @@ export default function ReplayChart() {
     applyIndex(dayRows.length)
   }
 
+  // 한 번의 폴링에서 새로 받은 rows를 liveRowsRef에 반영한다(id 기준 병합 - 진행 중인 캔들은 같은
+  // id로 갱신되어 들어옴).
+  const mergeLiveRows = (incoming) => {
+    const offsetSeconds = summerTimeRef.current ? BROKER_OFFSET_SECONDS.summer : BROKER_OFFSET_SECONDS.winter
+    const byId = new Map(liveRowsRef.current.map(r => [r.id, r]))
+    for (const r of incoming) {
+      byId.set(r.id, {
+        id: r.id,
+        time: toUnixSeconds(r.date, r.time, offsetSeconds),
+        open: r.open, high: r.high, low: r.low, close: r.close,
+      })
+      if (r.id > liveLastIdRef.current) liveLastIdRef.current = r.id
+    }
+    liveRowsRef.current = Array.from(byId.values()).sort((a, b) => a.time - b.time)
+  }
+
   const pollLiveOnce = async (sym) => {
     try {
       const sinceId = Math.max(0, liveLastIdRef.current - 1) // 진행 중인 캔들의 최신 갱신도 받기 위해 1 낮춰서 요청
@@ -2442,17 +2461,7 @@ export default function ReplayChart() {
       if (sym !== symbolRef.current) return // 응답 오는 사이 심볼이 바뀌었으면 버림
       const incoming = data.rows || []
       if (incoming.length > 0) {
-        const offsetSeconds = summerTimeRef.current ? BROKER_OFFSET_SECONDS.summer : BROKER_OFFSET_SECONDS.winter
-        const byId = new Map(liveRowsRef.current.map(r => [r.id, r]))
-        for (const r of incoming) {
-          byId.set(r.id, {
-            id: r.id,
-            time: toUnixSeconds(r.date, r.time, offsetSeconds),
-            open: r.open, high: r.high, low: r.low, close: r.close,
-          })
-          if (r.id > liveLastIdRef.current) liveLastIdRef.current = r.id
-        }
-        liveRowsRef.current = Array.from(byId.values()).sort((a, b) => a.time - b.time)
+        mergeLiveRows(incoming)
         refreshLiveChart()
       }
       setLiveStatus('live')
@@ -3437,22 +3446,14 @@ export default function ReplayChart() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [playing, speed, stopPlayback])
 
-  // 캔들 타이머 화면 숫자를 부드럽게 카운트다운시키는 전용 인터벌 - 위 재생 인터벌(tickMs)은 배속이
-  // 낮으면 몇십 초 단위라 그 주기로만 갱신하면 숫자가 안 움직이는 것처럼 보인다. 100ms마다
-  // nextCandleAtRef(다음 캔들 예정 시각)까지 남은 시간을 다시 계산해서 화면만 갱신한다.
+  // 라이브 페이지는 배속 재생 개념이 없으니(사용자 요청) 캔들 타이머를 위 두 effect(배속 기준 카운트다운)
+  // 대신 실제 벽시계 기준 "다음 정각 분까지 남은 시간"으로 보여준다 - MT5 M1 캔들은 매 분 0초에 새로 연다.
   useEffect(() => {
-    if (!playing) return
-    timerTickRef.current = setInterval(() => {
-      setCandleTimerMs(Math.max(0, nextCandleAtRef.current - Date.now()))
-    }, 100)
-    return () => { if (timerTickRef.current) clearInterval(timerTickRef.current) }
-  }, [playing])
-
-  // 멈춰있는 동안(재생 전/일시정지 중) 배속 버튼을 누르면 캔들 타이머 표시도 그 배속 기준 풀타임으로
-  // 바로 바뀐다 - 재생 중엔 위 재생 인터벌 effect가 speed 변경 시 통째로 재시작되며 이미 처리한다.
-  useEffect(() => {
-    if (!playing) setCandleTimerMs(REALTIME_MS / speed)
-  }, [speed, playing])
+    const tick = () => setCandleTimerMs(60000 - (Date.now() % 60000))
+    tick()
+    const timer = setInterval(tick, 200)
+    return () => clearInterval(timer)
+  }, [])
 
   const reset = () => {
     stopPlayback()
@@ -4658,7 +4659,7 @@ export default function ReplayChart() {
 
         <main style={{ maxWidth: 1500, margin: '0 auto', padding: '28px 20px 60px' }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>실시간 차트</h1>
-          <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>MT5에 붙여둔 EA가 보내는 시세를 그대로 이어서 보여드려요.</p>
+          <p style={{ color: '#9aa0ab', fontSize: 14, marginBottom: 24 }}>MT5에 붙여둔 EA가 보내는 시세를 그대로 이어서 보여드려요. 지금은 1분(M1) 캔들만 지원해요.</p>
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             {/* 왼쪽 컬럼: 심볼버튼 / 지표 설정 카드들이 서로 붙어서 쌓인다 (오른쪽 차트 높이랑 무관하게) */}
@@ -5305,7 +5306,7 @@ export default function ReplayChart() {
                 사라지지 않게 뷰포트 높이에 sticky로 고정하고, 자체 높이가 화면보다 크면 내부에서만 스크롤되게 함 */}
             <div style={{ flex: 1, minWidth: 280, position: 'sticky', top: 20, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto', overflowX: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', minHeight: 38 }}>
-                {liveStatus === 'connecting' && <div style={{ color: '#9aa0ab', fontSize: 13 }}>⏳ 연결 중...</div>}
+                {liveStatus === 'connecting' && <div style={{ color: '#9aa0ab', fontSize: 13 }}>⏳ 데이터 불러오는 중...</div>}
                 {liveStatus === 'live' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4CAF50', fontSize: 13, fontWeight: 700 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4CAF50', display: 'inline-block', flexShrink: 0 }} />
