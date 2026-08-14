@@ -1052,6 +1052,15 @@ export default function ReplayChart() {
   const [positions, setPositions] = useState([]) // { id, side:'buy'|'sell', symbol, lot, entryPrice, entryTime }
   const [pnlDisplay, setPnlDisplay] = useState(rs.pnlDisplay ?? 'dollar') // 'dollar' | 'point'
 
+  // 실주문(진짜 MT5 주문) 관련 상태 - 위의 랏수/포지션은 전부 웹 안에서만 도는 가상매매고, 이건 실제
+  // 돈이 움직이는 별개 기능이라 일부러 랏수도 따로 둔다(가상매매 설정과 안 섞이게). 비밀번호는 새로고침하면
+  // 사라지게 세션 state로만 두고 저장 안 함(보안 - 실제 계좌 비밀번호 성격의 값이라 localStorage에도 안 남김).
+  const [tradePassword, setTradePassword] = useState('')
+  const [tradeAccountLabel, setTradeAccountLabel] = useState('') // 기본값 없음(사용자 요청) - 안 정하면 전송 버튼 비활성
+  const [tradeLot, setTradeLot] = useState(0.01)
+  const [tradeCommands, setTradeCommands] = useState([]) // 최근 보낸 명령들 [{id, direction, status, message}] - 화면에 체결 결과 보여주는 용도
+  const [tradeSending, setTradeSending] = useState(false)
+
   // 분리매매창(EasyTrade_MT5 데스크톱 앱의 "매매 실행" 팝업 그대로 재현) - 공통 입력부 + 매매1/골드/나스닥 탭.
   // 골드/나스닥 탭의 반자동 예약 신호는 리플레이가 지금 로드해둔 심볼(symbol)의 데이터로만 실제 동작한다
   // (데스크톱 앱은 두 탭이 각자 독립적으로 MT5에서 실시간 데이터를 받아오지만, 리플레이는 한 번에 한
@@ -3602,6 +3611,51 @@ export default function ReplayChart() {
     }])
   }
 
+  // ── 실주문(진짜 MT5 주문) ────────────────────────────────────────────────
+  // 위 openPosition 등은 전부 웹 안에서만 도는 가상매매 - 이건 /api/trade-command에 명령을 만들어서
+  // MT5 EA(EasyTrade_LivePriceSender.mq5, EnableRealTrading=true)가 실제로 체결하게 하는 별개 기능.
+  // 계좌 비밀번호/라벨을 안 정하면 아예 버튼이 막힌다(안전장치) - EA 쪽에도 같은 안전장치가 이중으로 있음.
+  const pollTradeCommandStatus = (id, triesLeft = 15) => {
+    if (triesLeft <= 0) return
+    fetch(`/api/trade-command?id=${id}`)
+      .then(r => r.json())
+      .then(data => {
+        const cmd = data.command
+        if (!cmd) return
+        setTradeCommands(prev => prev.map(c => c.id === id ? { ...c, status: cmd.status, message: cmd.result_message || '' } : c))
+        if (cmd.status === 'pending' || cmd.status === 'claimed') {
+          setTimeout(() => pollTradeCommandStatus(id, triesLeft - 1), 2000)
+        }
+      })
+      .catch(() => { /* 다음 폴링에서 재시도 */ })
+  }
+
+  const sendTradeCommand = async (direction) => {
+    if (!tradePassword || !tradeAccountLabel || tradeSending) return
+    const actionLabel = direction === 'buy' ? '매수' : direction === 'sell' ? '매도' : '전체 청산'
+    const lotLabel = direction === 'close' ? '' : ` ${tradeLot}랏`
+    if (!window.confirm(`정말로 계좌 "${tradeAccountLabel}"에 ${symbol} ${actionLabel}${lotLabel} 실주문을 넣을까요? 실제 돈이 움직입니다.`)) return
+    setTradeSending(true)
+    try {
+      const res = await fetch('/api/trade-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: tradePassword, account_label: tradeAccountLabel, symbol, direction,
+          lot: direction === 'close' ? null : tradeLot,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { alert(`전송 실패: ${data.error || res.status}`); return }
+      setTradeCommands(prev => [{ id: data.id, direction, status: 'pending', message: '' }, ...prev].slice(0, 20))
+      pollTradeCommandStatus(data.id)
+    } catch (e) {
+      alert('전송 실패: ' + e.message)
+    } finally {
+      setTradeSending(false)
+    }
+  }
+
   // 분리매매창 전용 진입 - 손절/익절을 "포인트"로 받아 절대가격(sl/tp)으로 미리 계산해 포지션에 저장해둔다
   // (PyQt의 sl_spin/tp_spin과 같은 단위). 반자동 예약(1~6번)이 쏜 진입도 이 함수를 그대로 쓴다.
   const openModalPositionAt = (side, price, time, { lot, slPoints, tpPoints, tag }) => {
@@ -5564,6 +5618,67 @@ export default function ReplayChart() {
                     {symbol === 'GOLD' ? '골드 1랏 = 1.00pt당 $100' : '나스닥 1랏 = 1.00pt당 $1'} (수수료 미반영)
                   </span>
                 </div>
+              </div>
+
+              {/* 실주문(진짜 MT5 주문) - 위 매매 컨트롤은 전부 웹 안에서만 도는 가상매매고, 이건 별개
+                  기능이라 일부러 카드도 분리해뒀다(사용자 요청 - 실제 돈이 걸린 기능이라 안전장치 필요).
+                  비밀번호/계좌라벨을 안 정하면 버튼이 막힌다 - EA 쪽에도 같은 안전장치가 이중으로 있음. */}
+              <div style={{ background: '#171a21', border: '1px solid #F44336', borderRadius: 14, padding: 16, flex: '1 1 100%' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#F44336', marginBottom: 10 }}>🔴 실주문 (MT5에 실제로 체결됩니다)</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                  <input
+                    type="password" placeholder="MT5 비번" value={tradePassword}
+                    onChange={e => setTradePassword(e.target.value)}
+                    style={{ width: 120, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '7px 8px', fontSize: 13 }}
+                  />
+                  <input
+                    type="text" placeholder="계좌 라벨 (예: live1)" value={tradeAccountLabel}
+                    onChange={e => setTradeAccountLabel(e.target.value)}
+                    style={{ width: 140, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '7px 8px', fontSize: 13 }}
+                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 12, color: '#9aa0ab' }}>랏수</span>
+                    <input
+                      type="number" step={0.01} min={0.01} value={tradeLot}
+                      onChange={e => setTradeLot(Math.max(0.01, Number(e.target.value) || 0.01))}
+                      style={{ width: 64, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '5px 6px', fontSize: 13, textAlign: 'center' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {(() => {
+                    const disabled = !tradePassword || !tradeAccountLabel || tradeSending
+                    return (
+                      <>
+                        <button
+                          type="button" onClick={() => sendTradeCommand('buy')} disabled={disabled}
+                          style={{ background: '#26a69a', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700, padding: '9px 22px', fontSize: 14, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.4 : 1 }}
+                        >실매수</button>
+                        <button
+                          type="button" onClick={() => sendTradeCommand('sell')} disabled={disabled}
+                          style={{ background: '#ef5350', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700, padding: '9px 22px', fontSize: 14, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.4 : 1 }}
+                        >실매도</button>
+                        <button
+                          type="button" onClick={() => sendTradeCommand('close')} disabled={disabled}
+                          style={{ background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9, fontWeight: 700, padding: '9px 18px', fontSize: 13, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.4 : 1 }}
+                        >전체 청산</button>
+                      </>
+                    )
+                  })()}
+                  {!tradeAccountLabel && <span style={{ fontSize: 11, color: '#6b7280' }}>비번/계좌 라벨을 입력해야 버튼이 활성화됩니다</span>}
+                </div>
+                {tradeCommands.length > 0 && (
+                  <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {tradeCommands.map(c => (
+                      <div key={c.id} style={{ fontSize: 11.5, color: '#9aa0ab', display: 'flex', gap: 6 }}>
+                        <span style={{ color: c.status === 'done' ? '#4CAF50' : c.status === 'error' ? '#F44336' : '#FF9800', fontWeight: 700 }}>
+                          {c.status === 'pending' || c.status === 'claimed' ? '⏳ 처리 중' : c.status === 'done' ? '✅ 체결' : '❌ 실패'}
+                        </span>
+                        <span>{c.direction === 'buy' ? '매수' : c.direction === 'sell' ? '매도' : '청산'}{c.message ? ` - ${c.message}` : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* 매매진입 현황 - 원래 있던 자리(인라인). 분리하면(positionPanelFloating=true) 여기선
