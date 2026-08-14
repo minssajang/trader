@@ -1064,6 +1064,9 @@ export default function ReplayChart() {
   const [tradeLot, setTradeLot] = useState(0.01)
   const [tradeCommands, setTradeCommands] = useState([]) // 최근 보낸 명령들 [{id, direction, status, message}] - 화면에 체결 결과 보여주는 용도
   const [tradeSending, setTradeSending] = useState(false)
+  // 지금 로그인된 MT5가 데모/라이브인지, 잔고가 얼마인지 - EA가 주기적으로 보고해둔 걸 폴링해서 보여줌
+  // (사용자 요청 - 실주문 누르기 전에 어느 계좌인지 먼저 확인할 수 있어야 함).
+  const [accountStatus, setAccountStatus] = useState(null) // null | { is_demo, balance, currency, account_login, updated_at }
 
   // 분리매매창(EasyTrade_MT5 데스크톱 앱의 "매매 실행" 팝업 그대로 재현) - 공통 입력부 + 매매1/골드/나스닥 탭.
   // 골드/나스닥 탭의 반자동 예약 신호는 리플레이가 지금 로드해둔 심볼(symbol)의 데이터로만 실제 동작한다
@@ -3615,6 +3618,22 @@ export default function ReplayChart() {
     }])
   }
 
+  // 계좌 라벨을 입력하면 그 EA가 보고해둔 계좌 상태(데모/라이브, 잔고)를 10초마다 폴링해서 보여준다 -
+  // 실주문 켜기 전에 "내가 지금 어느 계좌에 연결돼 있는지" 미리 확인할 수 있게(사용자 요청).
+  useEffect(() => {
+    if (!tradeAccountLabel) { setAccountStatus(null); return }
+    let cancelled = false
+    const poll = () => {
+      fetch(`/api/account-status?account_label=${encodeURIComponent(tradeAccountLabel)}`)
+        .then(r => r.json())
+        .then(data => { if (!cancelled) setAccountStatus(data.status || null) })
+        .catch(() => {})
+    }
+    poll()
+    const timer = setInterval(poll, 10000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [tradeAccountLabel])
+
   // ── 실주문(진짜 MT5 주문) ────────────────────────────────────────────────
   // 위 openPosition 등은 전부 웹 안에서만 도는 가상매매 - 이건 /api/trade-command에 명령을 만들어서
   // MT5 EA(EasyTrade_LivePriceSender.mq5, EnableRealTrading=true)가 실제로 체결하게 하는 별개 기능.
@@ -4858,6 +4877,12 @@ export default function ReplayChart() {
                   style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
                 >❓ 사용법</button>
               </div>
+              {/* 연결 방식 설명(사용자 요청) - 서버가 계좌에 로그인하는 게 아니라 이용자 본인 PC의 MT5가
+                  직접 주문을 내는 구조라는 걸 오해 없이 먼저 알려준다. 항상 보이게(체크 여부와 무관). */}
+              <div style={{ fontSize: 10.5, color: '#6b7280', lineHeight: 1.6 }}>
+                ℹ 이 기능은 본인 PC의 MT5에 직접 로그인되어 있어야 동작해요. 저희 서버가 계좌에 로그인하는
+                게 아니라, MT5에 붙여둔 EA가 신호를 받아 그 자리에서 직접 주문을 넣는 방식이에요.
+              </div>
               {realTradingUnlocked && (
                 <div style={{ background: 'rgba(244,67,54,0.1)', border: '1px solid #F44336', borderRadius: 8, padding: '8px 10px', fontSize: 11, color: '#F44336', lineHeight: 1.5 }}>
                   ⚠ 이제부터 아래 "실주문" 카드에서 누르는 매수/매도는 시뮬레이션이 아니라 MT5에 연결된
@@ -5619,7 +5644,11 @@ export default function ReplayChart() {
                   "🗗 분리" 버튼을 누르면 그때만 분리매매창처럼 떠다니는 패널(positionPanelFloating)이
                   된다(사용자 지적 - "원래 있던곳에 있고 분리하면 떠야지"). */}
               <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'stretch', flexWrap: 'wrap' }}>
+              {/* 시뮬레이션(가상매매) 패널 - 실제 매매를 켜면(realTradingUnlocked) 헷갈리지 않게 아예
+                  숨긴다(사용자 요청 - "실매매 체크하면 안 보이게 해줘"). */}
+              {!realTradingUnlocked && (
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, flex: positionPanelFloating ? '0 1 560px' : '1 1 460px' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#4CAF50', marginBottom: 10 }}>🧪 시뮬레이션 (가상매매)</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa0ab' }}>
                     시작 자금
@@ -5699,6 +5728,7 @@ export default function ReplayChart() {
                   </span>
                 </div>
               </div>
+              )}
 
               {/* 실주문(진짜 MT5 주문) - 위 매매 컨트롤은 전부 웹 안에서만 도는 가상매매고, 이건 별개
                   기능이라 일부러 카드도 분리해뒀다(사용자 요청 - 실제 돈이 걸린 기능이라 안전장치 필요).
@@ -5706,7 +5736,44 @@ export default function ReplayChart() {
                   버튼이 막힌다 - EA 쪽 EnableRealTrading/AccountLabel 이중 확인도 별개로 있음. */}
               {realTradingUnlocked && (
               <div style={{ background: '#171a21', border: '1px solid #F44336', borderRadius: 14, padding: 16, flex: '1 1 100%' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#F44336', marginBottom: 10 }}>🔴 실주문 (MT5에 실제로 체결됩니다)</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#F44336' }}>🔴 실주문 (MT5에 실제로 체결됩니다)</div>
+                  {/* 계좌 상태(데모/라이브 + 잔고) - EA가 주기적으로 보고해둔 걸 폴링해서 표시(사용자 요청).
+                      계좌 라벨을 아직 안 정했거나 EA가 한 번도 보고 안 했으면 접속 안내만 보여준다. */}
+                  {tradeAccountLabel && (
+                    accountStatus ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                        <span style={{
+                          padding: '3px 8px', borderRadius: 6, fontWeight: 700,
+                          background: accountStatus.is_demo ? 'rgba(33,150,243,0.15)' : 'rgba(244,67,54,0.15)',
+                          color: accountStatus.is_demo ? '#4FC3F7' : '#F44336',
+                          border: `1px solid ${accountStatus.is_demo ? '#4FC3F7' : '#F44336'}`,
+                        }}>{accountStatus.is_demo ? '🔵 데모 계좌' : '🔴 라이브 계좌'}</span>
+                        <span style={{ color: '#9aa0ab' }}>
+                          잔고 {accountStatus.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {accountStatus.currency || ''}
+                          {accountStatus.account_login ? ` (#${accountStatus.account_login})` : ''}
+                        </span>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: 11.5, color: '#6b7280' }}>⏳ 계좌 정보 대기 중 - MT5의 EA가 아직 한 번도 보고하지 않았어요</span>
+                    )
+                  )}
+                  <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+                    {[['dollar', '달러'], ['point', '포인트']].map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setPnlDisplay(mode)}
+                        style={{
+                          fontSize: 12, padding: '5px 10px', borderRadius: 7,
+                          border: `1px solid ${pnlDisplay === mode ? '#4CAF50' : '#2a2e38'}`,
+                          background: pnlDisplay === mode ? 'rgba(76,175,80,0.15)' : 'none',
+                          color: pnlDisplay === mode ? '#4CAF50' : '#9aa0ab', cursor: 'pointer',
+                        }}
+                      >{label}</button>
+                    ))}
+                  </div>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
                   <input
                     type="password" placeholder="계좌 라벨 (자기 EA와 동일하게)" value={tradeAccountLabel}
@@ -5739,6 +5806,15 @@ export default function ReplayChart() {
                           type="button" onClick={() => sendTradeCommand('close')} disabled={disabled}
                           style={{ background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9, fontWeight: 700, padding: '9px 18px', fontSize: 13, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.4 : 1 }}
                         >전체 청산</button>
+                        <button
+                          type="button" onClick={() => setShowTradingWindow(v => !v)}
+                          style={{
+                            marginLeft: 'auto', fontSize: 12, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', fontWeight: 700,
+                            border: `1px solid ${showTradingWindow ? '#4CAF50' : '#2a2e38'}`,
+                            background: showTradingWindow ? 'rgba(76,175,80,0.15)' : 'none',
+                            color: showTradingWindow ? '#4CAF50' : '#9aa0ab',
+                          }}
+                        >🖱 매매 실행 (분리매매창){showTradingWindow ? ' 닫기' : ''}</button>
                       </>
                     )
                   })()}
