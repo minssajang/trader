@@ -2016,7 +2016,7 @@ export default function ReplayChart() {
       // 🛑 손절: 이평선 따라가기(사용자 요청) - 선택된 이평선의 이 구간 값을 미리 읽어둔다. 캔들 고가/저가
       // 기준(종가 아님 - 안전 우선, 사용자 확인)으로 SL/TP 다음 우선순위로 검사한다.
       const maTrailKey = twMaTrailStopRef.current
-        ? { s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85' }[twMaTrailStopRef.current] : null
+        ? { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85' }[twMaTrailStopRef.current] : null
       // 🎯 청산목표 S100 계열 3종(사용자 요청) - 크로스가 아니라 "닿으면" 방식. 익절(목표 도달) 방향이라
       // 손절과 정반대: SELL은 저가가 닿으면(가격 하락=이익), BUY는 고가가 닿으면(가격 상승=이익) 청산.
       const exitTargetKey = twExitCrossPairRef.current
@@ -4223,14 +4223,14 @@ export default function ReplayChart() {
   // 🛑 이평선 따라가기 손절 - 선택된 선의 "끝"(지금 재생 위치의 값)을 좌표로 변환한다(사용자 요청 -
   // timerAnchor와 같은 방식, 화면을 드래그/줌하거나 캔들이 새로 그려질 때마다 다시 계산해야 함).
   // pair 인자는 setTwMaTrailStop 직후 같은 틱에서 부를 때 stale한 ref를 안 읽기 위한 override.
-  const maTrailLabels = { s1: 'S1', h3: 'H3', h5: 'H5', w85: 'W85' }
+  const maTrailLabels = { h1: 'H1', s1: 'S1', h3: 'H3', h5: 'H5', w85: 'W85' }
   const updateMaStopAnchor = (pair = twMaTrailStopRef.current) => {
     const chart = chartRef.current
     const series = seriesRef.current
     const S = reservationSeriesRef.current
     const idx = indexRef.current
     if (!chart || !series || !S || !pair || idx <= 0) { setMaStopAnchor(null); return }
-    const maKey = { s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85' }[pair]
+    const maKey = { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85' }[pair]
     const row = rowsRef.current[idx - 1]
     const val = S[maKey]?.[(idx - 1) + S.offset]
     if (!row || val == null) { setMaStopAnchor(null); return }
@@ -4457,7 +4457,7 @@ export default function ReplayChart() {
     // 헷갈리지 않게 색을 빨강으로 구분하고, 라벨도 "H1×.." 크로스 표기 대신 선 이름만 표시(사용자
     // 설명이 "그 선을 따라간다"는 개념이라 크로스 기호를 쓰면 오해 소지가 있음). 선택한 선을 캔들
     // 고가/저가가 건드리면(사용자 확인) 즉시 손절.
-    const maTrailOptions = [['s1', 'S1'], ['h3', 'H3'], ['h5', 'H5'], ['w85', 'W85']]
+    const maTrailOptions = [['h1', 'H1'], ['s1', 'S1'], ['h3', 'H3'], ['h5', 'H5'], ['w85', 'W85']]
     const renderMaTrailStopButtons = () => (
       <>
         <div style={{ fontSize: 11, color: '#9aa0ab', marginBottom: 4 }}>🛑 손절: 이평선 따라가기</div>
@@ -4542,12 +4542,12 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 4} onChange={() => toggleCheck(4)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`1번: 하락추세\nWMA85 < 5분중심\n${fmtTopBottom(wma85, sma100)}`}</span>
+              <span style={{ color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`1번: 하락추세\n5분17선 < 5분20선\n${fmtTopBottom(wma85, sma100)}`}</span>
               <TwStatusDot label="상태" active={row5State} colorA={TW_STATUS_RED_A} />
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 3} onChange={() => toggleCheck(3)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\nWMA85 > 5분중심\n${fmtTopBottom(wma85, sma100)}`}</span>
+              <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\n5분17선 > 5분20선\n${fmtTopBottom(wma85, sma100)}`}</span>
               <TwStatusDot label="상태" active={row6State} colorA={TW_STATUS_LIME_A} />
             </label>
           </div>
@@ -4556,12 +4556,12 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: HMA15(HMA300) 하락중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선 하락중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
               <TwStatusDot label="상태" active={row2State} colorA={TW_STATUS_RED_A} />
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 2.1} onChange={() => toggleCheck(2.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: HMA15(HMA300) 상승중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: 15분 빠른선 상승중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
               <TwStatusDot label="상태" active={row2_1State} colorA={TW_STATUS_LIME_A} />
             </label>
           </div>
@@ -4572,7 +4572,7 @@ export default function ReplayChart() {
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', marginBottom: 6 }}>
                 <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-                <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`5번: 주가 < H1\nH1 하락중`}</span>
+                <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`5번: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <TwStatusDot label="상태" active={row3Ready} colorA={TW_STATUS_RED_A} />
                   <TwStatusDot label="진입" active={row3Entry} colorA={TW_STATUS_RED_A} />
@@ -4583,7 +4583,7 @@ export default function ReplayChart() {
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', marginBottom: 6 }}>
                 <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-                <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`6번: 주가 > H1\nH1 상승중`}</span>
+                <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`6번: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <TwStatusDot label="상태" active={row4Ready} colorA={TW_STATUS_LIME_A} />
                   <TwStatusDot label="진입" active={row4Entry} colorA={TW_STATUS_LIME_A} />
@@ -4597,7 +4597,7 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1} onChange={() => toggleCheck(1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: 5Bol 상단 돌파후 진입\n${bbUp != null ? bbUp.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: \n5분Bol 상단 돌파후 진입\n${bbUp != null ? bbUp.toFixed(2) : '-'}`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="슈팅" active={row1AboveShooting} colorA={TW_STATUS_RED_A} />
                 <TwStatusDot label="돌파" active={row1AboveBreakout} colorA={TW_STATUS_RED_A} />
@@ -4606,7 +4606,7 @@ export default function ReplayChart() {
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1.1} onChange={() => toggleCheck(1.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: 5Bol 하단 돌파후 진입\n${bbLo != null ? bbLo.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: \n5분Bol 하단 돌파후 진입\n${bbLo != null ? bbLo.toFixed(2) : '-'}`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="슈팅" active={row1BelowShooting} colorA={TW_STATUS_LIME_A} />
                 <TwStatusDot label="돌파" active={row1BelowBreakout} colorA={TW_STATUS_LIME_A} />
@@ -4619,7 +4619,7 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 7} onChange={() => toggleCheck(7)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: (row9State1 && row9State2) ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`9번: 스토 데드크로스\n(70,15,15) / (210,45,45)`}</span>
+              <span style={{ color: (row9State1 && row9State2) ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`9번: 스토 데드크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="70" active={row9State1} colorA={TW_STATUS_RED_A} />
                 <TwStatusDot label="210" active={row9State2} colorA={TW_STATUS_RED_A} />
@@ -4627,7 +4627,7 @@ export default function ReplayChart() {
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 7.1} onChange={() => toggleCheck(7.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: (row10State1 && row10State2) ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`10번: 스토 골든크로스\n(70,15,15) / (210,45,45)`}</span>
+              <span style={{ color: (row10State1 && row10State2) ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`10번: 스토 골든크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="70" active={row10State1} colorA={TW_STATUS_LIME_A} />
                 <TwStatusDot label="210" active={row10State2} colorA={TW_STATUS_LIME_A} />
