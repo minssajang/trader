@@ -610,6 +610,13 @@ const REALTIME_MS = 60000
 // 화면에서 여전히 5분이 아니면 이 숫자를 더 줄여야 한다.
 const INITIAL_VISIBLE_CANDLES = 60
 const MIN_TICK_MS = 50 // setInterval 실질 하한 - 이보다 짧은 간격은 한 틱에 여러 캔들을 진행시켜 흉내낸다
+// 데이터 끊김(stale)이 진짜 장애인지 그냥 주말 휴장인지 구분용 - 브라우저 로컬 시각 기준 토/일요일이면
+// 주말로 본다. 주말은 통째로 이틀이라 브로커 시간대 오차(몇 시간) 정도는 오분류에 영향이 거의 없다.
+const isWeekendNow = () => {
+  const day = new Date().getDay() // 0=일, 6=토
+  return day === 0 || day === 6
+}
+
 // 캔들 타이머 표시용 - ms를 "1:05" 또는 "48.2초" 형태로 포맷. 1분 이상이면 분:초, 아니면 소수점 1자리 초.
 const formatCandleTimer = (ms) => {
   const totalSec = Math.max(0, ms / 1000)
@@ -1211,6 +1218,8 @@ export default function ReplayChart() {
   // 자동매매가 꺼져서 EA가 멈췄는데도 페이지는 계속 초록불이었음) - 요청 성공 여부 대신 "마지막 캔들의
   // 실제 시각이 지금과 얼마나 벌어졌는지"로 끊김을 감지한다(pollLiveOnce 참고).
   const [liveStatus, setLiveStatus] = useState('connecting') // 'connecting' | 'live' | 'stale' | 'error' | 'disconnected'
+  const liveStatusRef = useRef('connecting') // 캔들 타이머 tick()이 effect 재시작 없이 최신 상태를 읽기 위한 미러
+  useEffect(() => { liveStatusRef.current = liveStatus }, [liveStatus])
   const [liveStaleSec, setLiveStaleSec] = useState(0)
   // Realtime이 지금 막 들어온 캔들 하나만 먼저 밀어주는 경우, 그 이전 구간이 아직 안 채워진 상태로
   // 화면에 붙으면 "시간이 붕 뜨는" 점프처럼 보인다(사용자 지적) - 그 구간을 REST로 마저 채우는 동안은
@@ -3656,8 +3665,14 @@ export default function ReplayChart() {
 
   // 라이브 페이지는 배속 재생 개념이 없으니(사용자 요청) 캔들 타이머를 위 두 effect(배속 기준 카운트다운)
   // 대신 실제 벽시계 기준 "다음 정각 분까지 남은 시간"으로 보여준다 - MT5 M1 캔들은 매 분 0초에 새로 연다.
+  // liveStatus가 'live'가 아니면(주말/장마감 등으로 데이터가 끊김) 더 이상 값을 갱신하지 않는다 - 데이터가
+  // 안 오는데도 "곧 새 캔들"이라며 계속 도는 게 오해를 준다는 지적(사용자) - 숨기지 말고 그 순간 값에서
+  // 그대로 얼려서 "멈춰있음"을 보여준다(배지 표시는 렌더 쪽에서 아이콘/색을 ⏸·회색으로 바꿔 처리).
   useEffect(() => {
-    const tick = () => setCandleTimerMs(60000 - (Date.now() % 60000))
+    const tick = () => {
+      if (liveStatusRef.current !== 'live') return
+      setCandleTimerMs(60000 - (Date.now() % 60000))
+    }
     tick()
     const timer = setInterval(tick, 200)
     return () => clearInterval(timer)
@@ -4556,12 +4571,12 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선 하락중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선\n하락중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
               <TwStatusDot label="상태" active={row2State} colorA={TW_STATUS_RED_A} />
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 2.1} onChange={() => toggleCheck(2.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: 15분 빠른선 상승중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: 15분 빠른선\n상승중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
               <TwStatusDot label="상태" active={row2_1State} colorA={TW_STATUS_LIME_A} />
             </label>
           </div>
@@ -4597,7 +4612,7 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1} onChange={() => toggleCheck(1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: \n5분Bol 상단 돌파후 진입\n${bbUp != null ? bbUp.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: \n5분Bol 상단\n돌파후 진입\n${bbUp != null ? bbUp.toFixed(2) : '-'}`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="슈팅" active={row1AboveShooting} colorA={TW_STATUS_RED_A} />
                 <TwStatusDot label="돌파" active={row1AboveBreakout} colorA={TW_STATUS_RED_A} />
@@ -4606,7 +4621,7 @@ export default function ReplayChart() {
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1.1} onChange={() => toggleCheck(1.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: \n5분Bol 하단 돌파후 진입\n${bbLo != null ? bbLo.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: \n5분Bol 하단\n돌파후 진입\n${bbLo != null ? bbLo.toFixed(2) : '-'}`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="슈팅" active={row1BelowShooting} colorA={TW_STATUS_LIME_A} />
                 <TwStatusDot label="돌파" active={row1BelowBreakout} colorA={TW_STATUS_LIME_A} />
@@ -5668,10 +5683,17 @@ export default function ReplayChart() {
                   </div>
                 )}
                 {liveStatus === 'stale' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#FF9800', fontSize: 13, fontWeight: 700 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#FF9800', display: 'inline-block', flexShrink: 0 }} />
-                    ⚠ 데이터 끊김 - 마지막 캔들 {liveStaleSec}초 전(MT5 EA/자동매매 상태 확인해주세요)
-                  </div>
+                  isWeekendNow() ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#6b7280', fontSize: 13, fontWeight: 700 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#6b7280', display: 'inline-block', flexShrink: 0 }} />
+                      🌙 주말 휴장 중 - 장이 다시 열리면 자동으로 이어집니다
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#FF9800', fontSize: 13, fontWeight: 700 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#FF9800', display: 'inline-block', flexShrink: 0 }} />
+                      ⚠ 데이터 끊김 - 마지막 캔들 {liveStaleSec}초 전(MT5 EA/자동매매 상태 확인해주세요)
+                    </div>
+                  )
                 )}
                 {liveStatus === 'error' && <div style={{ color: '#F44336', fontSize: 13 }}>❌ 서버 연결 실패 - 잠시 후 자동으로 다시 시도합니다</div>}
                 {liveStatus === 'disconnected' && (
@@ -5711,15 +5733,19 @@ export default function ReplayChart() {
                     시각/종가를 실제 화면 좌표로 변환해서 timerAnchor에 넣어두면 그 좌표 기준으로 뜬다.
                     컨테이너 padding(16px)만큼 보정하고, 캔들 오른쪽으로 60px 떨어뜨린다(사용자 요청).
                     pointerEvents:none이라 차트 드래그/줌 조작은 그대로 통과한다. */}
+                {/* liveStatus!=='live'(주말/장마감 등으로 끊김)일 땐 배지 자체는 계속 보여주되 숫자가
+                    더 이상 안 흐르게 얼려둔다(사용자 요청 - "안 보이면 안 되고 멈춰있어야") - 실제로
+                    값을 멈추는 로직은 아래 tick() effect에서 liveStatus==='live'일 때만 setCandleTimerMs를
+                    부르도록 처리한다. 배지 테두리색도 회색으로 바꿔 "지금 안 돌아가는 중"임을 표시. */}
                 {timerAnchor && (
-                  <span title="다음 캔들이 그려질 때까지 남은 시간" style={{
+                  <span title={liveStatus === 'live' ? '다음 캔들이 그려질 때까지 남은 시간' : '데이터가 끊겨서 멈춰있음'} style={{
                     position: 'absolute', left: timerAnchor.x + 16 + 60, top: timerAnchor.y + 16 - 15,
                     zIndex: 5, pointerEvents: 'none', whiteSpace: 'nowrap',
                     display: 'inline-flex', alignItems: 'center', gap: 6,
-                    background: 'rgba(23,26,33,0.92)', border: '1px solid #2a2e38', borderRadius: 9,
+                    background: 'rgba(23,26,33,0.92)', border: `1px solid ${liveStatus === 'live' ? '#2a2e38' : '#6b7280'}`, borderRadius: 9,
                     padding: '6px 12px', fontSize: 14, fontWeight: 700,
-                    color: playing ? '#4CAF50' : '#9aa0ab', fontVariantNumeric: 'tabular-nums',
-                  }}>⏱ {formatCandleTimer(candleTimerMs)}</span>
+                    color: liveStatus !== 'live' ? '#6b7280' : (playing ? '#4CAF50' : '#9aa0ab'), fontVariantNumeric: 'tabular-nums',
+                  }}>{liveStatus === 'live' ? '⏱' : '⏸'} {formatCandleTimer(candleTimerMs)}</span>
                 )}
                 {/* 🎯 청산 버튼에서 선택한 페어를 캔들 타이머 바로 위에 표시(사용자 요청) - twExitCrossPair를
                     렌더에서 직접 읽으니 선택을 바꾸면 다음 렌더에서 바로 반영된다(별도 갱신 로직 불필요). */}
