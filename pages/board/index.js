@@ -31,6 +31,7 @@ export default function BoardIndex() {
             <Link href="/backtest-chart">📊 학습</Link>
             <Link href="/backtest-intraday">📈 일중패턴</Link>
             <Link href="/replay">🔁 리플레이</Link>
+            <Link href="/live">🔴 라이브</Link>
             <Link href="/apply">신청</Link>
           </nav>
         </header>
