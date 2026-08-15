@@ -1151,6 +1151,11 @@ export default function ReplayChart() {
   const [twPopupEl, setTwPopupEl] = useState(null) // 새 창으로 뺐을 때 그 창 안에 만든 portal 대상 div (없으면 페이지 안 모달로 렌더)
   const twWinRef = useRef(null) // 새 창의 window 객체
   const twOnUnloadRef = useRef(null) // 위 창의 beforeunload 핸들러 참조(다시 붙이기 시 떼어내기 위해 보관)
+  // 매매진입 현황도 분리매매창과 같은 방식으로 진짜 새 창으로 뺄 수 있게(사용자 요청) - 위 tw* 3개와
+  // 완전히 같은 역할, 대상만 매매진입 현황 패널.
+  const [posPopupEl, setPosPopupEl] = useState(null)
+  const posWinRef = useRef(null)
+  const posOnUnloadRef = useRef(null)
   // 반자동진입 - 왼쪽 표시(crossPairs 슬롯)와 켜고 끄는 슬롯 상태는 따로 관리한다(화면엔 여러 개
   // 띄워두고 그중 일부만 실전 진입 조건으로 쓸 수 있게). 계산 로직(findMACrossForPair)은 공유하므로,
   // 왼쪽과 여기에 같은 조합을 골라두면 마커 표시 캔들 = 실제 진입 캔들이 항상 일치한다.
@@ -4128,6 +4133,41 @@ export default function ReplayChart() {
   // 탭이 닫히거나 이 페이지를 벗어나면 열어둔 새 창도 같이 정리
   useEffect(() => () => { if (twWinRef.current && !twWinRef.current.closed) twWinRef.current.close() }, [])
 
+  // 매매진입 현황도 진짜 새 창으로 - openTwPopup/closeTwPopup과 완전히 같은 방식(같은 origin portal로
+  // state 공유). 창 안에서 BUY/SELL·청산을 눌러도 이 페이지의 포지션·잔고에 곧바로 반영된다.
+  const openPosPopup = () => {
+    const w = window.open('', 'easytrade-pos', 'width=380,height=560,resizable=yes')
+    if (!w) { alert('팝업이 차단됐어요. 브라우저 주소창의 팝업 차단 아이콘을 눌러 허용해주세요.'); return }
+    w.document.title = '매매진입 현황 — EasyTrade'
+    document.querySelectorAll('link[rel="stylesheet"], style').forEach(node => {
+      w.document.head.appendChild(node.cloneNode(true))
+    })
+    const resetStyle = w.document.createElement('style')
+    resetStyle.textContent = 'body{margin:0} #pos-root button{width:auto;margin-top:0}'
+    w.document.head.appendChild(resetStyle)
+    w.document.body.style.background = '#0f1115'
+    const root = w.document.createElement('div')
+    root.id = 'pos-root'
+    w.document.body.appendChild(root)
+    posWinRef.current = w
+    setPosPopupEl(root)
+    const onUserClosed = () => { posWinRef.current = null; setPosPopupEl(null); setPositionPanelFloating(false) }
+    posOnUnloadRef.current = onUserClosed
+    w.addEventListener('beforeunload', onUserClosed)
+  }
+
+  const closePosPopup = () => {
+    if (posWinRef.current && !posWinRef.current.closed) {
+      if (posOnUnloadRef.current) posWinRef.current.removeEventListener('beforeunload', posOnUnloadRef.current)
+      posWinRef.current.close()
+    }
+    posOnUnloadRef.current = null
+    posWinRef.current = null
+    setPosPopupEl(null)
+  }
+
+  useEffect(() => () => { if (posWinRef.current && !posWinRef.current.closed) posWinRef.current.close() }, [])
+
   // 지금 재생 위치(playIndex-1, dayRows 기준)의 실시간 계산값 하나를 읽는다 - reservationSeriesRef는
   // fullRows(절대) 인덱스라 offset을 더해서 변환. 데이터가 없거나 워밍업 중이면 null.
   // back(기본 0)을 주면 그만큼 이전 캔들 값을 읽는다 - "진입" 표시등(크로스가 이 캔들에서 났는지)처럼
@@ -4238,7 +4278,7 @@ export default function ReplayChart() {
   // 🛑 이평선 따라가기 손절 - 선택된 선의 "끝"(지금 재생 위치의 값)을 좌표로 변환한다(사용자 요청 -
   // timerAnchor와 같은 방식, 화면을 드래그/줌하거나 캔들이 새로 그려질 때마다 다시 계산해야 함).
   // pair 인자는 setTwMaTrailStop 직후 같은 틱에서 부를 때 stale한 ref를 안 읽기 위한 override.
-  const maTrailLabels = { h1: 'H1', s1: 'S1', h3: 'H3', h5: 'H5', w85: 'W85' }
+  const maTrailLabels = { h1: '1M-빠른선', s1: '1M-Bol 중심선', h3: '3M-빠른선', h5: '5M-빠른선', w85: '5M-17가중선' }
   const updateMaStopAnchor = (pair = twMaTrailStopRef.current) => {
     const chart = chartRef.current
     const series = seriesRef.current
@@ -4472,7 +4512,7 @@ export default function ReplayChart() {
     // 헷갈리지 않게 색을 빨강으로 구분하고, 라벨도 "H1×.." 크로스 표기 대신 선 이름만 표시(사용자
     // 설명이 "그 선을 따라간다"는 개념이라 크로스 기호를 쓰면 오해 소지가 있음). 선택한 선을 캔들
     // 고가/저가가 건드리면(사용자 확인) 즉시 손절.
-    const maTrailOptions = [['h1', 'H1'], ['s1', 'S1'], ['h3', 'H3'], ['h5', 'H5'], ['w85', 'W85']]
+    const maTrailOptions = [['h1', '1M-빠른선'], ['s1', '1M-Bol 중심선'], ['h3', '3M-빠른선'], ['h5', '5M-빠른선'], ['w85', '5M-17가중선']]
     const renderMaTrailStopButtons = () => (
       <>
         <div style={{ fontSize: 11, color: '#9aa0ab', marginBottom: 4 }}>🛑 손절: 이평선 따라가기</div>
@@ -4852,6 +4892,95 @@ export default function ReplayChart() {
 
   // 매매진입 현황 패널 - 분리매매창(renderTwEmbedded)과 완전히 같은 구조(드래그 헤더 + fixed + resize +
   // document.body 포탈로 항상 최상단)로 뗀 떠다니는 패널(사용자 요청).
+  // 매매진입 현황 내용물 - 인라인 패널/새 창 팝업 둘 다 이 함수 하나를 공유한다(분리매매창의 renderTwInner와
+  // 같은 패턴, 사용자 요청으로 새 창 지원 추가하면서 중복 방지를 위해 뽑아냄).
+  const renderPosInner = () => (
+    <>
+      {/* 진입 랏수/손절/목표 설정값 / 보유 포지션 개수를 맨 위에 요약(사용자 요청) - 지금 몇 랏으로
+          진입되는지, 손절/목표가 몇 포인트로 잡혀있는지(분리매매창 twSl/twTp와 동일한 설정), 포지션이
+          몇 개 열려있는지 버튼 누르기 전에 바로 보이게. */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 4, fontSize: 12, color: '#9aa0ab', flexWrap: 'wrap' }}>
+        <span>진입 랏수 <b style={{ color: '#e8eaed' }}>{lotSize}</b></span>
+        <span>포지션 <b style={{ color: positions.length > 0 ? '#4CAF50' : '#e8eaed' }}>{positions.length}</b>개</span>
+      </div>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 10, fontSize: 12, color: '#9aa0ab', flexWrap: 'wrap' }}>
+        <span>손절 <b style={{ color: twUseSl ? '#F44336' : '#5a5f6a' }}>{twUseSl ? `${twSl}pt` : '미사용'}</b></span>
+        <span>목표 <b style={{ color: twUseTp ? '#4CAF50' : '#5a5f6a' }}>{twUseTp ? `${twTp}pt` : '미사용'}</b></span>
+      </div>
+      {/* BUY/SELL도 여기서 바로(사용자 요청) - 메인 차트의 openPosition/lotSize 그대로 재사용 */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <button
+          type="button" onClick={() => openPosition('buy')} disabled={currentPrice == null}
+          style={{
+            flex: 1, width: 'auto', background: '#26a69a', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+            padding: '9px 0', fontSize: 13, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
+          }}
+        >BUY</button>
+        <button
+          type="button" onClick={() => openPosition('sell')} disabled={currentPrice == null}
+          style={{
+            flex: 1, width: 'auto', background: '#ef5350', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
+            padding: '9px 0', fontSize: 13, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
+          }}
+        >SELL</button>
+      </div>
+      {/* 포지션이 여러 개일 때 맨 위에 전체 합계(사용자 요청) */}
+      {positions.length > 1 && (() => {
+        const totalDollars = positions.reduce((sum, pos) => sum + (currentPrice != null ? calcPnl(pos, currentPrice).dollars : 0), 0)
+        const totalPoints = positions.reduce((sum, pos) => sum + (currentPrice != null ? calcPnl(pos, currentPrice).points : 0), 0)
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0 10px', marginBottom: 6, borderBottom: '1px solid #2a2e38', whiteSpace: 'nowrap' }}>
+            <span style={{ fontWeight: 700 }}>합계</span>
+            <span style={{ color: totalDollars >= 0 ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
+              {currentPrice == null ? '—' : pnlDisplay === 'dollar'
+                ? `${totalDollars >= 0 ? '+' : ''}$${totalDollars.toFixed(2)}`
+                : `${totalPoints >= 0 ? '+' : ''}${totalPoints.toFixed(2)}pt`}
+            </span>
+            {/* 합계 옆에도 벌크 청산 바로가기(사용자 요청) - 아래 목록 끝에 있는 것과 완전히 같은 함수.
+                disabled 없음(사용자 지적 - 다른 벌크청산 버튼들과 일관되게 항상 눌리게) */}
+            <button
+              type="button" onClick={closeAllPositionsModal}
+              style={{
+                width: 'auto', flexShrink: 0, fontSize: 11, padding: '5px 10px', borderRadius: 6, border: 'none',
+                background: '#FF5722', color: '#fff', fontWeight: 700, cursor: 'pointer',
+              }}
+            >🚨 벌크 청산</button>
+          </div>
+        )
+      })()}
+      {positions.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: '#5a5f6a' }}>보유 중인 포지션이 없습니다</div>
+      ) : (
+        positions.map(pos => {
+          const { points, dollars } = currentPrice != null ? calcPnl(pos, currentPrice) : { points: 0, dollars: 0 }
+          const profit = dollars >= 0
+          return (
+            <div key={pos.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5, borderBottom: '1px solid #2a2e38', whiteSpace: 'nowrap' }}>
+              <span style={{ color: pos.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36, flexShrink: 0 }}>
+                {pos.side === 'buy' ? 'BUY' : 'SELL'}
+              </span>
+              <span style={{ color: '#9aa0ab', flexShrink: 0 }}>{pos.lot.toFixed(2)}랏</span>
+              <span style={{ color: '#9aa0ab', flexShrink: 0 }}>진입 {pos.entryPrice.toFixed(2)}</span>
+              <span style={{ color: profit ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto', flexShrink: 0 }}>
+                {currentPrice == null ? '—' : pnlDisplay === 'dollar'
+                  ? `${profit ? '+' : ''}$${dollars.toFixed(2)}`
+                  : `${points >= 0 ? '+' : ''}${points.toFixed(2)}pt`}
+              </span>
+              <button
+                type="button" onClick={() => closePosition(pos.id)}
+                style={{ width: 'auto', flexShrink: 0, fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
+              >청산</button>
+            </div>
+          )
+        })
+      )}
+      <button
+        type="button" onClick={closeAllPositionsModal}
+        style={{ width: '100%', marginTop: 10, background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700, padding: '9px 16px', fontSize: 13, cursor: 'pointer' }}
+      >🚨 벌크 청산</button>
+    </>
+  )
+
   const renderPositionPanel = () => (
     <div style={{
       position: 'fixed', left: posPanelPos.x, top: posPanelPos.y, width: 360, height: 400,
@@ -4868,99 +4997,37 @@ export default function ReplayChart() {
             버튼이 제멋대로 커지던 문제(사용자 지적) - width:'auto'로 직접 눌러준다. 제목도 줄바꿈되던
             문제(사용자 지적) - whiteSpace:nowrap. */}
         <span style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>매매진입 현황 {positions.length > 0 && `(${positions.length})`}</span>
-        {/* 닫기 버튼을 "🔗"만으론 뭘 하는 건지 알기 어려워서(사용자 지적) X박스 형태로 눈에 띄게 바꿈.
-            기능은 그대로 - 이 패널엔 "완전히 숨김" 상태가 없어서 닫으면 곧 원래 자리(인라인)로 돌아간다. */}
-        <button type="button" onClick={() => setPositionPanelFloating(false)} title="닫기 (원래 자리로 돌아감)"
-          style={{
-            width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: '#2a2e38', border: '1px solid #3a3f4a', borderRadius: 5, color: '#e8eaed', fontSize: 13,
-            cursor: 'pointer', lineHeight: 1, padding: 0,
-          }}>✕</button>
-      </div>
-      <div style={{ padding: 14, overflowX: 'auto' }}>
-        {/* 진입 랏수/손절/목표 설정값 / 보유 포지션 개수를 맨 위에 요약(사용자 요청) - 지금 몇 랏으로
-            진입되는지, 손절/목표가 몇 포인트로 잡혀있는지(분리매매창 twSl/twTp와 동일한 설정), 포지션이
-            몇 개 열려있는지 버튼 누르기 전에 바로 보이게. */}
-        <div style={{ display: 'flex', gap: 12, marginBottom: 4, fontSize: 12, color: '#9aa0ab', flexWrap: 'wrap' }}>
-          <span>진입 랏수 <b style={{ color: '#e8eaed' }}>{lotSize}</b></span>
-          <span>포지션 <b style={{ color: positions.length > 0 ? '#4CAF50' : '#e8eaed' }}>{positions.length}</b>개</span>
-        </div>
-        <div style={{ display: 'flex', gap: 12, marginBottom: 10, fontSize: 12, color: '#9aa0ab', flexWrap: 'wrap' }}>
-          <span>손절 <b style={{ color: twUseSl ? '#F44336' : '#5a5f6a' }}>{twUseSl ? `${twSl}pt` : '미사용'}</b></span>
-          <span>목표 <b style={{ color: twUseTp ? '#4CAF50' : '#5a5f6a' }}>{twUseTp ? `${twTp}pt` : '미사용'}</b></span>
-        </div>
-        {/* BUY/SELL도 여기서 바로(사용자 요청) - 메인 차트의 openPosition/lotSize 그대로 재사용 */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-          <button
-            type="button" onClick={() => openPosition('buy')} disabled={currentPrice == null}
+        <span style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          {/* 분리매매창과 동일하게 진짜 새 창으로도 뺄 수 있게(사용자 요청) */}
+          <button type="button" onClick={openPosPopup} title="진짜 새 창으로 분리해서 열기 (크기 자유 조절, 리플레이와 계속 연동됨)"
+            style={{ background: 'none', border: 'none', color: '#9aa0ab', fontSize: 14, cursor: 'pointer', lineHeight: 1, padding: 0 }}>🗗</button>
+          {/* 닫기 버튼을 "🔗"만으론 뭘 하는 건지 알기 어려워서(사용자 지적) X박스 형태로 눈에 띄게 바꿈.
+              기능은 그대로 - 이 패널엔 "완전히 숨김" 상태가 없어서 닫으면 곧 원래 자리(인라인)로 돌아간다. */}
+          <button type="button" onClick={() => setPositionPanelFloating(false)} title="닫기 (원래 자리로 돌아감)"
             style={{
-              flex: 1, width: 'auto', background: '#26a69a', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
-              padding: '9px 0', fontSize: 13, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
-            }}
-          >BUY</button>
-          <button
-            type="button" onClick={() => openPosition('sell')} disabled={currentPrice == null}
-            style={{
-              flex: 1, width: 'auto', background: '#ef5350', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700,
-              padding: '9px 0', fontSize: 13, cursor: currentPrice == null ? 'not-allowed' : 'pointer', opacity: currentPrice == null ? 0.5 : 1,
-            }}
-          >SELL</button>
-        </div>
-        {/* 포지션이 여러 개일 때 맨 위에 전체 합계(사용자 요청) */}
-        {positions.length > 1 && (() => {
-          const totalDollars = positions.reduce((sum, pos) => sum + (currentPrice != null ? calcPnl(pos, currentPrice).dollars : 0), 0)
-          const totalPoints = positions.reduce((sum, pos) => sum + (currentPrice != null ? calcPnl(pos, currentPrice).points : 0), 0)
-          return (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0 10px', marginBottom: 6, borderBottom: '1px solid #2a2e38', whiteSpace: 'nowrap' }}>
-              <span style={{ fontWeight: 700 }}>합계</span>
-              <span style={{ color: totalDollars >= 0 ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto' }}>
-                {currentPrice == null ? '—' : pnlDisplay === 'dollar'
-                  ? `${totalDollars >= 0 ? '+' : ''}$${totalDollars.toFixed(2)}`
-                  : `${totalPoints >= 0 ? '+' : ''}${totalPoints.toFixed(2)}pt`}
-              </span>
-              {/* 합계 옆에도 벌크 청산 바로가기(사용자 요청) - 아래 목록 끝에 있는 것과 완전히 같은 함수.
-                  disabled 없음(사용자 지적 - 다른 벌크청산 버튼들과 일관되게 항상 눌리게) */}
-              <button
-                type="button" onClick={closeAllPositionsModal}
-                style={{
-                  width: 'auto', flexShrink: 0, fontSize: 11, padding: '5px 10px', borderRadius: 6, border: 'none',
-                  background: '#FF5722', color: '#fff', fontWeight: 700, cursor: 'pointer',
-                }}
-              >🚨 벌크 청산</button>
-            </div>
-          )
-        })()}
-        {positions.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: '#5a5f6a' }}>보유 중인 포지션이 없습니다</div>
-        ) : (
-          positions.map(pos => {
-            const { points, dollars } = currentPrice != null ? calcPnl(pos, currentPrice) : { points: 0, dollars: 0 }
-            const profit = dollars >= 0
-            return (
-              <div key={pos.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12.5, borderBottom: '1px solid #2a2e38', whiteSpace: 'nowrap' }}>
-                <span style={{ color: pos.side === 'buy' ? '#26a69a' : '#ef5350', fontWeight: 700, width: 36, flexShrink: 0 }}>
-                  {pos.side === 'buy' ? 'BUY' : 'SELL'}
-                </span>
-                <span style={{ color: '#9aa0ab', flexShrink: 0 }}>{pos.lot.toFixed(2)}랏</span>
-                <span style={{ color: '#9aa0ab', flexShrink: 0 }}>진입 {pos.entryPrice.toFixed(2)}</span>
-                <span style={{ color: profit ? '#26a69a' : '#ef5350', fontWeight: 700, marginLeft: 'auto', flexShrink: 0 }}>
-                  {currentPrice == null ? '—' : pnlDisplay === 'dollar'
-                    ? `${profit ? '+' : ''}$${dollars.toFixed(2)}`
-                    : `${points >= 0 ? '+' : ''}${points.toFixed(2)}pt`}
-                </span>
-                <button
-                  type="button" onClick={() => closePosition(pos.id)}
-                  style={{ width: 'auto', flexShrink: 0, fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #2a2e38', background: 'none', color: '#9aa0ab', cursor: 'pointer' }}
-                >청산</button>
-              </div>
-            )
-          })
-        )}
-        <button
-          type="button" onClick={closeAllPositionsModal}
-          style={{ width: '100%', marginTop: 10, background: '#FF5722', color: '#fff', border: 'none', borderRadius: 9, fontWeight: 700, padding: '9px 16px', fontSize: 13, cursor: 'pointer' }}
-        >🚨 벌크 청산</button>
+              width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: '#2a2e38', border: '1px solid #3a3f4a', borderRadius: 5, color: '#e8eaed', fontSize: 13,
+              cursor: 'pointer', lineHeight: 1, padding: 0,
+            }}>✕</button>
+        </span>
       </div>
+      <div style={{ padding: 14, overflowX: 'auto' }}>{renderPosInner()}</div>
+    </div>
+  )
+
+  // 새 창(팝업) - 분리매매창의 renderTwPopupContent와 완전히 같은 패턴.
+  const renderPosPopupContent = () => (
+    <div style={{ padding: 14, color: '#e8eaed', fontFamily: '-apple-system, "Segoe UI", "Malgun Gothic", sans-serif', fontSize: 13 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, marginBottom: 8 }}>
+        <span style={{ fontWeight: 700 }}>매매진입 현황 {positions.length > 0 && `(${positions.length})`}</span>
+        <span style={{ display: 'flex', gap: 10 }}>
+          <button type="button" onClick={closePosPopup} title="이 창을 닫고 페이지 안 패널로 다시 붙이기"
+            style={{ background: 'none', border: '1px solid #2a2e38', borderRadius: 7, color: '#9aa0ab', fontSize: 12, padding: '5px 10px', cursor: 'pointer' }}>🔗 페이지에 다시 붙이기</button>
+          <button type="button" onClick={() => { closePosPopup(); setPositionPanelFloating(false) }}
+            style={{ background: 'none', border: '1px solid #2a2e38', borderRadius: 7, color: '#9aa0ab', fontSize: 12, padding: '5px 10px', cursor: 'pointer' }}>✕ 닫기</button>
+        </span>
+      </div>
+      {renderPosInner()}
     </div>
   )
 
@@ -6187,8 +6254,11 @@ export default function ReplayChart() {
         {showTradingWindow && !twPopupEl && createPortal(renderTwEmbedded(), document.body)}
         {showTradingWindow && twPopupEl && createPortal(renderTwPopupContent(), twPopupEl)}
         {/* positionPanelFloating 기본값이 false라 SSR에서 document.body에 안 닿지만, 혹시를 대비해
-            (예전 showPositionPanel=true 기본값 때 실제로 배포 에러가 났던 전례) typeof 가드는 유지한다. */}
-        {positionPanelFloating && typeof document !== 'undefined' && createPortal(renderPositionPanel(), document.body)}
+            (예전 showPositionPanel=true 기본값 때 실제로 배포 에러가 났던 전례) typeof 가드는 유지한다.
+            twPopupEl과 같은 패턴 - 새 창으로 뺐으면(posPopupEl) 그 창 document에, 아니면 페이지 안
+            떠다니는 패널로 렌더한다. */}
+        {positionPanelFloating && !posPopupEl && typeof document !== 'undefined' && createPortal(renderPositionPanel(), document.body)}
+        {positionPanelFloating && posPopupEl && createPortal(renderPosPopupContent(), posPopupEl)}
         {showTradeGuideModal && typeof document !== 'undefined' && createPortal(renderTradeGuideModal(), document.body)}
       </div>
     </>
