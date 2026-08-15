@@ -4172,8 +4172,9 @@ export default function ReplayChart() {
       ['center', '5분중심', true], ['bbUp', '5분상Bol', true], ['bbLo', '5분하Bol', true],
     ]
     const renderExitCrossButtons = () => (
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: '#9aa0ab', flexShrink: 0 }}>청산목표</span>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#9aa0ab', marginBottom: 4 }}>청산목표</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {exitCrossOptions.map(([id, label, isTouch]) => (
           <button key={id} type="button"
             onClick={() => setTwExitCrossPair(v => v === id ? null : id)}
@@ -4188,6 +4189,7 @@ export default function ReplayChart() {
             }}
           >{label}</button>
         ))}
+        </div>
       </div>
     )
 
