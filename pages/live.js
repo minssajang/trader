@@ -4732,14 +4732,14 @@ export default function ReplayChart() {
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer' }}>
                 <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-                <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`5번: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
+                <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`A: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
                 {dirBtnVertical('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false)}
               </label>
             </div>
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer' }}>
                 <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-                <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`6번: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
+                <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`B: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
                 {dirBtnVertical('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true)}
               </label>
             </div>
@@ -4753,7 +4753,7 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1} onChange={() => toggleCheck(1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: \n5분Bol 상단\n돌파후 진입`}</span>
+              <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`5번: \n5분Bol 상단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <div style={{ display: 'flex', gap: 2 }}>
                   <TwStatusDot label="슈팅" active={row1AboveShooting} colorA={TW_STATUS_RED_A} />
@@ -4764,7 +4764,7 @@ export default function ReplayChart() {
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1.1} onChange={() => toggleCheck(1.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: \n5분Bol 하단\n돌파후 진입`}</span>
+              <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`6번: \n5분Bol 하단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <div style={{ display: 'flex', gap: 2 }}>
                   <TwStatusDot label="슈팅" active={row1BelowShooting} colorA={TW_STATUS_LIME_A} />
@@ -4779,7 +4779,7 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 7} onChange={() => toggleCheck(7)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: (row9State1 && row9State2) ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`9번: 스토 데드크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
+              <span style={{ color: (row9State1 && row9State2) ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: 스토 데드크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="70" active={row9State1} colorA={TW_STATUS_RED_A} />
                 <TwStatusDot label="210" active={row9State2} colorA={TW_STATUS_RED_A} />
@@ -4787,7 +4787,7 @@ export default function ReplayChart() {
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 7.1} onChange={() => toggleCheck(7.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: (row10State1 && row10State2) ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`10번: 스토 골든크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
+              <span style={{ color: (row10State1 && row10State2) ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: 스토 골든크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="70" active={row10State1} colorA={TW_STATUS_LIME_A} />
                 <TwStatusDot label="210" active={row10State2} colorA={TW_STATUS_LIME_A} />
@@ -4823,12 +4823,12 @@ export default function ReplayChart() {
                 checked === 3 && '2번: 상승추세\n   상태 - WMA85>5분중심',
                 checked === 2 && '3번: HMA15(HMA300) 하락중\n   상태 - HMA300이 직전 캔들보다 하락중',
                 checked === 2.1 && '4번: HMA15(HMA300) 상승중\n   상태 - HMA300이 직전 캔들보다 상승중',
-                checked === 6 && '5번: 주가 < H1 (매도 전용)\n   상태 - 주가<H1(HMA20), H1 하락중\n   진입 - 주가가 S1(SMA20)을 데드크로스',
-                checked === 5 && '6번: 주가 > H1 (매수 전용)\n   상태 - 주가>H1(HMA20), H1 상승중\n   진입 - 주가가 S1(SMA20)을 골든크로스',
-                checked === 1 && '7번: 5Bol 상단 돌파\n   슈팅 - 5분볼린저(SMA100 볼린저) 상단을 고가가 뚫었지만 꼬리 달고 종가는 안쪽에서 마감\n   돌파 - 5분볼린저 상단을 캔들 종가가 나감\n   진입 - 5분볼린저 상단을 종가까지 들어옴',
-                checked === 1.1 && '8번: 5Bol 하단 돌파\n   슈팅 - 5분볼린저(SMA100 볼린저) 하단을 저가가 뚫었지만 꼬리 달고 종가는 안쪽에서 마감\n   돌파 - 5분볼린저 하단을 캔들 종가가 나감\n   진입 - 5분볼린저 하단을 종가까지 들어옴',
-                checked === 7 && '9번: 스토 데드크로스\n   상태 - 스토캐스틱(70,15,15) 데드 & 스토캐스틱(210,45,45) 데드',
-                checked === 7.1 && '10번: 스토 골든크로스\n   상태 - 스토캐스틱(70,15,15) 골든 & 스토캐스틱(210,45,45) 골든',
+                checked === 6 && 'A: 주가 < H1 (매도 전용)\n   상태 - 주가<H1(HMA20), H1 하락중\n   진입 - 주가가 S1(SMA20)을 데드크로스',
+                checked === 5 && 'B: 주가 > H1 (매수 전용)\n   상태 - 주가>H1(HMA20), H1 상승중\n   진입 - 주가가 S1(SMA20)을 골든크로스',
+                checked === 1 && '5번: 5Bol 상단 돌파\n   슈팅 - 5분볼린저(SMA100 볼린저) 상단을 고가가 뚫었지만 꼬리 달고 종가는 안쪽에서 마감\n   돌파 - 5분볼린저 상단을 캔들 종가가 나감\n   진입 - 5분볼린저 상단을 종가까지 들어옴',
+                checked === 1.1 && '6번: 5Bol 하단 돌파\n   슈팅 - 5분볼린저(SMA100 볼린저) 하단을 저가가 뚫었지만 꼬리 달고 종가는 안쪽에서 마감\n   돌파 - 5분볼린저 하단을 캔들 종가가 나감\n   진입 - 5분볼린저 하단을 종가까지 들어옴',
+                checked === 7 && '7번: 스토 데드크로스\n   상태 - 스토캐스틱(70,15,15) 데드 & 스토캐스틱(210,45,45) 데드',
+                checked === 7.1 && '8번: 스토 골든크로스\n   상태 - 스토캐스틱(70,15,15) 골든 & 스토캐스틱(210,45,45) 골든',
               ].filter(Boolean).join('\n\n') || '체크된 신호가 없습니다'}
             </div>
           </CollapsibleCard>
@@ -6034,23 +6034,22 @@ export default function ReplayChart() {
 
                   // "3롱/1셀"처럼 개수만 세면 어떤 번호가 롱인지 안 보인다는 지적(사용자) - 몇 번 신호가
                   // 롱인지/셀인지 번호 그대로 나열한다("1, 2, 3 롱" / "6 셀"). 번호는 분리매매창 반자동
-                  // 예약 카드의 "화면에 보이는 순서"를 그대로 따른다 - 5,6번(주가 vs H1)과 7,8번(5Bol)의
-                  // 자리를 서로 맞바꿈(사용자 요청): 1=1번(내부row4, 하락추세)/2=2번(내부row3, 상승추세)/
-                  // 3=3번(HMA300 하락중)/4=4번(HMA300 상승중)/5=5번(내부row6, 주가<H1)/6=6번(내부row5,
-                  // 주가>H1)/7=7번(내부row1, 5Bol 상단)/8=8번(내부row1.1, 5Bol 하단)/9=9번(스토 데드)/
-                  // 10=10번(스토 골든). 1↔2, 3↔4, 5↔6, 9↔10은 각각 같은 비교식의 반대 방향이라 절대
-                  // 동시에 못 뜬다.
+                  // 예약 카드의 "화면에 보이는 순서"를 그대로 따른다(사용자 요청, 최신 번호 체계):
+                  // 1=1번(내부row4, 하락추세)/2=2번(내부row3, 상승추세)/3=3번(HMA300 하락중)/
+                  // 4=4번(HMA300 상승중)/A=A(내부row6, 주가<H1)/B=B(내부row5, 주가>H1)/5=5번(내부row1,
+                  // 5Bol 상단)/6=6번(내부row1.1, 5Bol 하단)/7=7번(스토 데드)/8=8번(스토 골든).
+                  // 1↔2, 3↔4, A↔B, 7↔8은 각각 같은 비교식의 반대 방향이라 절대 동시에 못 뜬다.
                   const longRows = [], shortRows = []
                   if (wma85 != null && sma100 != null && h1 != null && wma85 < sma100 && stochGolden === false && price != null && price < h1) shortRows.push(1) // 1번(화면 위치, 내부row4): 하락추세
                   if (wma85 != null && sma100 != null && h1 != null && wma85 > sma100 && stochGolden === true && price != null && price > h1) longRows.push(2) // 2번(화면 위치, 내부row3): 상승추세
                   if (h300 != null && prevH300 != null && h300 < prevH300) shortRows.push(3) // 3번: HMA300 하락중
                   if (h300 != null && prevH300 != null && h300 >= prevH300) longRows.push(4) // 4번: HMA300 상승중(차트 듀얼컬러 선과 같은 기준)
-                  if (price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1) shortRows.push(5) // 5번: 주가<H1, H1 하락중
-                  if (price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1) longRows.push(6) // 6번: 주가>H1, H1 상승중
-                  if (row1Armed === 'above') shortRows.push(7) // 7번(매도 전용): 5Bol 상단 밖(row1Armed 진입 전)
-                  if (row1Armed === 'below') longRows.push(8) // 8번(매수 전용): 5Bol 하단 밖(row1Armed 진입 전)
-                  if (stoch70Golden === false && stoch210Golden === false) shortRows.push(9) // 9번: 스토(70,15,15)+(210,45,45) 둘 다 데드
-                  if (stoch70Golden === true && stoch210Golden === true) longRows.push(10) // 10번: 스토(70,15,15)+(210,45,45) 둘 다 골든
+                  if (price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1) shortRows.push('A') // A: 주가<H1, H1 하락중
+                  if (price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1) longRows.push('B') // B: 주가>H1, H1 상승중
+                  if (row1Armed === 'above') shortRows.push(5) // 5번(매도 전용): 5Bol 상단 밖(row1Armed 진입 전)
+                  if (row1Armed === 'below') longRows.push(6) // 6번(매수 전용): 5Bol 하단 밖(row1Armed 진입 전)
+                  if (stoch70Golden === false && stoch210Golden === false) shortRows.push(7) // 7번: 스토(70,15,15)+(210,45,45) 둘 다 데드
+                  if (stoch70Golden === true && stoch210Golden === true) longRows.push(8) // 8번: 스토(70,15,15)+(210,45,45) 둘 다 골든
 
                   if (longRows.length === 0 && shortRows.length === 0) return null
                   return (
