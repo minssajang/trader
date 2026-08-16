@@ -1128,7 +1128,12 @@ export default function ReplayChart() {
   // 버그를 고침). '동시'(70,210 둘 다 같이 갖춰지는 순간)는 9,10번 자체 체크박스(checked===7/7.1)+
   // 🔍찾기가 이미 그 역할이라 별도로 만들지 않는다(사용자 지적 - 중복).
   const [twFindStochKeys, setTwFindStochKeys] = useState(() => new Set())
-  const FIND_STOCH_KEY_PERIOD = { 'r9-70': '70', 'r9-210': '210', 'r10-70': '70', 'r10-210': '210' }
+  // 9번=데드크로스 카드니까 그 기간의 데드 전환만, 10번=골든크로스 카드니까 그 기간의 골든 전환만
+  // 찾는다(사용자 지적 - 카드 방향과 무관하게 골든/데드 둘 다 잡던 게 버그).
+  const FIND_STOCH_KEY_CONFIG = {
+    'r9-70': { period: '70', golden: false }, 'r9-210': { period: '210', golden: false },
+    'r10-70': { period: '70', golden: true }, 'r10-210': { period: '210', golden: true },
+  }
   // resize/pan/zoom 핸들러는 마운트 시 한 번만 설치돼서 클로저가 고정되므로, state를 직접 읽으면
   // stale해진다(rowsRef/indexRef처럼 ref로 미러링해서 항상 최신값을 읽게 함).
   const twFoundPositionsRef = useRef([])
@@ -3958,26 +3963,30 @@ export default function ReplayChart() {
   // (edge) 순간을 전부 찾는다. side는 마커 색상 구분용(골든=buy색, 데드=sell색)일 뿐 실제 매매 신호는
   // 아니다 - 9,10번처럼 두 기간이 같이 갖춰질 때만 잡는 게 아니라 그 기간 혼자 바뀌는 것도 보고 싶다는
   // 요청(사용자) - 순수 탐색 기능.
-  const findStochPositionsForPeriods = (periods) => {
-    if (!total || periods.size === 0) { setTwFoundPositions([]); setFoundMarkerAnchors([]); return }
+  const findStochPositionsForConfigs = (configs) => {
+    if (!total || configs.length === 0) { setTwFoundPositions([]); setFoundMarkerAnchors([]); return }
     const found = []
     for (let i = 1; i <= total; i++) {
-      for (const period of periods) {
-        const key = period === '70' ? 'stoch70Golden' : 'stoch210Golden'
+      for (const cfg of configs) {
+        const key = cfg.period === '70' ? 'stoch70Golden' : 'stoch210Golden'
         const cur = seriesValAt(key, i), prev = seriesValAt(key, i, 1)
-        if (cur == null || prev == null || cur === prev) continue
-        found.push({ idx: i, side: cur ? 'buy' : 'sell' })
+        if (cur == null || prev == null) continue
+        if (cur === cfg.golden && prev !== cfg.golden) found.push({ idx: i, side: cfg.golden ? 'buy' : 'sell' })
       }
     }
     setTwFoundPositions(found)
     updateFoundMarkerAnchors(found)
   }
+  // 체크박스는 선택만 하고, 실제 검색은 아래 찾기 버튼을 눌러야 실행된다(사용자 지적 - 체크하는 순간
+  // 바로 찾아버리면 "체크한 것만 찾으라"는 의도와 안 맞음).
   const toggleFindStoch = (checkboxKey) => {
     const next = new Set(twFindStochKeys)
     if (next.has(checkboxKey)) next.delete(checkboxKey)
     else next.add(checkboxKey)
     setTwFindStochKeys(next)
-    findStochPositionsForPeriods(new Set(Array.from(next).map(k => FIND_STOCH_KEY_PERIOD[k])))
+  }
+  const runFindStoch = () => {
+    findStochPositionsForConfigs(Array.from(twFindStochKeys).map(k => FIND_STOCH_KEY_CONFIG[k]))
   }
   // 재생 바 위 번호랑 완전히 같은 결과를 캔들 위/아래에도 그대로 얹는다(사용자 요청 - "잘 동작하는지
   // 찾아보게"). lightweight-charts 네이티브 마커(createSeriesMarkers)는 markerSeriesRef가 다른 라인
@@ -4459,6 +4468,17 @@ export default function ReplayChart() {
                 </div>
               </div>
             </label>
+          </div>
+          {/* 9,10번 개별 기간 찾기(사용자 요청) - 체크박스는 선택만, 실제 검색은 이 버튼을 눌러야 실행 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button type="button" onClick={runFindStoch} disabled={twFindStochKeys.size === 0}
+              style={{
+                background: twFindStochKeys.size === 0 ? '#37474F' : '#4FC3F7', color: 'white', border: 'none',
+                borderRadius: 5, padding: '6px 14px', fontSize: 12.5, fontWeight: 700, width: 'auto', flexShrink: 0,
+                cursor: twFindStochKeys.size === 0 ? 'not-allowed' : 'pointer', opacity: twFindStochKeys.size === 0 ? 0.5 : 1,
+              }}
+            >🔍 찾기</button>
+            {twFindStochKeys.size === 0 && <span style={{ fontSize: 11.5, color: '#9aa0ab' }}>70/210 체크박스를 먼저 선택하세요</span>}
           </div>
         </CollapsibleCard>
 

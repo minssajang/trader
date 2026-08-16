@@ -1147,16 +1147,6 @@ export default function ReplayChart() {
   // 🔍 찾기(검색) - 체크된 신호의 "진입" 위치를 불러온 구간 전체에서 찾아 순서대로 재생 바 위에
   // 번호로 표시(사용자 요청). [{idx, side}] 배열, idx는 dayRows 기준(1-based, playIndex와 같은 체계).
   const [twFoundPositions, setTwFoundPositions] = useState([])
-  // 9,10번 스토(70,15,15)/(210,45,45) 개별 찾기(사용자 요청) - 위 🔍 찾기는 반자동예약에 무장한 행
-  // 기준이라 9,10번은 두 기간이 "동시에" 갖춰진 순간만 찾아준다. 각 기간이 단독으로 골든/데드가
-  // 바뀌는 순간도 따로 찾아보고 싶다는 요청 - 반자동예약(checked/무장)과는 완전히 별개의 탐색
-  // 전용 체크박스라 twFoundPositions를 그대로 공유해서 재생 바 위에 똑같이 표시한다.
-  // 9번(데드크로스)/10번(골든크로스) 카드에 각각 70/210 체크박스가 따로 있다 - 같은 기간이라도
-  // 서로 독립적으로 체크/해제되어야 함(하나 체크하면 반대쪽 카드의 같은 기간 체크박스도 같이 켜지던
-  // 버그를 고침). '동시'(70,210 둘 다 같이 갖춰지는 순간)는 9,10번 자체 체크박스(checked===7/7.1)+
-  // 🔍찾기가 이미 그 역할이라 별도로 만들지 않는다(사용자 지적 - 중복).
-  const [twFindStochKeys, setTwFindStochKeys] = useState(() => new Set())
-  const FIND_STOCH_KEY_PERIOD = { 'r9-70': '70', 'r9-210': '210', 'r10-70': '70', 'r10-210': '210' }
   // resize/pan/zoom 핸들러는 마운트 시 한 번만 설치돼서 클로저가 고정되므로, state를 직접 읽으면
   // stale해진다(rowsRef/indexRef처럼 ref로 미러링해서 항상 최신값을 읽게 함).
   const twFoundPositionsRef = useRef([])
@@ -4271,31 +4261,6 @@ export default function ReplayChart() {
     setTwFoundPositions(found)
     updateFoundMarkerAnchors(found)
   }
-  // 9,10번 스토 개별 찾기 - 위 findSignalPositions와 독립적으로, 그 기간 하나의 골든/데드가 바뀌는
-  // (edge) 순간을 전부 찾는다. side는 마커 색상 구분용(골든=buy색, 데드=sell색)일 뿐 실제 매매 신호는
-  // 아니다 - 9,10번처럼 두 기간이 같이 갖춰질 때만 잡는 게 아니라 그 기간 혼자 바뀌는 것도 보고 싶다는
-  // 요청(사용자) - 순수 탐색 기능.
-  const findStochPositionsForPeriods = (periods) => {
-    if (!total || periods.size === 0) { setTwFoundPositions([]); setFoundMarkerAnchors([]); return }
-    const found = []
-    for (let i = 1; i <= total; i++) {
-      for (const period of periods) {
-        const key = period === '70' ? 'stoch70Golden' : 'stoch210Golden'
-        const cur = seriesValAt(key, i), prev = seriesValAt(key, i, 1)
-        if (cur == null || prev == null || cur === prev) continue
-        found.push({ idx: i, side: cur ? 'buy' : 'sell' })
-      }
-    }
-    setTwFoundPositions(found)
-    updateFoundMarkerAnchors(found)
-  }
-  const toggleFindStoch = (checkboxKey) => {
-    const next = new Set(twFindStochKeys)
-    if (next.has(checkboxKey)) next.delete(checkboxKey)
-    else next.add(checkboxKey)
-    setTwFindStochKeys(next)
-    findStochPositionsForPeriods(new Set(Array.from(next).map(k => FIND_STOCH_KEY_PERIOD[k])))
-  }
   // 재생 바 위 번호랑 완전히 같은 결과를 캔들 위/아래에도 그대로 얹는다(사용자 요청 - "잘 동작하는지
   // 찾아보게"). lightweight-charts 네이티브 마커(createSeriesMarkers)는 markerSeriesRef가 다른 라인
   // 추가/삭제 때마다 통째로 지웠다 다시 만들어지는 구조라(라인 위 배치 유지 목적) 그때마다 마커가
@@ -4752,28 +4717,16 @@ export default function ReplayChart() {
               <input type="checkbox" checked={checked === 7} onChange={() => toggleCheck(7)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
               <span style={{ color: (row9State1 && row9State2) ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`9번: 스토 데드크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <input type="checkbox" checked={twFindStochKeys.has('r9-70')} onChange={() => toggleFindStoch('r9-70')} style={{ accentColor: '#4CAF50', width: 12, height: 12 }} title="70기간만 찾기" />
-                  <TwStatusDot label="70" active={row9State1} colorA={TW_STATUS_RED_A} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <input type="checkbox" checked={twFindStochKeys.has('r9-210')} onChange={() => toggleFindStoch('r9-210')} style={{ accentColor: '#4CAF50', width: 12, height: 12 }} title="210기간만 찾기" />
-                  <TwStatusDot label="210" active={row9State2} colorA={TW_STATUS_RED_A} />
-                </div>
+                <TwStatusDot label="70" active={row9State1} colorA={TW_STATUS_RED_A} />
+                <TwStatusDot label="210" active={row9State2} colorA={TW_STATUS_RED_A} />
               </div>
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 7.1} onChange={() => toggleCheck(7.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
               <span style={{ color: (row10State1 && row10State2) ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`10번: 스토 골든크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <input type="checkbox" checked={twFindStochKeys.has('r10-70')} onChange={() => toggleFindStoch('r10-70')} style={{ accentColor: '#4CAF50', width: 12, height: 12 }} title="70기간만 찾기" />
-                  <TwStatusDot label="70" active={row10State1} colorA={TW_STATUS_LIME_A} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <input type="checkbox" checked={twFindStochKeys.has('r10-210')} onChange={() => toggleFindStoch('r10-210')} style={{ accentColor: '#4CAF50', width: 12, height: 12 }} title="210기간만 찾기" />
-                  <TwStatusDot label="210" active={row10State2} colorA={TW_STATUS_LIME_A} />
-                </div>
+                <TwStatusDot label="70" active={row10State1} colorA={TW_STATUS_LIME_A} />
+                <TwStatusDot label="210" active={row10State2} colorA={TW_STATUS_LIME_A} />
               </div>
             </label>
           </div>
