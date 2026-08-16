@@ -94,6 +94,11 @@ export default function Download() {
             </>
           )}
         </section>
+
+        <footer className="site">
+          문의: minssajang@gmail.com
+          <Link href="/admin" className="admin-link">admin</Link>
+        </footer>
       </div>
     </>
   )
