@@ -4280,7 +4280,7 @@ export default function ReplayChart() {
     // 줄바꿈될 때 옆의 표시등/버튼이 그 블록 중앙에 맞춰지면서 위아래로 빈 공간이 생기던 문제.
     const rowDef = (n, label, checked, onCheck, statusEl, sideBtns, disabled) => (
       <div key={n} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 6, opacity: disabled ? 0.4 : 1 }}>
-        <label style={{ display: 'flex', flexDirection: 'column', width: 130, flexShrink: 0, cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 11, fontWeight: 700 }}>
+        <label style={{ margin: 0, display: 'flex', flexDirection: 'column', width: 130, flexShrink: 0, cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 11, fontWeight: 700 }}>
           <span style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
             <input type="checkbox" checked={checked} disabled={disabled} onChange={onCheck} style={{ accentColor: '#4CAF50', marginTop: 2, flexShrink: 0 }} />
             <span style={{ color: label.color, whiteSpace: 'pre-line', lineHeight: 1.3 }}>{label.text}</span>
@@ -4455,24 +4455,24 @@ export default function ReplayChart() {
               그게 아니라 좌우로 나뉘어야 한다는 지적). "버튼 위치 변경"(twSwapped)에 좌우가 뒤바뀐다. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', border: '1px solid #2a2e38', borderRadius: 5 }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px' }}>
+              <label style={{ margin: 0, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px' }}>
                 <input type="checkbox" checked={checked === 4} onChange={() => toggleCheck(4)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
                 <span style={{ color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`1번: 하락추세\n5분17선 < 5분20선`}</span>
                 <TwStatusDot label="상태" active={row5State} colorA={TW_STATUS_RED_A} />
               </label>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px', borderTop: '1px solid #2a2e38' }}>
+              <label style={{ margin: 0, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px', borderTop: '1px solid #2a2e38' }}>
                 <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
                 <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선\n하락중`}</span>
                 <TwStatusDot label="상태" active={row2State} colorA={TW_STATUS_RED_A} />
               </label>
             </div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', border: '1px solid #2a2e38', borderRadius: 5 }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px' }}>
+              <label style={{ margin: 0, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px' }}>
                 <input type="checkbox" checked={checked === 3} onChange={() => toggleCheck(3)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
                 <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\n5분17선 > 5분20선`}</span>
                 <TwStatusDot label="상태" active={row6State} colorA={TW_STATUS_LIME_A} />
               </label>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px', borderTop: '1px solid #2a2e38' }}>
+              <label style={{ margin: 0, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px', borderTop: '1px solid #2a2e38' }}>
                 <input type="checkbox" checked={checked === 2.1} onChange={() => toggleCheck(2.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
                 <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: 15분 빠른선\n상승중`}</span>
                 <TwStatusDot label="상태" active={row2_1State} colorA={TW_STATUS_LIME_A} />
@@ -4488,19 +4488,19 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px', display: 'flex', gap: 6 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`A: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 8} onChange={() => toggleCheck(8)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowCState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>C: H1 &lt; S1</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 9} onChange={() => toggleCheck(9)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowEState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>E: H1 &lt; H3</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 10} onChange={() => toggleCheck(10)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowGState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>G: H3 &lt; H5</span>
                 </label>
@@ -4509,19 +4509,19 @@ export default function ReplayChart() {
             </div>
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px', display: 'flex', gap: 6 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`B: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 8.1} onChange={() => toggleCheck(8.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowDState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>D: H1 &gt; S1</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 9.1} onChange={() => toggleCheck(9.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowFState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>F: H1 &gt; H3</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 10.1} onChange={() => toggleCheck(10.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowHState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>H: H3 &gt; H5</span>
                 </label>
@@ -4536,7 +4536,7 @@ export default function ReplayChart() {
           {/* 옛 3,4번(5Bol 돌파)이 7,8번 자리로 밀림(사용자 요청 - 위 5,6번과 위치 맞바꿈) - "돌파"(=예전
               준비)+"진입" 표시등 세로, 왼쪽=7번(상단돌파)/오른쪽=8번(하단돌파) 나란히 배치. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
-            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
+            <label style={{ margin: 0, flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1} onChange={() => toggleCheck(1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
               <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`5번: \n5분Bol 상단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -4547,7 +4547,7 @@ export default function ReplayChart() {
                 <TwStatusDot label="진입" active={row1AboveReady} colorA={TW_STATUS_RED_A} />
               </div>
             </label>
-            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
+            <label style={{ margin: 0, flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1.1} onChange={() => toggleCheck(1.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
               <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`6번: \n5분Bol 하단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -4562,7 +4562,7 @@ export default function ReplayChart() {
           {/* 새 9,10번(사용자 요청) - 스토캐스틱 2세트(70,15,15 / 210,45,45) 상태만, 9번=둘 다 데드,
               10번=둘 다 골든(반대). 내부 체크 키는 새로 7/7.1 씀. twSwapped에 좌우 같이 뒤바뀜. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
-            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
+            <label style={{ margin: 0, flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 7} onChange={() => toggleCheck(7)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
               <span style={{ color: (row9State1 && row9State2) ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: 스토 데드크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -4576,7 +4576,7 @@ export default function ReplayChart() {
                 </div>
               </div>
             </label>
-            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
+            <label style={{ margin: 0, flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 7.1} onChange={() => toggleCheck(7.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
               <span style={{ color: (row10State1 && row10State2) ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: 스토 골든크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -4679,24 +4679,24 @@ export default function ReplayChart() {
             <span style={{ color: '#9aa0ab' }}>손절(포인트):</span>
             <input type="number" min={1} value={twSl} disabled={!twUseSl} onChange={e => setTwSl(Math.max(1, Number(e.target.value) || 1))}
               style={{ width: 80, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '4px 6px', fontSize: 12.5, opacity: twUseSl ? 1 : 0.5 }} />
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#4CAF50', fontWeight: 700, fontSize: 11.5 }}>
+            <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 4, color: '#4CAF50', fontWeight: 700, fontSize: 11.5 }}>
               <input type="checkbox" checked={twUseSl} onChange={e => setTwUseSl(e.target.checked)} /> 사용
             </label>
             <span style={{ color: '#9aa0ab' }}>익절(포인트):</span>
             <input type="number" min={1} value={twTp} disabled={!twUseTp} onChange={e => setTwTp(Math.max(1, Number(e.target.value) || 1))}
               style={{ width: 80, background: '#0f1115', border: '1px solid #2a2e38', borderRadius: 6, color: '#e8eaed', padding: '4px 6px', fontSize: 12.5, opacity: twUseTp ? 1 : 0.5 }} />
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#4CAF50', fontWeight: 700, fontSize: 11.5 }}>
+            <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 4, color: '#4CAF50', fontWeight: 700, fontSize: 11.5 }}>
               <input type="checkbox" checked={twUseTp} onChange={e => setTwUseTp(e.target.checked)} /> 사용
             </label>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 10, flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#FF9800', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+          <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, color: '#FF9800', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
             <input type="checkbox" checked={twSkipPopup} onChange={e => setTwSkipPopup(e.target.checked)} /> 팝업 확인 제외 (빠른 거래)
           </label>
           {/* 반자동 신호를 차트 아래에 "N 롱 / M 셀"로 표시(사용자 요청, 기본 체크) */}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#4CAF50', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+          <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, color: '#4CAF50', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
             <input type="checkbox" checked={showSemiAutoSignalOnChart} onChange={e => setShowSemiAutoSignalOnChart(e.target.checked)} /> 반자동 신호 차트 표시
           </label>
         </div>
@@ -4996,7 +4996,7 @@ export default function ReplayChart() {
               </div>
 
               <CollapsibleCard title="달력" maxWidth={170}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', marginBottom: 8 }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer', marginBottom: 8 }}>
                   <input
                     type="checkbox"
                     checked={multiSelectMode}
@@ -5041,7 +5041,7 @@ export default function ReplayChart() {
                   {uploadedTradeFile && (
                     <>
                       <div style={{ fontSize: 11, color: '#9aa0ab', wordBreak: 'break-all' }}>{uploadedTradeFile} ({uploadedTradeCount}건)</div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa0ab', cursor: 'pointer' }}>
+                      <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa0ab', cursor: 'pointer' }}>
                         <input
                           type="checkbox"
                           checked={showUploadedTrades}
@@ -5133,7 +5133,7 @@ export default function ReplayChart() {
 
               <CollapsibleCard title="횡보" maxWidth={170} defaultOpen={false}>
                 <div style={{ padding: '1px 0' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={sidewaysEnabled}
@@ -5158,7 +5158,7 @@ export default function ReplayChart() {
                   const hrs = sessionHours[s.id] || { start: s.startHour, end: s.endHour }
                   return (
                     <div key={s.id} style={{ padding: '3px 0', borderBottom: '1px solid #1c2028' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                      <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                         <input
                           type="checkbox"
                           checked={!!sessionEnabled[s.id]}
@@ -5261,7 +5261,7 @@ export default function ReplayChart() {
                   const isCustom = !!bandColors[band.id]
                   return (
                     <div key={band.id} style={{ padding: '3px 0' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                      <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                         <input
                           type="checkbox"
                           checked={on}
@@ -5324,7 +5324,7 @@ export default function ReplayChart() {
                   const isCustom = !!bandColors[band.id]
                   return (
                     <div key={band.id} style={{ padding: '3px 0' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                      <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                         <input
                           type="checkbox"
                           checked={on}
@@ -5387,7 +5387,7 @@ export default function ReplayChart() {
                   const isCustomWidth = !!maWidths[ma.id]
                   return (
                     <div key={ma.id} style={{ padding: '1px 0' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                      <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                         <input
                           type="checkbox"
                           checked={on}
@@ -5467,7 +5467,7 @@ export default function ReplayChart() {
 
               <CollapsibleCard title="리본" maxWidth={170} defaultOpen={false}>
                 <div style={{ padding: '1px 0' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={ribbonEnabled}
@@ -5477,7 +5477,7 @@ export default function ReplayChart() {
                     <span style={{ flex: 1 }}>리본</span>
                   </label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                    <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
                       상승
                       <input
                         type="color"
@@ -5487,7 +5487,7 @@ export default function ReplayChart() {
                         style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
                       />
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                    <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
                       하락
                       <input
                         type="color"
@@ -5530,7 +5530,7 @@ export default function ReplayChart() {
 
               <CollapsibleCard title="보조지표" maxWidth={170} defaultOpen={false}>
                 <div style={{ padding: '3px 0' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={enabledRSI}
@@ -5549,7 +5549,7 @@ export default function ReplayChart() {
                   </label>
                 </div>
                 <div style={{ padding: '3px 0' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={enabledMACD}
@@ -5580,7 +5580,7 @@ export default function ReplayChart() {
                   )}
                 </div>
                 <div style={{ padding: '3px 0' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={enabledMACD5}
@@ -5611,7 +5611,7 @@ export default function ReplayChart() {
                   )}
                 </div>
                 <div style={{ padding: '3px 0' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={enabledStoch1}
@@ -5636,7 +5636,7 @@ export default function ReplayChart() {
                   )}
                 </div>
                 <div style={{ padding: '3px 0' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={enabledStoch2}
@@ -5661,7 +5661,7 @@ export default function ReplayChart() {
                   )}
                 </div>
                 <div style={{ padding: '3px 0' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={enabledStoch3}
@@ -5699,7 +5699,7 @@ export default function ReplayChart() {
               </CollapsibleCard>
 
               <CollapsibleCard title="5분 슈팅" maxWidth={170} defaultOpen={false}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={shooting5MinEnabled}
@@ -6015,7 +6015,7 @@ export default function ReplayChart() {
               <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'stretch', flexWrap: 'wrap' }}>
               <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: 16, flex: positionPanelFloating ? '0 1 560px' : '1 1 460px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa0ab' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa0ab' }}>
                     시작 자금
                     <input
                       type="number" min={0} value={startingBalance}
@@ -6214,7 +6214,7 @@ export default function ReplayChart() {
 
               <div style={{ marginTop: 16 }}>
                 <CollapsibleCard title="⚙ 반자동" maxWidth="none" defaultOpen={false}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
                     <input
                       type="checkbox" checked={semiAutoEnabled}
                       onChange={e => setSemiAutoEnabled(e.target.checked)}
@@ -6237,7 +6237,7 @@ export default function ReplayChart() {
                   반자동과 동시에 켜두고 서로 다른 조건 조합을 비교해볼 수 있다. 날짜 선택/재생은 위 차트 컨트롤 그대로 공용으로 쓴다. */}
               <div style={{ marginTop: 16 }}>
                 <CollapsibleCard title="🧪 시뮬레이션" maxWidth="none" defaultOpen={false}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
                     <input
                       type="checkbox" checked={simulationEnabled}
                       onChange={e => setSimulationEnabled(e.target.checked)}
