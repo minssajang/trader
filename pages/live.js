@@ -678,6 +678,10 @@ const TW_MOVE_SL_OFF = '#BDBDBD', TW_MOVE_SL_ON = '#FF9800', TW_MOVE_SL_ON_HOVER
 //   가격 데이터만으로 결정되므로 전 구간을 한 번에 순차 계산 가능 - 아래 row1Armed 배열).
 function computeReservationSeries(fullRows) {
   const closes = fullRows.map(r => r.close)
+  // A(셀)/B(롱) 진입 시 "슈팅(꼬리)만 나도 걸리는" 문제 수정(사용자 지적) - 종가 크로스만 보지 않고
+  // 그 캔들의 저가/고가까지 S1을 안 건드렸는지(캔들 전체가 한쪽에 완전히 있는지) 같이 확인한다.
+  const lows = fullRows.map(r => r.low)
+  const highs = fullRows.map(r => r.high)
   const h1 = rollingHMA(closes, 20)
   const h3 = rollingHMA(closes, 60)
   const h100 = rollingHMA(closes, 100)
@@ -718,7 +722,7 @@ function computeReservationSeries(fullRows) {
     row1Armed[i] = armed
   }
 
-  return { closes, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, bbUp300, bbLo300, donUp5, donLo5, stochGolden, row1Armed, stoch70Golden, stoch210Golden }
+  return { closes, lows, highs, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, bbUp300, bbLo300, donUp5, donLo5, stochGolden, row1Armed, stoch70Golden, stoch210Golden }
 }
 
 // computeReservationSeries의 배열들을 훑어서 신호별 발생 이벤트를 dayRows 기준 idx(=i-startIdx)로
@@ -740,7 +744,7 @@ function computeReservationEvents(S, startIdx, endIdx) {
   // 🎯 청산 버튼 4종(사용자 요청, 삭제된 "✅ 익절: H1×H3 크로스 청산"의 후속) - H1(HMA20)과 S1/H3/H5/W85
   // 중 사용자가 고른 하나의 골든/데드크로스를 계속 감시하다가, 골든=숏 청산/데드=롱 청산(사용자 확인).
   const exitCross = { s1: [], h3: [], h5: [], w85: [] }
-  const { h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, bbUp, bbLo, stochGolden, row1Armed, closes } = S
+  const { h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, bbUp, bbLo, stochGolden, row1Armed, closes, lows, highs } = S
   for (let i = Math.max(1, startIdx); i < endIdx; i++) {
     const idx = i - startIdx
     // 청산 버튼 4종 크로스 감시 - 골든=숏 청산(closeSide:'sell'), 데드=롱 청산(closeSide:'buy')
@@ -769,14 +773,18 @@ function computeReservationEvents(S, startIdx, endIdx) {
       if (buyOk) row3.push({ idx, side: 'buy' })
       if (sellOk) row4.push({ idx, side: 'sell' })
     }
-    // 8번(매수): 주가>H1 & H1상승중(상태) + 주가가 S1(SMA20)을 골든크로스(진입) (사용자 요청 - 조건 전면 교체)
+    // 8번(매수): 주가>H1 & H1상승중(상태) + 주가가 S1(SMA20)을 골든크로스(진입), 그 캔들의 저가까지
+    // S1 위여야 함(사용자 지적 - 종가 크로스만 보면 슈팅/꼬리만 나도 진입돼버리는 문제)
     if (closes[i] != null && h1[i] != null && h1[i - 1] != null && closes[i] > h1[i] && h1[i] > h1[i - 1] &&
         closes[i - 1] != null && sma20_1m[i] != null && sma20_1m[i - 1] != null &&
-        closes[i - 1] <= sma20_1m[i - 1] && closes[i] > sma20_1m[i]) row5Entry.push({ idx, side: 'buy' })
-    // 7번(매도): 주가<H1 & H1하락중(상태) + 주가가 S1(SMA20)을 데드크로스(진입)
+        closes[i - 1] <= sma20_1m[i - 1] && closes[i] > sma20_1m[i] &&
+        lows[i] != null && lows[i] > sma20_1m[i]) row5Entry.push({ idx, side: 'buy' })
+    // 7번(매도): 주가<H1 & H1하락중(상태) + 주가가 S1(SMA20)을 데드크로스(진입), 그 캔들의 고가까지
+    // S1 아래여야 함(동일 사유)
     if (closes[i] != null && h1[i] != null && h1[i - 1] != null && closes[i] < h1[i] && h1[i] < h1[i - 1] &&
         closes[i - 1] != null && sma20_1m[i] != null && sma20_1m[i - 1] != null &&
-        closes[i - 1] >= sma20_1m[i - 1] && closes[i] < sma20_1m[i]) row6Entry.push({ idx, side: 'sell' })
+        closes[i - 1] >= sma20_1m[i - 1] && closes[i] < sma20_1m[i] &&
+        highs[i] != null && highs[i] < sma20_1m[i]) row6Entry.push({ idx, side: 'sell' })
     // C(셀)/D(바이): H1 vs S1(SMA20)
     if (h1[i] != null && sma20_1m[i] != null && h1[i - 1] != null && sma20_1m[i - 1] != null) {
       if (h1[i] < sma20_1m[i] && !(h1[i - 1] < sma20_1m[i - 1])) rowC.push({ idx, side: 'sell' })
@@ -4268,11 +4276,20 @@ export default function ReplayChart() {
     // 5,6번 진입 재정의(사용자 정정) - row1Armed가 이 캔들에 새로 'above'/'below'가 된 순간(edge)만.
     if (row === 1) return row1Armed === 'above' && prevRow1Armed !== 'above'
     if (row === 1.1) return row1Armed === 'below' && prevRow1Armed !== 'below'
-    // 7,8번 조건 전면 교체(사용자 요청) - 상태=주가 vs H1 & H1 방향, 진입=주가 자체가 S1을 크로스
-    if (row === 6) return price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1 &&
-      prevPrice != null && prevSma20 != null && sma20 != null && prevPrice >= prevSma20 && price < sma20
-    if (row === 5) return price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1 &&
-      prevPrice != null && prevSma20 != null && sma20 != null && prevPrice <= prevSma20 && price > sma20
+    // 7,8번 조건 전면 교체(사용자 요청) - 상태=주가 vs H1 & H1 방향, 진입=주가 자체가 S1을 크로스,
+    // 그 캔들 고가/저가까지 S1을 안 걸쳐야 함(사용자 지적 - 슈팅/꼬리만 나도 진입되는 문제)
+    if (row === 6) {
+      const high = seriesValAt('highs', i)
+      return price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1 &&
+        prevPrice != null && prevSma20 != null && sma20 != null && prevPrice >= prevSma20 && price < sma20 &&
+        high != null && high < sma20
+    }
+    if (row === 5) {
+      const low = seriesValAt('lows', i)
+      return price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1 &&
+        prevPrice != null && prevSma20 != null && sma20 != null && prevPrice <= prevSma20 && price > sma20 &&
+        low != null && low > sma20
+    }
     if (row === 4) {
       const state = wma85 != null && sma100 != null && wma85 < sma100
       const ready = price != null && h1 != null && price < h1 && h300 != null && prevH300 != null && h300 < prevH300
@@ -4538,10 +4555,13 @@ export default function ReplayChart() {
     const prevH1 = twSeriesVal('h1', 1), prevSma20 = twSeriesVal('sma20_1m', 1)
     const prevPrice = playIndex > 1 ? rowsRef.current[playIndex - 2]?.close ?? null : null
     const row3Ready = price != null && h1 != null && prevH1 != null && price < h1 && h1 < prevH1 // 7번 상태: 주가<H1, H1하락중
-    const row3DeadCrossNow = prevPrice != null && prevSma20 != null && price != null && sma20 != null && prevPrice >= prevSma20 && price < sma20 // 진입: 주가가 S1 데드크로스
+    // 진입: 주가가 S1 데드크로스 + 그 캔들 고가까지 S1 아래여야 함(사용자 지적 - 슈팅/꼬리만 나도 진입되는 문제)
+    const highNow = twSeriesVal('highs'), lowNow = twSeriesVal('lows')
+    const row3DeadCrossNow = prevPrice != null && prevSma20 != null && price != null && sma20 != null && prevPrice >= prevSma20 && price < sma20 && highNow != null && highNow < sma20
     const row3Entry = row3Ready && row3DeadCrossNow
     const row4Ready = price != null && h1 != null && prevH1 != null && price > h1 && h1 > prevH1 // 8번 상태: 주가>H1, H1상승중
-    const row4GoldenCrossNow = prevPrice != null && prevSma20 != null && price != null && sma20 != null && prevPrice <= prevSma20 && price > sma20 // 진입: 주가가 S1 골든크로스
+    // 진입: 주가가 S1 골든크로스 + 그 캔들 저가까지 S1 위여야 함(동일 사유)
+    const row4GoldenCrossNow = prevPrice != null && prevSma20 != null && price != null && sma20 != null && prevPrice <= prevSma20 && price > sma20 && lowNow != null && lowNow > sma20
     const row4Entry = row4Ready && row4GoldenCrossNow
 
     // A/B 카드 아래 C~H 추가(사용자 요청) - 셀 쪽(C,E,G)은 A카드에, 바이 쪽(D,F,H)은 B카드에 쌓이고
@@ -4775,7 +4795,7 @@ export default function ReplayChart() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1 }}>
                 <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
-                  <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`A: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
+                  <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`A: 주가 < 1분 빠른선`}</span>
                 </label>
                 <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 8} onChange={() => toggleCheck(8)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
@@ -4796,7 +4816,7 @@ export default function ReplayChart() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1 }}>
                 <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
-                  <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`B: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
+                  <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`B: 주가 > 1분 빠른선`}</span>
                 </label>
                 <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 8.1} onChange={() => toggleCheck(8.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
