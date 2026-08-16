@@ -5738,7 +5738,7 @@ export default function ReplayChart() {
                 onMouseDown={onScrubBarMouseDown}
                 title="드래그하면 그 자리로 재생 위치가 옮겨갑니다(캔들은 안 사라짐) - 손을 떼도 그 자리에 그대로 있고, 다음 재생은 여기서부터 이어집니다"
                 style={{
-                  position: 'relative', width: '100%', height: 16, marginTop: 8,
+                  position: 'relative', width: '100%', height: 16, marginTop: 26,
                   background: '#2a2e38', borderRadius: 8, overflow: 'visible',
                   cursor: total ? 'pointer' : 'not-allowed', opacity: total ? 1 : 0.5,
                 }}
@@ -5762,7 +5762,7 @@ export default function ReplayChart() {
                     onMouseDown={(e) => { e.stopPropagation(); stopPlayback(); scrubView(f.idx); applyIndex(f.idx) }}
                     title={`${n + 1}번째 (${f.idx}봉) - 클릭 시 이동`}
                     style={{
-                      position: 'absolute', top: -15, left: `${Math.min(100, (f.idx / total) * 100)}%`,
+                      position: 'absolute', top: -26, left: `${Math.min(100, (f.idx / total) * 100)}%`,
                       transform: 'translateX(-50%)', fontSize: 9, fontWeight: 700, lineHeight: '12px',
                       padding: '0 3px', borderRadius: 3, cursor: 'pointer', whiteSpace: 'nowrap', zIndex: 6,
                       background: '#171a21', color: f.side === 'sell' ? '#ef5350' : '#26a69a',
