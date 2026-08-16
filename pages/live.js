@@ -981,6 +981,10 @@ export default function ReplayChart() {
   // 그 선 자체, 터치 방식이면 그 선 그대로)을 계속 따라다니게(사용자 요청 - "H1×H5면 H5를 따라가야지").
   // maStopAnchor와 완전히 같은 구조/좌표계.
   const [exitTargetAnchor, setExitTargetAnchor] = useState(null)
+  // 진입가 표시(사용자 요청, "----- 진입 +/-금액") - 보유 중인 포지션마다 진입가 자리에 점선+라벨을
+  // 띄우고 실시간 손익(pnlDisplay 설정대로)을 계속 갱신한다. maStopAnchor와 같은 좌표계지만 포지션
+  // 개수만큼 배열. [{id, x, y, side, points, dollars}]
+  const [positionAnchors, setPositionAnchors] = useState([])
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
   // 기본 셋팅(사용자 요청) - 1분 볼린저는 중간선만, 5분/15분/1시간 볼린저는 전체 표시
@@ -1343,7 +1347,7 @@ export default function ReplayChart() {
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
-    setPositions([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
+    setPositions([]); setPositionAnchors([]) // 심볼이 바뀌면 그 전 심볼 가격 기준 포지션은 의미가 없어짐(체결 없이 그냥 사라짐)
     startLivePolling(symbol)
     return () => {
       if (livePollTimerRef.current) clearInterval(livePollTimerRef.current)
@@ -1512,14 +1516,14 @@ export default function ReplayChart() {
     // 컨테이너 자체의 크기 변화를 직접 감시해서 항상 실제 폭에 맞춘다.
     const ro = new ResizeObserver(entries => {
       const w = entries[0]?.contentRect?.width
-      if (w) { chart.resize(w, 700, true); updateTimerAnchor(); updateFoundMarkerAnchors(); updateMaStopAnchor(); updateExitTargetAnchor() }
+      if (w) { chart.resize(w, 700, true); updateTimerAnchor(); updateFoundMarkerAnchors(); updateMaStopAnchor(); updateExitTargetAnchor(); updatePositionAnchors() }
     })
     ro.observe(containerRef.current)
 
     // 캔들 타이머 배지 위치 - 화면을 드래그/줌하면(시각→x좌표 매핑이 바뀌므로) 캔들은 그대로여도
     // 화면상 위치는 움직여야 한다. 보이는 범위가 바뀔 때마다 다시 계산한다. 🔍 찾기 마커/이평선 손절
     // 라벨도 같은 이유로 같이 갱신.
-    const onVisibleRangeChange = () => { updateTimerAnchor(); updateFoundMarkerAnchors(); updateMaStopAnchor(); updateExitTargetAnchor() }
+    const onVisibleRangeChange = () => { updateTimerAnchor(); updateFoundMarkerAnchors(); updateMaStopAnchor(); updateExitTargetAnchor(); updatePositionAnchors() }
     chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRangeChange)
 
     return () => {
@@ -1964,6 +1968,7 @@ export default function ReplayChart() {
     updateFoundMarkerAnchors()
     updateMaStopAnchor()
     updateExitTargetAnchor()
+    updatePositionAnchors()
   }
 
   // "5분 슈팅" - 다른 신호 마커들과 같은 방식으로 재생 위치(idx) 이전 것만 보여준다.
@@ -2128,6 +2133,7 @@ export default function ReplayChart() {
       updateFoundMarkerAnchors()
       updateMaStopAnchor()
       updateExitTargetAnchor()
+      updatePositionAnchors()
     }
   }
 
@@ -2413,7 +2419,7 @@ export default function ReplayChart() {
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
-    setPositions([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
+    setPositions([]); setPositionAnchors([]) // 새 구간을 불러오면 그 전 리플레이의 미체결 포지션은 그냥 사라짐(새 연습 세션)
     indexRef.current = 0
     drawnUpToRef.current = 0 // 새 데이터 로드 시 "실제로 그려진 지점"도 반드시 같이 리셋 - 안 하면 이전
     // 날짜에서 남은 값이 새 날짜의 캔들 인덱스와 안 맞아서 update() 크래시로 이어졌다(실사용 중 재현됨).
@@ -2830,7 +2836,7 @@ export default function ReplayChart() {
     sessionPointsRef.current = []
     markersPrimitiveRef.current?.setMarkers([])
     uploadedEdgePrimitiveRef.current?.setPoints([])
-    setPositions([])
+    setPositions([]); setPositionAnchors([])
   }
 
   const toggleSummerTime = () => setSummerTime(prev => !prev)
@@ -3817,11 +3823,15 @@ export default function ReplayChart() {
 
   const openPosition = (side) => {
     if (currentPrice == null) return
-    setPositions(prev => [...prev, {
-      id: `${Date.now()}_${Math.random()}`,
-      side, symbol, lot: lotSize, entryPrice: currentPrice,
-      entryTime: rowsRef.current[playIndex - 1].time,
-    }])
+    setPositions(prev => {
+      const next = [...prev, {
+        id: `${Date.now()}_${Math.random()}`,
+        side, symbol, lot: lotSize, entryPrice: currentPrice,
+        entryTime: rowsRef.current[playIndex - 1].time,
+      }]
+      updatePositionAnchors(next)
+      return next
+    })
   }
 
   // 계좌 라벨을 입력하면 그 EA가 보고해둔 계좌 상태(데모/라이브, 잔고)를 10초마다 폴링해서 보여준다 -
@@ -3890,10 +3900,14 @@ export default function ReplayChart() {
   const openModalPositionAt = (side, price, time, { lot, slPoints, tpPoints, tag }) => {
     const sl = slPoints > 0 ? (side === 'buy' ? price - slPoints : price + slPoints) : null
     const tp = tpPoints > 0 ? (side === 'buy' ? price + tpPoints : price - tpPoints) : null
-    setPositions(prev => [...prev, {
-      id: `tw${tag ? '_' + tag : ''}_${Date.now()}_${Math.random()}`,
-      side, symbol, lot, entryPrice: price, entryTime: time, sl, tp,
-    }])
+    setPositions(prev => {
+      const next = [...prev, {
+        id: `tw${tag ? '_' + tag : ''}_${Date.now()}_${Math.random()}`,
+        side, symbol, lot, entryPrice: price, entryTime: time, sl, tp,
+      }]
+      updatePositionAnchors(next)
+      return next
+    })
   }
   const openModalPosition = (side, opts) => {
     if (currentPrice == null) return
@@ -3925,7 +3939,9 @@ export default function ReplayChart() {
         exitPrice: price, exitTime: time, points, dollars,
       })
       setClosedTradesCount(c => c + 1)
-      return prev.filter(p => p.id !== id)
+      const next = prev.filter(p => p.id !== id)
+      updatePositionAnchors(next)
+      return next
     })
   }
 
@@ -4326,6 +4342,27 @@ export default function ReplayChart() {
     const y = series.priceToCoordinate(val)
     if (x == null || y == null) { setExitTargetAnchor(null); return }
     setExitTargetAnchor({ x, y, label: exitTargetLineLabels[pair] })
+  }
+
+  // 진입가 표시(사용자 요청) - maStopAnchor/exitTargetAnchor와 완전히 같은 방식. 좌표는 "지금 재생
+  // 위치"(x, 계속 따라감) + "각 포지션의 진입가"(y, 고정) 조합이라 포지션마다 하나씩 만든다.
+  // positionsRef를 쓰는 이유는 resize/visible-range 핸들러가 마운트 시 한 번만 설치되는 클로저라
+  // state를 직접 읽으면 stale하기 때문(다른 anchor 함수들과 동일 패턴).
+  const updatePositionAnchors = (posList = positionsRef.current) => {
+    const chart = chartRef.current
+    const series = seriesRef.current
+    const idx = indexRef.current
+    const row = rowsRef.current[idx - 1]
+    if (!chart || !series || !row || posList.length === 0) { setPositionAnchors([]); return }
+    const x = chart.timeScale().timeToCoordinate(row.time)
+    if (x == null) { setPositionAnchors([]); return }
+    const anchors = posList.map(pos => {
+      const y = series.priceToCoordinate(pos.entryPrice)
+      if (y == null) return null
+      const { points, dollars } = row.close != null ? calcPnl(pos, row.close) : { points: 0, dollars: 0 }
+      return { id: pos.id, x, y, side: pos.side, points, dollars }
+    }).filter(Boolean)
+    setPositionAnchors(anchors)
   }
 
   const twMoneyColor = (v) => (v >= 0 ? '#26a69a' : '#ef5350')
@@ -5896,6 +5933,25 @@ export default function ReplayChart() {
                     </span>
                   </div>
                 )}
+                {/* 진입가 표시(사용자 요청, "-----진입 +/-금액") - maStopAnchor/exitTargetAnchor와 같은
+                    점선+라벨 스타일. 포지션마다 하나씩, 실시간 손익(pnlDisplay 설정 그대로)이 색과 함께
+                    계속 갱신된다(리플레이/실시간 공통, MT5는 오버레이 파일로 별도 구현). */}
+                {positionAnchors.map(a => (
+                  <div key={a.id} style={{
+                    position: 'absolute', left: a.x + 16, top: a.y + 16,
+                    transform: 'translateY(-50%)', zIndex: 5, pointerEvents: 'none',
+                    display: 'flex', alignItems: 'center', whiteSpace: 'nowrap',
+                  }}>
+                    <span style={{ width: 22, borderTop: `2px dashed ${twMoneyColor(a.dollars)}`, display: 'inline-block' }} />
+                    <span style={{
+                      background: 'rgba(23,26,33,0.92)', border: `1px solid ${twMoneyColor(a.dollars)}`, borderRadius: 4,
+                      padding: '2px 8px', fontSize: 11, fontWeight: 700, color: twMoneyColor(a.dollars), marginLeft: 2,
+                    }}>
+                      진입({a.side === 'buy' ? 'BUY' : 'SELL'}){' '}
+                      {pnlDisplay === 'dollar' ? `${a.dollars >= 0 ? '+' : ''}$${a.dollars.toFixed(2)}` : `${a.points >= 0 ? '+' : ''}${a.points.toFixed(2)}pt`}
+                    </span>
+                  </div>
+                ))}
                 {/* 🔍 찾기 결과 - timerAnchor와 같은 좌표계(컨테이너 padding 16px 보정). 셀은 캔들 위
                     20px, 롱은 캔들 아래 20px(사용자 요청 그대로). updateFoundMarkerAnchors가 화면을
                     드래그/줌하거나 캔들이 새로 그려질 때마다 좌표를 다시 계산해서 계속 따라다닌다. */}
