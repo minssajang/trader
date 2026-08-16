@@ -39,22 +39,28 @@ export function latestMonth(datasets) {
 }
 
 // 달력/볼린저 리스트처럼 왼쪽 컬럼에 세로로 쌓이는 카드들을 접었다 펼 수 있게 하는 공용 껍데기.
-export function CollapsibleCard({ title, defaultOpen = true, maxWidth = 170, children }) {
+// headerExtra(사용자 요청) - 타이틀 오른쪽(체브론 앞)에 카드를 펼치지 않아도 항상 보이는 컨트롤을
+// 넣을 수 있다(예: 반자동 예약 카드의 🔍 찾기 버튼). 예전엔 헤더 전체가 <button>이라 그 안에 또
+// 버튼(찾기)을 넣으면 중첩 버튼이 되는 문제가 있었다 - <div onClick>으로 바꾸고 headerExtra는
+// stopPropagation으로 감싸서 클릭해도 카드가 열리고 닫히지 않게 분리했다.
+export function CollapsibleCard({ title, defaultOpen = true, maxWidth = 170, headerExtra, children }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
     <div style={{ background: '#171a21', border: '1px solid #2a2e38', borderRadius: 14, padding: open ? 12 : '10px 12px', maxWidth }}>
-      <button
-        type="button"
+      <div
         onClick={() => setOpen(o => !o)}
         style={{
-          background: 'none', border: 'none', color: '#9aa0ab', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: 0,
+          color: '#9aa0ab', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
           fontSize: 11, fontWeight: 700, marginBottom: open ? 8 : 0,
         }}
       >
         <span>{title}</span>
-        <span style={{ fontSize: 10 }}>{open ? '▾' : '▸'}</span>
-      </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {headerExtra && <span onClick={e => e.stopPropagation()}>{headerExtra}</span>}
+          <span style={{ fontSize: 10 }}>{open ? '▾' : '▸'}</span>
+        </div>
+      </div>
       {open && children}
     </div>
   )

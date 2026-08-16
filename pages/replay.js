@@ -4353,15 +4353,6 @@ export default function ReplayChart() {
 
         <button type="button" onClick={() => setTwSwapped(v => !v)} style={{ width: '100%', background: '#9E9E9E', color: 'white', border: 'none', borderRadius: 5, padding: 6, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>버튼 위치 변경</button>
 
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
-          <button type="button" onClick={() => openModalPosition('sell', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
-            disabled={currentPrice == null || !live}
-            style={{ flex: 1, height: 57, background: TW_SHORT_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>SELL 🔴 매도</button>
-          <button type="button" onClick={() => openModalPosition('buy', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
-            disabled={currentPrice == null || !live}
-            style={{ flex: 1, height: 57, background: TW_LONG_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>BUY 🟢 매수</button>
-        </div>
-
         {/* 수동 매수/매도 버튼 바로 아래에 벌크 청산 하나 더(사용자 요청) - 아래쪽에 원래 있던 것과
             완전히 같은 함수(closeAllPositionsModal). 원래 버튼엔 disabled가 없는데 여기만 넣었던 게
             불일치였음(사용자 지적) - 똑같이 disabled 없이 항상 눌리게 맞춤. */}
@@ -4370,11 +4361,22 @@ export default function ReplayChart() {
         >🚨 벌크 청산</button>
         {renderExitCrossButtons()}
         {renderMaTrailStopButtons()}
+        {/* 매수매도 버튼을 손절 아래로 이동(사용자 요청) - 원래는 벌크청산 위(맨 위)에 있었음. 크기도
+            줄임(사용자 요청 - height 57 → 40). */}
+        <div style={{ display: 'flex', gap: 6, marginTop: 10, marginBottom: 8, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
+          <button type="button" onClick={() => openModalPosition('sell', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
+            disabled={currentPrice == null || !live}
+            style={{ flex: 1, height: 40, background: TW_SHORT_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 14, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>SELL 🔴 매도</button>
+          <button type="button" onClick={() => openModalPosition('buy', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
+            disabled={currentPrice == null || !live}
+            style={{ flex: 1, height: 40, background: TW_LONG_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 14, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>BUY 🟢 매수</button>
+        </div>
 
-        <CollapsibleCard title="🎯 반자동 예약" maxWidth="none" defaultOpen={false}>
-          {/* 🔍 찾기(사용자 요청) - 지금 체크된 신호가 불러온 구간 안에서 실제로 진입했던 캔들을 전부
-              찾아 아래 재생 바 위에 순서대로 번호로 표시한다(그 번호를 클릭하면 그 캔들로 이동). */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <CollapsibleCard title="🎯 반자동 예약" maxWidth="none" defaultOpen={false} headerExtra={(
+          /* 🔍 찾기(사용자 요청) - 지금 체크된 신호가 불러온 구간 안에서 실제로 진입했던 캔들을 전부
+             찾아 아래 재생 바 위에 순서대로 번호로 표시한다(그 번호를 클릭하면 그 캔들로 이동).
+             타이틀 오른쪽으로 옮겨서(사용자 요청) 카드를 안 열어도 바로 찾기를 쓸 수 있게 함. */
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" onClick={findSignalPositions} disabled={!live || (checked == null && twFindStochKeys.size === 0)}
               style={{
                 background: (!live || (checked == null && twFindStochKeys.size === 0)) ? '#37474F' : '#4FC3F7', color: 'white', border: 'none',
@@ -4392,6 +4394,7 @@ export default function ReplayChart() {
               </>
             )}
           </div>
+        )}>
           {/* 7,8번(추세)을 맨 위로 올림(사용자 요청) - 내부 checked/dir 키는 안 바꾸고, 화면 순서+라벨
               숫자만 1~8 순번으로 다시 붙였다. 새 순서: 내부row4(하락추세)=1번, 내부row3(상승추세)=2번,
               내부row1(5Bol 상단)=3번, 내부row1.1(5Bol 하단)=4번, 내부row2(주가<H1)=5번,
@@ -4453,6 +4456,10 @@ export default function ReplayChart() {
               <div style={{ display: 'flex', gap: 4 }}>{dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true)}</div>
             </div>
           </div>
+          {/* 5,6번 아래에 벌크 청산 버튼 하나 추가(사용자 요청) - 위/아래 두 벌과 완전히 같은 함수. */}
+          <button type="button" onClick={closeAllPositionsModal}
+            style={{ width: '100%', marginBottom: 6, background: '#FF5722', color: 'white', border: 'none', borderRadius: 5, padding: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}
+          >🚨 벌크 청산</button>
           {/* 옛 3,4번(5Bol 돌파)이 7,8번 자리로 밀림(사용자 요청 - 위 5,6번과 위치 맞바꿈) - "돌파"(=예전
               준비)+"진입" 표시등 세로, 왼쪽=7번(상단돌파)/오른쪽=8번(하단돌파) 나란히 배치. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
