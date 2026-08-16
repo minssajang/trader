@@ -4734,34 +4734,35 @@ export default function ReplayChart() {
               내부row1(5Bol 상단)=3번, 내부row1.1(5Bol 하단)=4번, 내부row2(주가<H1)=5번,
               내부row2.1(주가>H1)=6번, 내부row6(H1<1분중심)=7번, 내부row5(H1>1분중심)=8번. */}
           {/* 1,2번은 상태만 남기고 준비/진입 표시등 + 매수매도 버튼 삭제(사용자 요청) - 체크박스 자체는
-              그대로 둠(🔍 찾기 등에서 여전히 checked를 씀). 카드 짝을 방향별로 다시 묶음(사용자 요청) -
-              1번(하락추세)+3번(15분↓)을 한 카드, 2번(상승추세)+4번(15분↑)을 다른 한 카드로. "버튼 위치
-              변경"(twSwapped)에 같이 좌우가 뒤바뀐다(사용자 요청 - 1~6번도 7,8번과 동일하게). */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
-            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 4} onChange={() => toggleCheck(4)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`1번: 하락추세\n5분17선 < 5분20선`}</span>
-              <TwStatusDot label="상태" active={row5State} colorA={TW_STATUS_RED_A} />
-            </label>
-            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선\n하락중`}</span>
-              <TwStatusDot label="상태" active={row2State} colorA={TW_STATUS_RED_A} />
-            </label>
-          </div>
-          {/* 새 3,4번(사용자 요청) - HMA300(15분) 방향 상태만, 1,2번과 같은 스타일. 내부 체크 키는
-              삭제됐던 2/2.1 재사용. twSwapped에 좌우 같이 뒤바뀜(사용자 요청). */}
+              그대로 둠(🔍 찾기 등에서 여전히 checked를 씀). 1번(하락추세)+3번(15분↓)을 한 카드에
+              간격 없이 세로로 붙여 왼쪽에, 2번(상승추세)+4번(15분↑)을 한 카드에 간격 없이 세로로
+              붙여 오른쪽에 배치(사용자 요청 - 이전엔 1+3/2+4가 위아래 두 줄로 나뉘어 있었는데,
+              그게 아니라 좌우로 나뉘어야 한다는 지적). "버튼 위치 변경"(twSwapped)에 좌우가 뒤바뀐다. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
-            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 3} onChange={() => toggleCheck(3)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\n5분17선 > 5분20선`}</span>
-              <TwStatusDot label="상태" active={row6State} colorA={TW_STATUS_LIME_A} />
-            </label>
-            <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 2.1} onChange={() => toggleCheck(2.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: 15분 빠른선\n상승중`}</span>
-              <TwStatusDot label="상태" active={row2_1State} colorA={TW_STATUS_LIME_A} />
-            </label>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', border: '1px solid #2a2e38', borderRadius: 5 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px' }}>
+                <input type="checkbox" checked={checked === 4} onChange={() => toggleCheck(4)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <span style={{ color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`1번: 하락추세\n5분17선 < 5분20선`}</span>
+                <TwStatusDot label="상태" active={row5State} colorA={TW_STATUS_RED_A} />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px', borderTop: '1px solid #2a2e38' }}>
+                <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선\n하락중`}</span>
+                <TwStatusDot label="상태" active={row2State} colorA={TW_STATUS_RED_A} />
+              </label>
+            </div>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', border: '1px solid #2a2e38', borderRadius: 5 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px' }}>
+                <input type="checkbox" checked={checked === 3} onChange={() => toggleCheck(3)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\n5분17선 > 5분20선`}</span>
+                <TwStatusDot label="상태" active={row6State} colorA={TW_STATUS_LIME_A} />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px', borderTop: '1px solid #2a2e38' }}>
+                <input type="checkbox" checked={checked === 2.1} onChange={() => toggleCheck(2.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: 15분 빠른선\n상승중`}</span>
+                <TwStatusDot label="상태" active={row2_1State} colorA={TW_STATUS_LIME_A} />
+              </label>
+            </div>
           </div>
           {/* 옛 5,6번(H1<1분중심/H1>1분중심)이 5,6번 자리로 다시 올라옴(사용자 요청 - 옛 3,4번(5Bol)과
               위치 맞바꿈). 조건은 전에 정리한 그대로: 상태=주가 vs H1 & H1 방향, 진입=주가 자체가
