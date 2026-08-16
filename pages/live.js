@@ -318,8 +318,10 @@ const RIBBON_RED = '#FF0000'
 // 구조만 dual"이라는 요청이라 상승/하락 둘 다 원래 단색 그대로 넣어둠.
 // hma20(1분 H)도 3분/5분 H처럼 상/하 듀얼로 전환(사용자 요청) - 상승은 원래 단색(#F44336) 그대로,
 // 하락은 화이트로. wma17_1m(1분 W17)은 상/하 둘 다 rgb(41,0,245)로 지정(사용자 요청).
-const DUAL_DEFAULT_UP_COLOR = { hma20: '#F44336', hma60: '#00D5FF', hma100: '#FF9800', wma17_1m: '#2900F5', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
-const DUAL_DEFAULT_DOWN_COLOR = { hma20: '#FFFFFF', wma17_1m: '#2900F5', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
+// 1분/3분/5분/15분/1시간 H는 하락색을 상승색과 동일하게 통일(사용자 요청 - 사실상 단색으로 보임),
+// 1시간H(hma1200)는 블루로 지정(사용자 요청).
+const DUAL_DEFAULT_UP_COLOR = { hma20: '#F44336', hma60: '#00D5FF', hma100: '#FF9800', hma300: '#6DFF38', hma1200: '#1F43F4', wma17_1m: '#2900F5', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
+const DUAL_DEFAULT_DOWN_COLOR = { hma20: '#F44336', hma60: '#00D5FF', hma100: '#FF9800', hma300: '#6DFF38', hma1200: '#1F43F4', wma17_1m: '#2900F5', wma17_5m: '#4FC3F7', wma4_1h: '#FFEB3B' }
 // 리본 18개 + "1분/3분/5분/15분/1시간 H"(hma20/hma60/hma100/hma300/hma1200, 사용자 요청) - 이 id들은
 // 단색 대신 상승/하락 두 색으로 동적 렌더링한다.
 const DUAL_COLOR_IDS = new Set([...MADRID_RIBBON.map(m => m.id), 'hma20', 'hma60', 'hma100', 'hma300', 'hma1200', 'wma17_1m', 'wma17_5m', 'wma4_1h'])
@@ -687,6 +689,9 @@ function computeReservationSeries(fullRows) {
   const wma255 = rollingWMA(closes, 255)
   const sma300 = rollingSMA(closes, 300)
   const { ups: bbUp, lows: bbLo } = rollingBollinger(closes, 100)
+  // 🛑 손절: 이평선 따라가기 15분상Bol/15분하Bol(사용자 요청) - 15분봉 상당 볼린저(period=300,
+  // BOLLINGER_BANDS의 sma300과 동일 기간).
+  const { ups: bbUp300, lows: bbLo300 } = rollingBollinger(closes, 300)
   // 🛑 손절: 이평선 따라가기 5D-상단/5D-하단(사용자 요청) - 도치안 채널(D)의 5분(don100, period=100)
   // 상/하단. 볼린저(bbUp/bbLo)와 달리 그 기간의 실제 고점/저점이 갱신될 때만 움직인다.
   const { ups: donUp5, lows: donLo5 } = rollingDonchian(fullRows, 100)
@@ -713,7 +718,7 @@ function computeReservationSeries(fullRows) {
     row1Armed[i] = armed
   }
 
-  return { closes, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, donUp5, donLo5, stochGolden, row1Armed, stoch70Golden, stoch210Golden }
+  return { closes, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, bbUp300, bbLo300, donUp5, donLo5, stochGolden, row1Armed, stoch70Golden, stoch210Golden }
 }
 
 // computeReservationSeries의 배열들을 훑어서 신호별 발생 이벤트를 dayRows 기준 idx(=i-startIdx)로
@@ -992,9 +997,9 @@ export default function ReplayChart() {
   const [enabledBands, setEnabledBands] = useState(rs.enabledBands ?? { sma20: true, sma100: true, sma300: true, sma1200: true })
   const [lineVisibility, setLineVisibility] = useState(rs.lineVisibility ?? {}) // `${bandId}:${upper|middle|lower}` -> false면 숨김 (기본 true, 1분B 상/하도 기본 켜짐 - 사용자 요청)
   const [bandColors, setBandColors] = useState(rs.bandColors ?? {}) // bandId -> 커스텀 색상 (없으면 BOLLINGER_BANDS 기본색)
-  // 기본 셋팅 - 3분/5분/15분 H, 1분/5분 W17, 1시간 W4 이평선 체크
+  // 기본 셋팅 - 3분/5분/15분/1시간 H, 1분/5분 W17, 1시간 W4 이평선 체크(1시간H 기본체크는 사용자 요청)
   const [enabledMA, setEnabledMA] = useState(rs.enabledMA ?? {
-    hma20: true, hma60: true, hma100: true, hma300: true, wma17_1m: true, wma17_5m: true, wma4_1h: true,
+    hma20: true, hma60: true, hma100: true, hma300: true, hma1200: true, wma17_1m: true, wma17_5m: true, wma4_1h: true,
     ...Object.fromEntries(MADRID_RIBBON.map(m => [m.id, true])), // 리본 기본 체크(사용자 요청)
   })
   const [maColors, setMaColors] = useState(rs.maColors ?? {}) // maId -> 커스텀 색상 (없으면 MOVING_AVERAGES 기본색, 볼린저와 동일)
@@ -2043,7 +2048,7 @@ export default function ReplayChart() {
       // 🛑 손절: 이평선 따라가기(사용자 요청) - 선택된 이평선의 이 구간 값을 미리 읽어둔다. 캔들 고가/저가
       // 기준(종가 아님 - 안전 우선, 사용자 확인)으로 SL/TP 다음 우선순위로 검사한다.
       const maTrailKey = twMaTrailStopRef.current
-        ? { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85', center: 'sma100', don5up: 'donUp5', don5lo: 'donLo5' }[twMaTrailStopRef.current] : null
+        ? { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85', center: 'sma100', don5up: 'donUp5', don5lo: 'donLo5', bbUp: 'bbUp', bbLo: 'bbLo', bbUp300: 'bbUp300', bbLo300: 'bbLo300' }[twMaTrailStopRef.current] : null
       // 🎯 청산목표 S100 계열(사용자 요청) - 크로스가 아니라 "닿으면" 방식. 익절(목표 도달) 방향이라
       // 손절과 정반대: SELL은 저가가 닿으면(가격 하락=이익), BUY는 고가가 닿으면(가격 상승=이익) 청산.
       // w85t(5M-17가중, 터치 방식 추가분)도 여기서 같이 처리 - 기존 w85(크로스 방식, H1×W85)와는
@@ -4305,14 +4310,14 @@ export default function ReplayChart() {
   // 🛑 이평선 따라가기 손절 - 선택된 선의 "끝"(지금 재생 위치의 값)을 좌표로 변환한다(사용자 요청 -
   // timerAnchor와 같은 방식, 화면을 드래그/줌하거나 캔들이 새로 그려질 때마다 다시 계산해야 함).
   // pair 인자는 setTwMaTrailStop 직후 같은 틱에서 부를 때 stale한 ref를 안 읽기 위한 override.
-  const maTrailLabels = { h1: '1M-빠른선', s1: '1M-Bol 중심선', h3: '3M-빠른선', h5: '5M-빠른선', w85: '5M-17가중선', center: '5M-중심', don5up: '5D-상단', don5lo: '5D-하단' }
+  const maTrailLabels = { h1: '1M-빠른선', s1: '1M-Bol 중심선', h3: '3M-빠른선', h5: '5M-빠른선', w85: '5M-17가중선', center: '5M-중심', don5up: '5D-상단', don5lo: '5D-하단', bbUp: '5분상Bol', bbLo: '5분하Bol', bbUp300: '15분상Bol', bbLo300: '15분하Bol' }
   const updateMaStopAnchor = (pair = twMaTrailStopRef.current) => {
     const chart = chartRef.current
     const series = seriesRef.current
     const S = reservationSeriesRef.current
     const idx = indexRef.current
     if (!chart || !series || !S || !pair || idx <= 0) { setMaStopAnchor(null); return }
-    const maKey = { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85', center: 'sma100', don5up: 'donUp5', don5lo: 'donLo5' }[pair]
+    const maKey = { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85', center: 'sma100', don5up: 'donUp5', don5lo: 'donLo5', bbUp: 'bbUp', bbLo: 'bbLo', bbUp300: 'bbUp300', bbLo300: 'bbLo300' }[pair]
     const row = rowsRef.current[idx - 1]
     const val = S[maKey]?.[(idx - 1) + S.offset]
     if (!row || val == null) { setMaStopAnchor(null); return }
@@ -4587,10 +4592,12 @@ export default function ReplayChart() {
     // 헷갈리지 않게 색을 빨강으로 구분하고, 라벨도 "H1×.." 크로스 표기 대신 선 이름만 표시(사용자
     // 설명이 "그 선을 따라간다"는 개념이라 크로스 기호를 쓰면 오해 소지가 있음). 선택한 선을 캔들
     // 고가/저가가 건드리면(사용자 확인) 즉시 손절. center(5M-중심)/don5up·don5lo(5D-상단/하단, 도치안
-    // 채널 5분=don100)도 추가(사용자 요청) - 8개라 2줄(4+4)로 나눠서 표시.
+    // 채널 5분=don100)도 추가(사용자 요청) - 5분상Bol/5분하Bol(bbUp/bbLo, 기존 청산목표에서 쓰던 것과
+    // 같은 시리즈)/15분상Bol/15분하Bol(bbUp300/bbLo300, period=300)도 추가돼 12개라 3줄(4+4+4)로 표시.
     const maTrailOptions = [
       [['h1', '1M-빠른선'], ['s1', '1M-Bol 중심선'], ['h3', '3M-빠른선'], ['h5', '5M-빠른선']],
       [['w85', '5M-17가중선'], ['center', '5M-중심'], ['don5up', '5D-상단'], ['don5lo', '5D-하단']],
+      [['bbUp', '5분상Bol'], ['bbLo', '5분하Bol'], ['bbUp300', '15분상Bol'], ['bbLo300', '15분하Bol']],
     ]
     const renderMaTrailStopButtons = () => (
       <div style={{ marginBottom: 8 }}>
