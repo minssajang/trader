@@ -687,6 +687,9 @@ function computeReservationSeries(fullRows) {
   const wma255 = rollingWMA(closes, 255)
   const sma300 = rollingSMA(closes, 300)
   const { ups: bbUp, lows: bbLo } = rollingBollinger(closes, 100)
+  // 🛑 손절: 이평선 따라가기 5D-상단/5D-하단(사용자 요청) - 도치안 채널(D)의 5분(don100, period=100)
+  // 상/하단. 볼린저(bbUp/bbLo)와 달리 그 기간의 실제 고점/저점이 갱신될 때만 움직인다.
+  const { ups: donUp5, lows: donLo5 } = rollingDonchian(fullRows, 100)
   const stoch = rollingStochastic(fullRows, ...STOCH_RESERVE_PARAMS)
   const stochGolden = closes.map((_, i) => (stoch.k[i] != null && stoch.d[i] != null) ? stoch.k[i] > stoch.d[i] : null)
   // 9,10번(사용자 요청) - 스토(70,15,15)/(210,45,45) 두 세트의 골든/데드 상태
@@ -710,7 +713,7 @@ function computeReservationSeries(fullRows) {
     row1Armed[i] = armed
   }
 
-  return { closes, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, stochGolden, row1Armed, stoch70Golden, stoch210Golden }
+  return { closes, h1, h3, h100, h300, wma17_1m, sma20_1m, wma85, sma100, wma255, sma300, bbUp, bbLo, donUp5, donLo5, stochGolden, row1Armed, stoch70Golden, stoch210Golden }
 }
 
 // computeReservationSeries의 배열들을 훑어서 신호별 발생 이벤트를 dayRows 기준 idx(=i-startIdx)로
@@ -974,6 +977,10 @@ export default function ReplayChart() {
   // 🛑 이평선 따라가기 손절 - 선택한 선의 "끝"(지금 재생 위치 값)을 계속 따라다니는 라벨 좌표(사용자
   // 요청, timerAnchor와 같은 방식). {x, y, label} | null
   const [maStopAnchor, setMaStopAnchor] = useState(null)
+  // 🎯 청산목표 라벨도 캔들 타이머 위치가 아니라, 선택한 목표 중 "느린선"(크로스 방식이면 H1과 짝지어진
+  // 그 선 자체, 터치 방식이면 그 선 그대로)을 계속 따라다니게(사용자 요청 - "H1×H5면 H5를 따라가야지").
+  // maStopAnchor와 완전히 같은 구조/좌표계.
+  const [exitTargetAnchor, setExitTargetAnchor] = useState(null)
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
   // 기본 셋팅(사용자 요청) - 1분 볼린저는 중간선만, 5분/15분/1시간 볼린저는 전체 표시
@@ -1510,14 +1517,14 @@ export default function ReplayChart() {
     // 컨테이너 자체의 크기 변화를 직접 감시해서 항상 실제 폭에 맞춘다.
     const ro = new ResizeObserver(entries => {
       const w = entries[0]?.contentRect?.width
-      if (w) { chart.resize(w, 700, true); updateTimerAnchor(); updateFoundMarkerAnchors(); updateMaStopAnchor() }
+      if (w) { chart.resize(w, 700, true); updateTimerAnchor(); updateFoundMarkerAnchors(); updateMaStopAnchor(); updateExitTargetAnchor() }
     })
     ro.observe(containerRef.current)
 
     // 캔들 타이머 배지 위치 - 화면을 드래그/줌하면(시각→x좌표 매핑이 바뀌므로) 캔들은 그대로여도
     // 화면상 위치는 움직여야 한다. 보이는 범위가 바뀔 때마다 다시 계산한다. 🔍 찾기 마커/이평선 손절
     // 라벨도 같은 이유로 같이 갱신.
-    const onVisibleRangeChange = () => { updateTimerAnchor(); updateFoundMarkerAnchors(); updateMaStopAnchor() }
+    const onVisibleRangeChange = () => { updateTimerAnchor(); updateFoundMarkerAnchors(); updateMaStopAnchor(); updateExitTargetAnchor() }
     chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRangeChange)
 
     return () => {
@@ -1961,6 +1968,7 @@ export default function ReplayChart() {
     updateTimerAnchor()
     updateFoundMarkerAnchors()
     updateMaStopAnchor()
+    updateExitTargetAnchor()
   }
 
   // "5분 슈팅" - 다른 신호 마커들과 같은 방식으로 재생 위치(idx) 이전 것만 보여준다.
@@ -2035,11 +2043,13 @@ export default function ReplayChart() {
       // 🛑 손절: 이평선 따라가기(사용자 요청) - 선택된 이평선의 이 구간 값을 미리 읽어둔다. 캔들 고가/저가
       // 기준(종가 아님 - 안전 우선, 사용자 확인)으로 SL/TP 다음 우선순위로 검사한다.
       const maTrailKey = twMaTrailStopRef.current
-        ? { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85' }[twMaTrailStopRef.current] : null
-      // 🎯 청산목표 S100 계열 3종(사용자 요청) - 크로스가 아니라 "닿으면" 방식. 익절(목표 도달) 방향이라
+        ? { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85', center: 'sma100', don5up: 'donUp5', don5lo: 'donLo5' }[twMaTrailStopRef.current] : null
+      // 🎯 청산목표 S100 계열(사용자 요청) - 크로스가 아니라 "닿으면" 방식. 익절(목표 도달) 방향이라
       // 손절과 정반대: SELL은 저가가 닿으면(가격 하락=이익), BUY는 고가가 닿으면(가격 상승=이익) 청산.
+      // w85t(5M-17가중, 터치 방식 추가분)도 여기서 같이 처리 - 기존 w85(크로스 방식, H1×W85)와는
+      // id가 달라서 서로 안 겹친다.
       const exitTargetKey = twExitCrossPairRef.current
-        ? { center: 'sma100', bbUp: 'bbUp', bbLo: 'bbLo' }[twExitCrossPairRef.current] : null
+        ? { center: 'sma100', bbUp: 'bbUp', bbLo: 'bbLo', w85t: 'wma85' }[twExitCrossPairRef.current] : null
       const S = reservationSeriesRef.current
       // 같은 캔들에서 여러 개 걸리면 보수적으로 SL→TP→이평선손절→청산목표 순으로 우선한다
       // (OHLC만으로는 어느 쪽이 먼저 닿았는지 알 수 없음)
@@ -2122,6 +2132,7 @@ export default function ReplayChart() {
       updateTimerAnchor()
       updateFoundMarkerAnchors()
       updateMaStopAnchor()
+      updateExitTargetAnchor()
     }
   }
 
@@ -4305,14 +4316,14 @@ export default function ReplayChart() {
   // 🛑 이평선 따라가기 손절 - 선택된 선의 "끝"(지금 재생 위치의 값)을 좌표로 변환한다(사용자 요청 -
   // timerAnchor와 같은 방식, 화면을 드래그/줌하거나 캔들이 새로 그려질 때마다 다시 계산해야 함).
   // pair 인자는 setTwMaTrailStop 직후 같은 틱에서 부를 때 stale한 ref를 안 읽기 위한 override.
-  const maTrailLabels = { h1: '1M-빠른선', s1: '1M-Bol 중심선', h3: '3M-빠른선', h5: '5M-빠른선', w85: '5M-17가중선' }
+  const maTrailLabels = { h1: '1M-빠른선', s1: '1M-Bol 중심선', h3: '3M-빠른선', h5: '5M-빠른선', w85: '5M-17가중선', center: '5M-중심', don5up: '5D-상단', don5lo: '5D-하단' }
   const updateMaStopAnchor = (pair = twMaTrailStopRef.current) => {
     const chart = chartRef.current
     const series = seriesRef.current
     const S = reservationSeriesRef.current
     const idx = indexRef.current
     if (!chart || !series || !S || !pair || idx <= 0) { setMaStopAnchor(null); return }
-    const maKey = { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85' }[pair]
+    const maKey = { h1: 'h1', s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85', center: 'sma100', don5up: 'donUp5', don5lo: 'donLo5' }[pair]
     const row = rowsRef.current[idx - 1]
     const val = S[maKey]?.[(idx - 1) + S.offset]
     if (!row || val == null) { setMaStopAnchor(null); return }
@@ -4323,6 +4334,25 @@ export default function ReplayChart() {
     const diffPoints = row.close != null ? Math.abs(row.close - val) : null
     const diffDollars = diffPoints != null ? diffPoints * lotSizeRef.current * (POINT_VALUE_PER_LOT[symbolRef.current] || 0) : null
     setMaStopAnchor({ x, y, label: maTrailLabels[pair], diffPoints, diffDollars })
+  }
+
+  // 🎯 청산목표 - updateMaStopAnchor와 완전히 같은 방식이지만 대상 선이 다르다. 크로스 방식
+  // (s1/h3/h5/w85)은 H1과 짝지어진 그 선 자체를, 터치 방식(center/bbUp/bbLo)은 그 선 그대로 따라간다.
+  const exitTargetLineLabels = { s1: 'H1×S1', h3: 'H1×H3', h5: 'H1×H5', w85: 'H1×W85', center: '5분중심', bbUp: '5분상Bol', bbLo: '5분하Bol', w85t: '5M-17가중' }
+  const updateExitTargetAnchor = (pair = twExitCrossPairRef.current) => {
+    const chart = chartRef.current
+    const series = seriesRef.current
+    const S = reservationSeriesRef.current
+    const idx = indexRef.current
+    if (!chart || !series || !S || !pair || idx <= 0) { setExitTargetAnchor(null); return }
+    const targetKey = { s1: 'sma20_1m', h3: 'h3', h5: 'h100', w85: 'wma85', center: 'sma100', bbUp: 'bbUp', bbLo: 'bbLo', w85t: 'wma85' }[pair]
+    const row = rowsRef.current[idx - 1]
+    const val = S[targetKey]?.[(idx - 1) + S.offset]
+    if (!row || val == null) { setExitTargetAnchor(null); return }
+    const x = chart.timeScale().timeToCoordinate(row.time)
+    const y = series.priceToCoordinate(val)
+    if (x == null || y == null) { setExitTargetAnchor(null); return }
+    setExitTargetAnchor({ x, y, label: exitTargetLineLabels[pair] })
   }
 
   const twMoneyColor = (v) => (v >= 0 ? '#26a69a' : '#ef5350')
@@ -4506,60 +4536,69 @@ export default function ReplayChart() {
     // 방향버튼(SELL/BUY) - 체크박스와 별개의 토글. 다시 누르면 원복.
     const pressDir = (row, side) => setDir(d => (d && d.row === row && d.side === side) ? null : { row, side })
 
-    // 🎯 청산목표 버튼 7종(사용자 요청, twTpExitCross 후속) - 라디오 방식(하나만 선택, 다시 누르면 꺼짐).
-    // 벌크 청산 버튼 위/아래 두 자리에 똑같이 보여준다(하나의 공유 상태, 위치만 두 곳). 앞 4개(S1/H3/H5/
-    // W85)는 H1(HMA20)과의 크로스 방식(골든=숏 청산/데드=롱 청산) 그대로, 뒤 3개(S100 계열)는 크로스가
+    // 🎯 청산목표 버튼(사용자 요청, twTpExitCross 후속) - 라디오 방식(하나만 선택, 다시 누르면 꺼짐).
+    // 벌크 청산 버튼 위/아래 두 자리에 똑같이 보여준다(하나의 공유 상태, 위치만 두 곳). 1번째 줄(S1/H3/
+    // H5/W85)은 H1(HMA20)과의 크로스 방식(골든=숏 청산/데드=롱 청산), 2번째 줄(S100 계열+w85t)은 크로스가
     // 아니라 "닿으면"(터치) 방식 - 익절(목표 도달) 방향: SELL은 저가가 닿으면(가격 하락=이익), BUY는
-    // 고가가 닿으면(가격 상승=이익) 청산(사용자 확인 - 손절과 정반대 방향).
+    // 고가가 닿으면(가격 상승=이익) 청산(사용자 확인 - 손절과 정반대 방향). w85t(5M-17가중, 터치)는
+    // 기존 w85(크로스, H1×W85)와 별개 옵션으로 추가(사용자 요청) - 2줄로 나눠서 표시.
     const exitCrossOptions = [
-      ['s1', 'H1×S1', false], ['h3', 'H1×H3', false], ['h5', 'H1×H5', false], ['w85', 'H1×W85', false],
-      ['center', '5분중심', true], ['bbUp', '5분상Bol', true], ['bbLo', '5분하Bol', true],
+      [['s1', 'H1×S1', false], ['h3', 'H1×H3', false], ['h5', 'H1×H5', false], ['w85', 'H1×W85', false]],
+      [['center', '5분중심', true], ['bbUp', '5분상Bol', true], ['bbLo', '5분하Bol', true], ['w85t', '5M-17가중', true]],
     ]
     const renderExitCrossButtons = () => (
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#9aa0ab', marginBottom: 4 }}>청산목표</div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {exitCrossOptions.map(([id, label, isTouch]) => (
-          <button key={id} type="button"
-            onClick={() => setTwExitCrossPair(v => v === id ? null : id)}
-            title={isTouch
-              ? `${label}에 가격이 닿으면(SELL=저가, BUY=고가) 목표 도달로 청산 - 무장 여부와 무관하게 항상 감시`
-              : `H1(HMA20)×${label.split('×')[1]} 골든크로스=숏 청산 / 데드크로스=롱 청산 - 무장 여부와 무관하게 항상 감시`}
-            style={{
-              flex: 1, padding: '8px 4px', fontSize: 12, fontWeight: 700, borderRadius: 5, cursor: 'pointer',
-              border: '1.5px solid #2196F3',
-              background: twExitCrossPair === id ? 'white' : 'none',
-              color: '#FF5722',
-            }}
-          >{label}</button>
+        {exitCrossOptions.map((row, ri) => (
+          <div key={ri} style={{ display: 'flex', gap: 6, marginBottom: ri < exitCrossOptions.length - 1 ? 6 : 0 }}>
+            {row.map(([id, label, isTouch]) => (
+              <button key={id} type="button"
+                onClick={() => { const next = twExitCrossPair === id ? null : id; setTwExitCrossPair(next); updateExitTargetAnchor(next) }}
+                title={isTouch
+                  ? `${label}에 가격이 닿으면(SELL=저가, BUY=고가) 목표 도달로 청산 - 무장 여부와 무관하게 항상 감시`
+                  : `H1(HMA20)×${label.split('×')[1]} 골든크로스=숏 청산 / 데드크로스=롱 청산 - 무장 여부와 무관하게 항상 감시`}
+                style={{
+                  flex: 1, padding: '8px 4px', fontSize: 12, fontWeight: 700, borderRadius: 5, cursor: 'pointer',
+                  border: '1.5px solid #2196F3',
+                  background: twExitCrossPair === id ? 'white' : 'none',
+                  color: '#FF5722',
+                }}
+              >{label}</button>
+            ))}
+          </div>
         ))}
-        </div>
       </div>
     )
 
-    // 🛑 손절: 이평선 따라가기 버튼 4종(사용자 요청) - 청산 버튼과 완전히 같은 라디오 UI 패턴이지만
+    // 🛑 손절: 이평선 따라가기 버튼(사용자 요청) - 청산 버튼과 완전히 같은 라디오 UI 패턴이지만
     // 헷갈리지 않게 색을 빨강으로 구분하고, 라벨도 "H1×.." 크로스 표기 대신 선 이름만 표시(사용자
     // 설명이 "그 선을 따라간다"는 개념이라 크로스 기호를 쓰면 오해 소지가 있음). 선택한 선을 캔들
-    // 고가/저가가 건드리면(사용자 확인) 즉시 손절.
-    const maTrailOptions = [['h1', '1M-빠른선'], ['s1', '1M-Bol 중심선'], ['h3', '3M-빠른선'], ['h5', '5M-빠른선'], ['w85', '5M-17가중선']]
+    // 고가/저가가 건드리면(사용자 확인) 즉시 손절. center(5M-중심)/don5up·don5lo(5D-상단/하단, 도치안
+    // 채널 5분=don100)도 추가(사용자 요청) - 8개라 2줄(4+4)로 나눠서 표시.
+    const maTrailOptions = [
+      [['h1', '1M-빠른선'], ['s1', '1M-Bol 중심선'], ['h3', '3M-빠른선'], ['h5', '5M-빠른선']],
+      [['w85', '5M-17가중선'], ['center', '5M-중심'], ['don5up', '5D-상단'], ['don5lo', '5D-하단']],
+    ]
     const renderMaTrailStopButtons = () => (
-      <>
+      <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 11, color: '#9aa0ab', marginBottom: 4 }}>🛑 손절: 이평선 따라가기</div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-          {maTrailOptions.map(([id, label]) => (
-            <button key={id} type="button"
-              onClick={() => { const next = twMaTrailStop === id ? null : id; setTwMaTrailStop(next); updateMaStopAnchor(next) }}
-              title={`선택한 이평선(${label})을 계속 추적하다가 캔들 고가/저가가 닿으면 즉시 손절 - 무장 여부와 무관하게 항상 감시`}
-              style={{
-                flex: 1, padding: '8px 4px', fontSize: 12, fontWeight: 700, borderRadius: 5, cursor: 'pointer',
-                border: '1.5px solid #F44336',
-                background: twMaTrailStop === id ? 'white' : 'none',
-                color: '#F44336',
-              }}
-            >{label}</button>
-          ))}
-        </div>
-      </>
+        {maTrailOptions.map((row, ri) => (
+          <div key={ri} style={{ display: 'flex', gap: 6, marginBottom: ri < maTrailOptions.length - 1 ? 6 : 0 }}>
+            {row.map(([id, label]) => (
+              <button key={id} type="button"
+                onClick={() => { const next = twMaTrailStop === id ? null : id; setTwMaTrailStop(next); updateMaStopAnchor(next) }}
+                title={`선택한 이평선(${label})을 계속 추적하다가 캔들 고가/저가가 닿으면 즉시 손절 - 무장 여부와 무관하게 항상 감시`}
+                style={{
+                  flex: 1, padding: '8px 4px', fontSize: 12, fontWeight: 700, borderRadius: 5, cursor: 'pointer',
+                  border: '1.5px solid #F44336',
+                  background: twMaTrailStop === id ? 'white' : 'none',
+                  color: '#F44336',
+                }}
+              >{label}</button>
+            ))}
+          </div>
+        ))}
+      </div>
     )
 
     return (
@@ -5856,16 +5895,22 @@ export default function ReplayChart() {
                     color: liveStatus !== 'live' ? '#6b7280' : (playing ? '#4CAF50' : '#9aa0ab'), fontVariantNumeric: 'tabular-nums',
                   }}>{liveStatus === 'live' ? '⏱' : '⏸'} {formatCandleTimer(candleTimerMs)}</span>
                 )}
-                {/* 🎯 청산 버튼에서 선택한 페어를 캔들 타이머 바로 위에 표시(사용자 요청) - twExitCrossPair를
-                    렌더에서 직접 읽으니 선택을 바꾸면 다음 렌더에서 바로 반영된다(별도 갱신 로직 불필요). */}
-                {timerAnchor && twExitCrossPair && (
-                  <span title="지금 감시 중인 청산 조건" style={{
-                    position: 'absolute', left: timerAnchor.x + 16 + 60, top: timerAnchor.y + 16 - 15 - 30,
-                    zIndex: 5, pointerEvents: 'none', whiteSpace: 'nowrap',
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    background: 'rgba(23,26,33,0.92)', border: '1px solid #FF5722', borderRadius: 9,
-                    padding: '4px 10px', fontSize: 12, fontWeight: 700, color: '#FF5722',
-                  }}>🎯 청산목표: {{ s1: 'H1×S1', h3: 'H1×H3', h5: 'H1×H5', w85: 'H1×W85', center: '5분중심', bbUp: '5분상Bol', bbLo: '5분하Bol' }[twExitCrossPair]}</span>
+                {/* 🎯 청산목표 - 예전엔 캔들 타이머 배지 위치를 따라다녔는데, 그건 "지금 캔들" 자리일
+                    뿐 실제 감시 대상(느린선)의 값과는 무관해서 오해를 줬다(사용자 지적 - "H1×H5면 H5를
+                    따라가야지"). updateExitTargetAnchor가 손절과 완전히 같은 방식으로 그 선의 실제
+                    좌표를 계산해서, maStopAnchor와 같은 점선+라벨 스타일로 계속 따라다니게 한다. */}
+                {exitTargetAnchor && (
+                  <div style={{
+                    position: 'absolute', left: exitTargetAnchor.x + 16, top: exitTargetAnchor.y + 16,
+                    transform: 'translateY(-50%)', zIndex: 5, pointerEvents: 'none',
+                    display: 'flex', alignItems: 'center', whiteSpace: 'nowrap',
+                  }}>
+                    <span style={{ width: 22, borderTop: '2px dashed #FF5722', display: 'inline-block' }} />
+                    <span style={{
+                      background: 'rgba(23,26,33,0.92)', border: '1px solid #FF5722', borderRadius: 4,
+                      padding: '2px 8px', fontSize: 11, fontWeight: 700, color: '#FF5722', marginLeft: 2,
+                    }}>🎯 청산목표({exitTargetAnchor.label})</span>
+                  </div>
                 )}
                 {/* 🛑 이평선 따라가기 손절 - 선택한 선의 "끝"(지금 값)에서 점선이 나와 라벨이 붙는다(사용자
                     요청, "-----손절(H5)" 형태). updateMaStopAnchor가 화면 갱신마다 좌표를 다시 계산해서
