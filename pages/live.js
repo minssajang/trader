@@ -4341,7 +4341,10 @@ export default function ReplayChart() {
     const x = chart.timeScale().timeToCoordinate(row.time)
     const y = series.priceToCoordinate(val)
     if (x == null || y == null) { setExitTargetAnchor(null); return }
-    setExitTargetAnchor({ x, y, label: exitTargetLineLabels[pair] })
+    // 현재 주가와 청산목표선의 차이(사용자 요청, 손절과 동일) - 포인트/달러 둘 다 미리 계산해둔다.
+    const diffPoints = row.close != null ? Math.abs(row.close - val) : null
+    const diffDollars = diffPoints != null ? diffPoints * lotSizeRef.current * (POINT_VALUE_PER_LOT[symbolRef.current] || 0) : null
+    setExitTargetAnchor({ x, y, label: exitTargetLineLabels[pair], diffPoints, diffDollars })
   }
 
   // 진입가 표시(사용자 요청) - maStopAnchor/exitTargetAnchor와 완전히 같은 방식. 좌표는 "지금 재생
@@ -5910,7 +5913,15 @@ export default function ReplayChart() {
                     <span style={{
                       background: 'rgba(23,26,33,0.92)', border: '1px solid #FF5722', borderRadius: 4,
                       padding: '2px 8px', fontSize: 11, fontWeight: 700, color: '#FF5722', marginLeft: 2,
-                    }}>🎯 청산목표({exitTargetAnchor.label})</span>
+                    }}>
+                      🎯 청산목표({exitTargetAnchor.label})
+                      {/* 현재 주가와의 차이(사용자 요청, 손절과 동일) - 달러/포인트는 pnlDisplay 토글을 그대로 따름 */}
+                      {exitTargetAnchor.diffDollars != null && (
+                        <span style={{ opacity: 0.85 }}>
+                          {' '}{pnlDisplay === 'dollar' ? `$${exitTargetAnchor.diffDollars.toFixed(2)}` : `${exitTargetAnchor.diffPoints.toFixed(2)}pt`}
+                        </span>
+                      )}
+                    </span>
                   </div>
                 )}
                 {/* 🛑 이평선 따라가기 손절 - 선택한 선의 "끝"(지금 값)에서 점선이 나와 라벨이 붙는다(사용자
