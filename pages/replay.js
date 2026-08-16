@@ -4390,12 +4390,12 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 4} onChange={() => toggleCheck(4)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`1번: 하락추세\n5분17선 < 5분20선\n${fmtTopBottom(wma85, sma100)}`}</span>
+              <span style={{ color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`1번: 하락추세\n5분17선 < 5분20선`}</span>
               <TwStatusDot label="상태" active={row5State} colorA={TW_STATUS_RED_A} />
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 3} onChange={() => toggleCheck(3)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\n5분17선 > 5분20선\n${fmtTopBottom(wma85, sma100)}`}</span>
+              <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\n5분17선 > 5분20선`}</span>
               <TwStatusDot label="상태" active={row6State} colorA={TW_STATUS_LIME_A} />
             </label>
           </div>
@@ -4404,12 +4404,12 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선\n하락중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선\n하락중`}</span>
               <TwStatusDot label="상태" active={row2State} colorA={TW_STATUS_RED_A} />
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 2.1} onChange={() => toggleCheck(2.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: 15분 빠른선\n상승중\n${h300 != null ? h300.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: 15분 빠른선\n상승중`}</span>
               <TwStatusDot label="상태" active={row2_1State} colorA={TW_STATUS_LIME_A} />
             </label>
           </div>
@@ -4445,7 +4445,7 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1} onChange={() => toggleCheck(1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: \n5분Bol 상단\n돌파후 진입\n${bbUp != null ? bbUp.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: \n5분Bol 상단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="슈팅" active={row1AboveShooting} colorA={TW_STATUS_RED_A} />
                 <TwStatusDot label="돌파" active={row1AboveBreakout} colorA={TW_STATUS_RED_A} />
@@ -4454,7 +4454,7 @@ export default function ReplayChart() {
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 1.1} onChange={() => toggleCheck(1.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: \n5분Bol 하단\n돌파후 진입\n${bbLo != null ? bbLo.toFixed(2) : '-'}`}</span>
+              <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: \n5분Bol 하단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TwStatusDot label="슈팅" active={row1BelowShooting} colorA={TW_STATUS_LIME_A} />
                 <TwStatusDot label="돌파" active={row1BelowBreakout} colorA={TW_STATUS_LIME_A} />
