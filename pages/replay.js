@@ -4456,24 +4456,24 @@ export default function ReplayChart() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', border: '1px solid #2a2e38', borderRadius: 5 }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px' }}>
-                <input type="checkbox" checked={checked === 4} onChange={() => toggleCheck(4)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <input type="checkbox" checked={checked === 4} onChange={() => toggleCheck(4)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
                 <span style={{ color: row4Sell ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`1번: 하락추세\n5분17선 < 5분20선`}</span>
                 <TwStatusDot label="상태" active={row5State} colorA={TW_STATUS_RED_A} />
               </label>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px', borderTop: '1px solid #2a2e38' }}>
-                <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
                 <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선\n하락중`}</span>
                 <TwStatusDot label="상태" active={row2State} colorA={TW_STATUS_RED_A} />
               </label>
             </div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', border: '1px solid #2a2e38', borderRadius: 5 }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px' }}>
-                <input type="checkbox" checked={checked === 3} onChange={() => toggleCheck(3)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <input type="checkbox" checked={checked === 3} onChange={() => toggleCheck(3)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
                 <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\n5분17선 > 5분20선`}</span>
                 <TwStatusDot label="상태" active={row6State} colorA={TW_STATUS_LIME_A} />
               </label>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '4px 8px', borderTop: '1px solid #2a2e38' }}>
-                <input type="checkbox" checked={checked === 2.1} onChange={() => toggleCheck(2.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+                <input type="checkbox" checked={checked === 2.1} onChange={() => toggleCheck(2.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
                 <span style={{ color: row2_1State ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`4번: 15분 빠른선\n상승중`}</span>
                 <TwStatusDot label="상태" active={row2_1State} colorA={TW_STATUS_LIME_A} />
               </label>
@@ -4489,19 +4489,19 @@ export default function ReplayChart() {
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px', display: 'flex', gap: 6 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`A: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={checked === 8} onChange={() => toggleCheck(8)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <input type="checkbox" checked={checked === 8} onChange={() => toggleCheck(8)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowCState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>C: H1 &lt; S1</span>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={checked === 9} onChange={() => toggleCheck(9)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <input type="checkbox" checked={checked === 9} onChange={() => toggleCheck(9)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowEState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>E: H1 &lt; H3</span>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={checked === 10} onChange={() => toggleCheck(10)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <input type="checkbox" checked={checked === 10} onChange={() => toggleCheck(10)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowGState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>G: H3 &lt; H5</span>
                 </label>
               </div>
@@ -4510,19 +4510,19 @@ export default function ReplayChart() {
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px', display: 'flex', gap: 6 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`B: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={checked === 8.1} onChange={() => toggleCheck(8.1)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <input type="checkbox" checked={checked === 8.1} onChange={() => toggleCheck(8.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowDState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>D: H1 &gt; S1</span>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={checked === 9.1} onChange={() => toggleCheck(9.1)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <input type="checkbox" checked={checked === 9.1} onChange={() => toggleCheck(9.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowFState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>F: H1 &gt; H3</span>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={checked === 10.1} onChange={() => toggleCheck(10.1)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <input type="checkbox" checked={checked === 10.1} onChange={() => toggleCheck(10.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowHState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>H: H3 &gt; H5</span>
                 </label>
               </div>
@@ -4537,7 +4537,7 @@ export default function ReplayChart() {
               준비)+"진입" 표시등 세로, 왼쪽=7번(상단돌파)/오른쪽=8번(하단돌파) 나란히 배치. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 1} onChange={() => toggleCheck(1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+              <input type="checkbox" checked={checked === 1} onChange={() => toggleCheck(1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
               <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`5번: \n5분Bol 상단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <div style={{ display: 'flex', gap: 2 }}>
@@ -4548,7 +4548,7 @@ export default function ReplayChart() {
               </div>
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 1.1} onChange={() => toggleCheck(1.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+              <input type="checkbox" checked={checked === 1.1} onChange={() => toggleCheck(1.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
               <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`6번: \n5분Bol 하단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <div style={{ display: 'flex', gap: 2 }}>
@@ -4563,7 +4563,7 @@ export default function ReplayChart() {
               10번=둘 다 골든(반대). 내부 체크 키는 새로 7/7.1 씀. twSwapped에 좌우 같이 뒤바뀜. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 7} onChange={() => toggleCheck(7)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+              <input type="checkbox" checked={checked === 7} onChange={() => toggleCheck(7)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
               <span style={{ color: (row9State1 && row9State2) ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: 스토 데드크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -4577,7 +4577,7 @@ export default function ReplayChart() {
               </div>
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 7.1} onChange={() => toggleCheck(7.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+              <input type="checkbox" checked={checked === 7.1} onChange={() => toggleCheck(7.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: '2px 0 0 0' }} />
               <span style={{ color: (row10State1 && row10State2) ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: 스토 골든크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
