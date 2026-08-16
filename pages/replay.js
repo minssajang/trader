@@ -4447,8 +4447,10 @@ export default function ReplayChart() {
               <input type="checkbox" checked={checked === 1} onChange={() => toggleCheck(1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
               <span style={{ color: row1AboveReady ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`7번: \n5분Bol 상단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <TwStatusDot label="슈팅" active={row1AboveShooting} colorA={TW_STATUS_RED_A} />
-                <TwStatusDot label="돌파" active={row1AboveBreakout} colorA={TW_STATUS_RED_A} />
+                <div style={{ display: 'flex', gap: 2 }}>
+                  <TwStatusDot label="슈팅" active={row1AboveShooting} colorA={TW_STATUS_RED_A} />
+                  <TwStatusDot label="돌파" active={row1AboveBreakout} colorA={TW_STATUS_RED_A} />
+                </div>
                 <TwStatusDot label="진입" active={row1AboveReady} colorA={TW_STATUS_RED_A} />
               </div>
             </label>
@@ -4456,8 +4458,10 @@ export default function ReplayChart() {
               <input type="checkbox" checked={checked === 1.1} onChange={() => toggleCheck(1.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
               <span style={{ color: row1BelowReady ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`8번: \n5분Bol 하단\n돌파후 진입`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <TwStatusDot label="슈팅" active={row1BelowShooting} colorA={TW_STATUS_LIME_A} />
-                <TwStatusDot label="돌파" active={row1BelowBreakout} colorA={TW_STATUS_LIME_A} />
+                <div style={{ display: 'flex', gap: 2 }}>
+                  <TwStatusDot label="슈팅" active={row1BelowShooting} colorA={TW_STATUS_LIME_A} />
+                  <TwStatusDot label="돌파" active={row1BelowBreakout} colorA={TW_STATUS_LIME_A} />
+                </div>
                 <TwStatusDot label="진입" active={row1BelowReady} colorA={TW_STATUS_LIME_A} />
               </div>
             </label>
