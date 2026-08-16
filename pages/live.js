@@ -4276,6 +4276,30 @@ export default function ReplayChart() {
     // 새로 크로스하는 순간만 잡는다. S1 크로스/꼬리체크/H1 방향 조건은 전부 뺐다.
     if (row === 6) return price != null && h1 != null && prevPrice != null && prevH1 != null && prevPrice >= prevH1 && price < h1
     if (row === 5) return price != null && h1 != null && prevPrice != null && prevH1 != null && prevPrice <= prevH1 && price > h1
+    // C~J(사용자 지적 - 찾기가 A/B만 되고 있었음) - computeReservationEvents의 rowC~rowJ와 동일한
+    // 엣지 판정(그 상태가 이 캔들에 새로 시작되는 순간)을 dayIdx 기준으로 재계산.
+    if (row === 8 || row === 8.1) {
+      const s20 = seriesValAt('sma20_1m', i), prevS20 = seriesValAt('sma20_1m', i, 1)
+      if (h1 == null || s20 == null || prevH1 == null || prevS20 == null) return false
+      return row === 8 ? (h1 < s20 && !(prevH1 < prevS20)) : (h1 > s20 && !(prevH1 > prevS20))
+    }
+    if (row === 9 || row === 9.1) {
+      const h3 = seriesValAt('h3', i), prevH3 = seriesValAt('h3', i, 1)
+      if (h1 == null || h3 == null || prevH1 == null || prevH3 == null) return false
+      return row === 9 ? (h1 < h3 && !(prevH1 < prevH3)) : (h1 > h3 && !(prevH1 > prevH3))
+    }
+    if (row === 10 || row === 10.1) {
+      const h3 = seriesValAt('h3', i), prevH3 = seriesValAt('h3', i, 1)
+      const h5 = seriesValAt('h100', i), prevH5 = seriesValAt('h100', i, 1)
+      if (h3 == null || h5 == null || prevH3 == null || prevH5 == null) return false
+      return row === 10 ? (h3 < h5 && !(prevH3 < prevH5)) : (h3 > h5 && !(prevH3 > prevH5))
+    }
+    if (row === 11 || row === 11.1) {
+      const w17 = seriesValAt('wma17_1m', i), prevW17 = seriesValAt('wma17_1m', i, 1)
+      const s20 = seriesValAt('sma20_1m', i), prevS20 = seriesValAt('sma20_1m', i, 1)
+      if (w17 == null || s20 == null || prevW17 == null || prevS20 == null) return false
+      return row === 11 ? (w17 < s20 && !(prevW17 < prevS20)) : (w17 > s20 && !(prevW17 > prevS20))
+    }
     if (row === 4) {
       const state = wma85 != null && sma100 != null && wma85 < sma100
       const ready = price != null && h1 != null && price < h1 && h300 != null && prevH300 != null && h300 < prevH300
@@ -4297,7 +4321,7 @@ export default function ReplayChart() {
     }
     return false
   }
-  const twSignalSide = (row) => [1, 2, 6, 4, 7].includes(row) ? 'sell' : 'buy' // 1,3,5,7,9번(화면번호)=매도, 2,4,6,8,10번=매수
+  const twSignalSide = (row) => [1, 2, 6, 4, 7, 8, 9, 10, 11].includes(row) ? 'sell' : 'buy' // 내부key 기준 셀 쪽(A,C,E,G,I 포함) - C~J 추가하며 8,9,10,11(C,E,G,I) 빠져있던 것도 같이 고침
   // 🔍 찾기 버튼 - 체크된 신호가 불러온 구간(dayRows 1~total) 안에서 실제로 "진입"했던 캔들을 전부
   // 훑어서 순서대로 모은다. 결과는 재생 바(빨간 바) 위에 번호로 표시되고, 클릭하면 그 캔들로 이동한다.
   const findSignalPositions = () => {
