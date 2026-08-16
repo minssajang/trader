@@ -664,6 +664,9 @@ export default function BacktestChart() {
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedDateTo, setSelectedDateTo] = useState('') // 여러 날 선택 모드에서 범위의 끝 날짜 (단일 선택이면 '')
   const [multiSelectMode, setMultiSelectMode] = useState(false) // 켜면 달력 클릭 두 번으로 범위(여러 날)를 이어서 불러온다
+  // 왼쪽 사이드바(달력+지표 설정) 접기(사용자 요청) - 셋팅 끝내고 나면 필요 없어져서 차트 폭을 넓히고
+  // 싶다는 취지. 접으면 좁은 스트립만 남고 오른쪽 차트 컬럼(flex:1)이 그만큼 넓어진다.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [loadingCsv, setLoadingCsv] = useState(false)
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
@@ -2594,7 +2597,17 @@ export default function BacktestChart() {
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             {/* 왼쪽 컬럼: 심볼버튼 / 달력 / 볼린저 리스트가 서로 붙어서 쌓인다 (오른쪽 차트 높이랑 무관하게) */}
-            <div style={{ width: 170, display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0 }}>
+            <div style={{ width: sidebarCollapsed ? 28 : 170, display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0 }}>
+              <button
+                type="button" onClick={() => setSidebarCollapsed(v => !v)}
+                title={sidebarCollapsed ? '왼쪽 패널 펼치기' : '왼쪽 패널 접기'}
+                style={{
+                  width: '100%', background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
+                  padding: '7px 0', fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                }}
+              >{sidebarCollapsed ? '▶' : '◀ 접기'}</button>
+              {!sidebarCollapsed && (
+              <>
               <div style={{ display: 'flex', gap: 8 }}>
                 {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
                   <button key={sym} onClick={() => setSymbol(sym)} style={{
@@ -3158,6 +3171,8 @@ export default function BacktestChart() {
                 {renderCrossRow('데드크로스', deadShape, setDeadShape, deadColor, setDeadColor, deadSize, setDeadSize)}
                 {renderPairSlots(crossPairs, setCrossPair, MOVING_AVERAGES, '크로스')}
               </CollapsibleCard>
+              </>
+              )}
 
             </div>
 

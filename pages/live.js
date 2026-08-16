@@ -990,6 +990,9 @@ export default function ReplayChart() {
   // 띄우고 실시간 손익(pnlDisplay 설정대로)을 계속 갱신한다. maStopAnchor와 같은 좌표계지만 포지션
   // 개수만큼 배열. [{id, x, y, side, points, dollars}]
   const [positionAnchors, setPositionAnchors] = useState([])
+  // 왼쪽 사이드바(지표 설정) 접기(사용자 요청) - 셋팅 끝내고 나면 필요 없어져서 차트 폭을 넓히고
+  // 싶다는 취지. 접으면 좁은 스트립만 남고 오른쪽 차트 컬럼(flex:1)이 그만큼 넓어진다.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [playIndex, setPlayIndex] = useState(0)
   const [total, setTotal] = useState(0)
   // 기본 셋팅(사용자 요청) - 1분 볼린저는 중간선만, 5분/15분/1시간 볼린저는 전체 표시
@@ -5162,7 +5165,17 @@ export default function ReplayChart() {
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             {/* 왼쪽 컬럼: 심볼버튼 / 지표 설정 카드들이 서로 붙어서 쌓인다 (오른쪽 차트 높이랑 무관하게) */}
-            <div style={{ width: 170, display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0 }}>
+            <div style={{ width: sidebarCollapsed ? 28 : 170, display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0 }}>
+              <button
+                type="button" onClick={() => setSidebarCollapsed(v => !v)}
+                title={sidebarCollapsed ? '왼쪽 패널 펼치기' : '왼쪽 패널 접기'}
+                style={{
+                  width: '100%', background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
+                  padding: '7px 0', fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                }}
+              >{sidebarCollapsed ? '▶' : '◀ 접기'}</button>
+              {!sidebarCollapsed && (
+              <>
               <div style={{ display: 'flex', gap: 8 }}>
                 {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
                   <button key={sym} onClick={() => setSymbol(sym)} style={{
@@ -5824,6 +5837,8 @@ export default function ReplayChart() {
                   고가/저가가 5분 볼린저를 조금이라도 뚫은 지점을 꼬리 끝(정확한 가격)에 표시합니다.
                 </p>
               </CollapsibleCard>
+              </>
+              )}
 
             </div>
 

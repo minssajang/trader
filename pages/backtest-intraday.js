@@ -97,6 +97,9 @@ export default function BacktestIntraday() {
   const [symbol, setSymbol] = useState('NASDAQ')
   const [datasets, setDatasets] = useState([])
   const [viewMonth, setViewMonth] = useState(() => new Date())
+  // 왼쪽 사이드바(심볼/달력/오버레이 설정) 접기(사용자 요청) - 셋팅 끝내고 나면 필요 없어져서 차트 폭을
+  // 넓히고 싶다는 취지. 접으면 좁은 스트립만 남고 오른쪽 차트 컬럼(flex:1)이 그만큼 넓어진다.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [days, setDays] = useState([]) // [{date, points:[[minute, deviation]]}]
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -1258,7 +1261,17 @@ export default function BacktestIntraday() {
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             {/* 왼쪽: 심볼 선택 + 달력(날짜를 클릭해서 겹쳐볼 날짜를 고른다) */}
-            <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ width: sidebarCollapsed ? 28 : 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <button
+                type="button" onClick={() => setSidebarCollapsed(v => !v)}
+                title={sidebarCollapsed ? '왼쪽 패널 펼치기' : '왼쪽 패널 접기'}
+                style={{
+                  width: '100%', background: 'none', color: '#9aa0ab', border: '1px solid #2a2e38', borderRadius: 9,
+                  padding: '7px 0', fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                }}
+              >{sidebarCollapsed ? '▶' : '◀ 접기'}</button>
+              {!sidebarCollapsed && (
+              <>
               <div style={{ display: 'flex', gap: 8 }}>
                 {Object.entries(SYMBOL_LABEL).map(([sym, label]) => (
                   <button key={sym} onClick={() => setSymbol(sym)} style={{
@@ -1352,6 +1365,8 @@ export default function BacktestIntraday() {
               )}
               {loading && <div style={{ color: '#9aa0ab', fontSize: 13 }}>불러오는 중...</div>}
               {error && <div style={{ color: '#F44336', fontSize: 13 }}>❌ {error}</div>}
+              </>
+              )}
             </div>
 
             {/* 오른쪽: 오버레이 차트 */}
