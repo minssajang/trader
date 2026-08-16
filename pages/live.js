@@ -4772,7 +4772,7 @@ export default function ReplayChart() {
               행(A/C/E/G 중 하나, D/F/H 중 하나)을 기준으로 발동한다. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px', display: 'flex', gap: 6 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
                   <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`A: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
@@ -4793,7 +4793,7 @@ export default function ReplayChart() {
               {dirBtnVertical('SELL 🔴 매도', SELL_GROUP.includes(dir?.row), () => { if (SELL_GROUP.includes(checked)) pressDir(checked, 'sell') }, false, !SELL_GROUP.includes(checked))}
             </div>
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px', display: 'flex', gap: 6 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
                   <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`B: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
