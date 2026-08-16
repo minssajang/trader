@@ -734,6 +734,9 @@ function computeReservationSeries(fullRows) {
 function computeReservationEvents(S, startIdx, endIdx) {
   const row1 = [], row3 = [], row4 = []
   const row5Entry = [], row6Entry = []
+  // A/B 카드 아래 C~H(사용자 요청) - C/E/G(셀)는 H1<S1/H1<H3/H3<H5, D/F/H(바이)는 반대 부등호.
+  // 진입은 그 상태가 이 캔들에 새로 시작되는 순간(edge)만 잡는다.
+  const rowC = [], rowD = [], rowE = [], rowF = [], rowG = [], rowH = []
   // 🎯 청산 버튼 4종(사용자 요청, 삭제된 "✅ 익절: H1×H3 크로스 청산"의 후속) - H1(HMA20)과 S1/H3/H5/W85
   // 중 사용자가 고른 하나의 골든/데드크로스를 계속 감시하다가, 골든=숏 청산/데드=롱 청산(사용자 확인).
   const exitCross = { s1: [], h3: [], h5: [], w85: [] }
@@ -774,8 +777,23 @@ function computeReservationEvents(S, startIdx, endIdx) {
     if (closes[i] != null && h1[i] != null && h1[i - 1] != null && closes[i] < h1[i] && h1[i] < h1[i - 1] &&
         closes[i - 1] != null && sma20_1m[i] != null && sma20_1m[i - 1] != null &&
         closes[i - 1] >= sma20_1m[i - 1] && closes[i] < sma20_1m[i]) row6Entry.push({ idx, side: 'sell' })
+    // C(셀)/D(바이): H1 vs S1(SMA20)
+    if (h1[i] != null && sma20_1m[i] != null && h1[i - 1] != null && sma20_1m[i - 1] != null) {
+      if (h1[i] < sma20_1m[i] && !(h1[i - 1] < sma20_1m[i - 1])) rowC.push({ idx, side: 'sell' })
+      if (h1[i] > sma20_1m[i] && !(h1[i - 1] > sma20_1m[i - 1])) rowD.push({ idx, side: 'buy' })
+    }
+    // E(셀)/F(바이): H1 vs H3
+    if (h1[i] != null && h3[i] != null && h1[i - 1] != null && h3[i - 1] != null) {
+      if (h1[i] < h3[i] && !(h1[i - 1] < h3[i - 1])) rowE.push({ idx, side: 'sell' })
+      if (h1[i] > h3[i] && !(h1[i - 1] > h3[i - 1])) rowF.push({ idx, side: 'buy' })
+    }
+    // G(셀)/H(바이): H3 vs H5(H100)
+    if (h3[i] != null && h100[i] != null && h3[i - 1] != null && h100[i - 1] != null) {
+      if (h3[i] < h100[i] && !(h3[i - 1] < h100[i - 1])) rowG.push({ idx, side: 'sell' })
+      if (h3[i] > h100[i] && !(h3[i - 1] > h100[i - 1])) rowH.push({ idx, side: 'buy' })
+    }
   }
-  return { row1, row3, row4, row5Entry, row6Entry, exitCross }
+  return { row1, row3, row4, row5Entry, row6Entry, rowC, rowD, rowE, rowF, rowG, rowH, exitCross }
 }
 const DEFAULT_RSI_COLOR = '#FFB74D'
 const DEFAULT_MACD_LINE_COLOR = '#42A5F5'
@@ -2091,11 +2109,15 @@ export default function ReplayChart() {
         const isGold = symbol === 'GOLD'
         const isNasdaq = symbol === 'NASDAQ'
         // 내부 row=1/1.1(=화면 3,4번)은 같은 배열(row1)에 side로만 나뉘어 들어있다. 내부 row=2/2.1
-        // (옛 화면 5,6번, "주가<H1/주가>H1")은 완전 삭제됨(사용자 요청).
+        // (옛 화면 5,6번, "주가<H1/주가>H1")은 완전 삭제됨(사용자 요청). 8,8.1,9,9.1,10,10.1은
+        // A/B 카드 아래 추가된 C~H(사용자 요청).
         const eventListFor = (row) => (
           row === 1 || row === 1.1 ? rEvents.row1 :
           row === 3 ? rEvents.row3 : row === 4 ? rEvents.row4 :
-          row === 5 ? rEvents.row5Entry : rEvents.row6Entry
+          row === 5 ? rEvents.row5Entry : row === 6 ? rEvents.row6Entry :
+          row === 8 ? rEvents.rowC : row === 8.1 ? rEvents.rowD :
+          row === 9 ? rEvents.rowE : row === 9.1 ? rEvents.rowF :
+          row === 10 ? rEvents.rowG : rEvents.rowH
         )
         const fireRow = (row, side, idx) => {
           openModalPositionAt(side, rows[idx].close, rows[idx].time,
@@ -4522,6 +4544,20 @@ export default function ReplayChart() {
     const row4GoldenCrossNow = prevPrice != null && prevSma20 != null && price != null && sma20 != null && prevPrice <= prevSma20 && price > sma20 // 진입: 주가가 S1 골든크로스
     const row4Entry = row4Ready && row4GoldenCrossNow
 
+    // A/B 카드 아래 C~H 추가(사용자 요청) - 셀 쪽(C,E,G)은 A카드에, 바이 쪽(D,F,H)은 B카드에 쌓이고
+    // SELL/BUY 버튼은 각 카드에서 공용으로 쓴다(체크된 행이 무엇이든 그 행 기준으로 발동). 상태만
+    // 표시하고 진입(발동)은 그 상태가 이 캔들에 새로 시작되는 순간(edge) - computeReservationEvents의
+    // rowC~rowH와 동일한 조건.
+    const prevH3 = twSeriesVal('h3', 1), prevH100 = twSeriesVal('h100', 1)
+    const rowCState = h1 != null && sma20 != null && h1 < sma20 // C: H1 < S1
+    const rowDState = h1 != null && sma20 != null && h1 > sma20 // D: H1 > S1
+    const rowEState = h1 != null && h3 != null && h1 < h3 // E: H1 < H3
+    const rowFState = h1 != null && h3 != null && h1 > h3 // F: H1 > H3
+    const rowGState = h3 != null && h100 != null && h3 < h100 // G: H3 < H5
+    const rowHState = h3 != null && h100 != null && h3 > h100 // H: H3 > H5
+    const SELL_GROUP = [6, 8, 9, 10]
+    const BUY_GROUP = [5, 8.1, 9.1, 10.1]
+
     // 원본 QHBoxLayout 순서 그대로: [체크박스+라벨] → [상태 표시등] → [SELL/BUY 버튼]
     // disabled(사용자 요청) - 3↔4, 5↔6은 같은 방향성의 반대쌍이라 한쪽이 무장되면 반대쪽은 아예 못
     // 누르게 막는다(그냥 unchecked가 아니라 disabled로 - "3번이 활성이면 4번은 비활성"이라고 명시함).
@@ -4549,9 +4585,12 @@ export default function ReplayChart() {
     )
     // 5,6번 표시등 자리에 들어가는 세로형 매도/매수 버튼(사용자 요청) - writingMode로 글자를 세로로
     // 흘려서 좁은 폭(표시등 컬럼과 같은 44px)에 들어가게 한다.
-    const dirBtnVertical = (text, active, onClick, isLong) => (
-      <button type="button" onClick={onClick} style={{
-        width: 44, alignSelf: 'stretch', padding: '4px 2px', fontSize: 11, fontWeight: 700, borderRadius: 5, cursor: 'pointer',
+    // disabled는 A카드/B카드에 C,D,E,F,G,H가 추가되면서(사용자 요청, 셀/바이 버튼 공용) 생김 - 그룹
+    // 중 아무 것도 체크 안 돼있으면 눌러도 대상이 없으니 비활성화로 표시.
+    const dirBtnVertical = (text, active, onClick, isLong, disabled) => (
+      <button type="button" onClick={onClick} disabled={disabled} style={{
+        width: 44, alignSelf: 'stretch', padding: '4px 2px', fontSize: 11, fontWeight: 700, borderRadius: 5,
+        cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
         color: 'white', border: active ? '3px solid white' : 'none',
         background: active ? (isLong ? TW_LONG_ON : TW_SHORT_ON) : (isLong ? TW_LONG_OFF : TW_SHORT_OFF),
         writingMode: 'vertical-rl', textOrientation: 'mixed',
@@ -4695,9 +4734,9 @@ export default function ReplayChart() {
               내부row1(5Bol 상단)=3번, 내부row1.1(5Bol 하단)=4번, 내부row2(주가<H1)=5번,
               내부row2.1(주가>H1)=6번, 내부row6(H1<1분중심)=7번, 내부row5(H1>1분중심)=8번. */}
           {/* 1,2번은 상태만 남기고 준비/진입 표시등 + 매수매도 버튼 삭제(사용자 요청) - 체크박스 자체는
-              그대로 둠(🔍 찾기 등에서 여전히 checked를 씀). 왼쪽=1번(하락추세)/오른쪽=2번(상승추세)
-              나란히 배치(사용자 지정), rowDef 대신 절반폭 전용 레이아웃. "버튼 위치 변경"(twSwapped)에
-              같이 좌우가 뒤바뀐다(사용자 요청 - 1~6번도 7,8번과 동일하게). */}
+              그대로 둠(🔍 찾기 등에서 여전히 checked를 씀). 카드 짝을 방향별로 다시 묶음(사용자 요청) -
+              1번(하락추세)+3번(15분↓)을 한 카드, 2번(상승추세)+4번(15분↑)을 다른 한 카드로. "버튼 위치
+              변경"(twSwapped)에 같이 좌우가 뒤바뀐다(사용자 요청 - 1~6번도 7,8번과 동일하게). */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 4} onChange={() => toggleCheck(4)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
@@ -4705,18 +4744,18 @@ export default function ReplayChart() {
               <TwStatusDot label="상태" active={row5State} colorA={TW_STATUS_RED_A} />
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 3} onChange={() => toggleCheck(3)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\n5분17선 > 5분20선`}</span>
-              <TwStatusDot label="상태" active={row6State} colorA={TW_STATUS_LIME_A} />
+              <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+              <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선\n하락중`}</span>
+              <TwStatusDot label="상태" active={row2State} colorA={TW_STATUS_RED_A} />
             </label>
           </div>
           {/* 새 3,4번(사용자 요청) - HMA300(15분) 방향 상태만, 1,2번과 같은 스타일. 내부 체크 키는
               삭제됐던 2/2.1 재사용. twSwapped에 좌우 같이 뒤바뀜(사용자 요청). */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <input type="checkbox" checked={checked === 2} onChange={() => toggleCheck(2)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ color: row2State ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`3번: 15분 빠른선\n하락중`}</span>
-              <TwStatusDot label="상태" active={row2State} colorA={TW_STATUS_RED_A} />
+              <input type="checkbox" checked={checked === 3} onChange={() => toggleCheck(3)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
+              <span style={{ color: row3Buy ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`2번: 상승추세\n5분17선 > 5분20선`}</span>
+              <TwStatusDot label="상태" active={row6State} colorA={TW_STATUS_LIME_A} />
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 2.1} onChange={() => toggleCheck(2.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
@@ -4726,22 +4765,52 @@ export default function ReplayChart() {
           </div>
           {/* 옛 5,6번(H1<1분중심/H1>1분중심)이 5,6번 자리로 다시 올라옴(사용자 요청 - 옛 3,4번(5Bol)과
               위치 맞바꿈). 조건은 전에 정리한 그대로: 상태=주가 vs H1 & H1 방향, 진입=주가 자체가
-              S1(SMA20)을 크로스하는 순간. 표시등을 지우고 그 자리에 세로형 매도(5번)/매수(6번) 버튼을
-              대신 배치(사용자 요청) - 기존에 라벨 아래 있던 가로형 버튼은 없앰. */}
+              S1(SMA20)을 크로스하는 순간. 표시등을 지우고 그 자리에 세로형 매도(A)/매수(B) 버튼을
+              대신 배치(사용자 요청) - 기존에 라벨 아래 있던 가로형 버튼은 없앰. A카드 아래에 C,E,G,
+              B카드 아래에 D,F,H를 추가(사용자 요청) - 셀/바이 버튼은 카드 안에서 공용으로 쓰고, 체크된
+              행(A/C/E/G 중 하나, D/F/H 중 하나)을 기준으로 발동한다. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
-            <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer' }}>
-                <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-                <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`A: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
-                {dirBtnVertical('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false)}
-              </label>
+            <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px', display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`A: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={checked === 8} onChange={() => toggleCheck(8)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <span style={{ color: rowCState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>C: H1 &lt; S1</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={checked === 9} onChange={() => toggleCheck(9)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <span style={{ color: rowEState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>E: H1 &lt; H3</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={checked === 10} onChange={() => toggleCheck(10)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <span style={{ color: rowGState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>G: H3 &lt; H5</span>
+                </label>
+              </div>
+              {dirBtnVertical('SELL 🔴 매도', SELL_GROUP.includes(dir?.row), () => { if (SELL_GROUP.includes(checked)) pressDir(checked, 'sell') }, false, !SELL_GROUP.includes(checked))}
             </div>
-            <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer' }}>
-                <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
-                <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`B: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
-                {dirBtnVertical('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true)}
-              </label>
+            <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px', display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`B: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={checked === 8.1} onChange={() => toggleCheck(8.1)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <span style={{ color: rowDState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>D: H1 &gt; S1</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={checked === 9.1} onChange={() => toggleCheck(9.1)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <span style={{ color: rowFState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>F: H1 &gt; H3</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={checked === 10.1} onChange={() => toggleCheck(10.1)} style={{ accentColor: '#4CAF50', flexShrink: 0 }} />
+                  <span style={{ color: rowHState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, flex: 1 }}>H: H3 &gt; H5</span>
+                </label>
+              </div>
+              {dirBtnVertical('BUY 🟢 매수', BUY_GROUP.includes(dir?.row), () => { if (BUY_GROUP.includes(checked)) pressDir(checked, 'buy') }, true, !BUY_GROUP.includes(checked))}
             </div>
           </div>
           {/* 5,6번 아래에 벌크 청산 버튼 하나 추가(사용자 요청) - 위/아래 두 벌과 완전히 같은 함수. */}
@@ -4825,6 +4894,12 @@ export default function ReplayChart() {
                 checked === 2.1 && '4번: HMA15(HMA300) 상승중\n   상태 - HMA300이 직전 캔들보다 상승중',
                 checked === 6 && 'A: 주가 < H1 (매도 전용)\n   상태 - 주가<H1(HMA20), H1 하락중\n   진입 - 주가가 S1(SMA20)을 데드크로스',
                 checked === 5 && 'B: 주가 > H1 (매수 전용)\n   상태 - 주가>H1(HMA20), H1 상승중\n   진입 - 주가가 S1(SMA20)을 골든크로스',
+                checked === 8 && 'C: H1 < S1 (매도 전용)\n   상태 - H1이 S1(SMA20)보다 낮음\n   진입 - 이 상태가 새로 시작되는 순간',
+                checked === 8.1 && 'D: H1 > S1 (매수 전용)\n   상태 - H1이 S1(SMA20)보다 높음\n   진입 - 이 상태가 새로 시작되는 순간',
+                checked === 9 && 'E: H1 < H3 (매도 전용)\n   상태 - H1이 H3보다 낮음\n   진입 - 이 상태가 새로 시작되는 순간',
+                checked === 9.1 && 'F: H1 > H3 (매수 전용)\n   상태 - H1이 H3보다 높음\n   진입 - 이 상태가 새로 시작되는 순간',
+                checked === 10 && 'G: H3 < H5 (매도 전용)\n   상태 - H3이 H5(HMA100)보다 낮음\n   진입 - 이 상태가 새로 시작되는 순간',
+                checked === 10.1 && 'H: H3 > H5 (매수 전용)\n   상태 - H3이 H5(HMA100)보다 높음\n   진입 - 이 상태가 새로 시작되는 순간',
                 checked === 1 && '5번: 5Bol 상단 돌파\n   슈팅 - 5분볼린저(SMA100 볼린저) 상단을 고가가 뚫었지만 꼬리 달고 종가는 안쪽에서 마감\n   돌파 - 5분볼린저 상단을 캔들 종가가 나감\n   진입 - 5분볼린저 상단을 종가까지 들어옴',
                 checked === 1.1 && '6번: 5Bol 하단 돌파\n   슈팅 - 5분볼린저(SMA100 볼린저) 하단을 저가가 뚫었지만 꼬리 달고 종가는 안쪽에서 마감\n   돌파 - 5분볼린저 하단을 캔들 종가가 나감\n   진입 - 5분볼린저 하단을 종가까지 들어옴',
                 checked === 7 && '7번: 스토 데드크로스\n   상태 - 스토캐스틱(70,15,15) 데드 & 스토캐스틱(210,45,45) 데드',
