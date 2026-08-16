@@ -4427,30 +4427,29 @@ export default function ReplayChart() {
               <input type="checkbox" checked={checked === 7} onChange={() => toggleCheck(7)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
               <span style={{ color: (row9State1 && row9State2) ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`9번: 스토 데드크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <TwStatusDot label="70" active={row9State1} colorA={TW_STATUS_RED_A} />
-                <TwStatusDot label="210" active={row9State2} colorA={TW_STATUS_RED_A} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <input type="checkbox" checked={twFindStoch === '70'} onChange={() => toggleFindStoch('70')} style={{ accentColor: '#4CAF50', width: 12, height: 12 }} title="70기간만 찾기" />
+                  <TwStatusDot label="70" active={row9State1} colorA={TW_STATUS_RED_A} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <input type="checkbox" checked={twFindStoch === '210'} onChange={() => toggleFindStoch('210')} style={{ accentColor: '#4CAF50', width: 12, height: 12 }} title="210기간만 찾기" />
+                  <TwStatusDot label="210" active={row9State2} colorA={TW_STATUS_RED_A} />
+                </div>
               </div>
             </label>
             <label style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
               <input type="checkbox" checked={checked === 7.1} onChange={() => toggleCheck(7.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
               <span style={{ color: (row10State1 && row10State2) ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`10번: 스토 골든크로스\n5분스토 (70,15,15)\n15분스토(210,45,45)`}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <TwStatusDot label="70" active={row10State1} colorA={TW_STATUS_LIME_A} />
-                <TwStatusDot label="210" active={row10State2} colorA={TW_STATUS_LIME_A} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <input type="checkbox" checked={twFindStoch === '70'} onChange={() => toggleFindStoch('70')} style={{ accentColor: '#4CAF50', width: 12, height: 12 }} title="70기간만 찾기" />
+                  <TwStatusDot label="70" active={row10State1} colorA={TW_STATUS_LIME_A} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <input type="checkbox" checked={twFindStoch === '210'} onChange={() => toggleFindStoch('210')} style={{ accentColor: '#4CAF50', width: 12, height: 12 }} title="210기간만 찾기" />
+                  <TwStatusDot label="210" active={row10State2} colorA={TW_STATUS_LIME_A} />
+                </div>
               </div>
-            </label>
-          </div>
-          {/* 9,10번 스토 개별 찾기(사용자 요청) - 위 🔍 찾기(무장한 행 기준)와 별개로, 70/210 기간
-              하나씩 단독으로 골든/데드가 바뀌는 순간을 찾아본다. 체크하면 즉시 검색해서 재생 바 위에
-              표시(다른 🔍 찾기 결과와 같은 영역 공유 - 새로 찾으면 이전 결과는 자연히 덮어써짐). */}
-          <div style={{ display: 'flex', gap: 12, marginTop: 2, fontSize: 11, color: '#9aa0ab' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-              <input type="checkbox" checked={twFindStoch === '70'} onChange={() => toggleFindStoch('70')} style={{ accentColor: '#4CAF50' }} />
-              70기간만 찾기
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-              <input type="checkbox" checked={twFindStoch === '210'} onChange={() => toggleFindStoch('210')} style={{ accentColor: '#4CAF50' }} />
-              210기간만 찾기
             </label>
           </div>
         </CollapsibleCard>
