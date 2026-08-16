@@ -4547,6 +4547,16 @@ export default function ReplayChart() {
         background: active ? (isLong ? TW_LONG_ON : TW_SHORT_ON) : (isLong ? TW_LONG_OFF : TW_SHORT_OFF),
       }}>{text}</button>
     )
+    // 5,6번 표시등 자리에 들어가는 세로형 매도/매수 버튼(사용자 요청) - writingMode로 글자를 세로로
+    // 흘려서 좁은 폭(표시등 컬럼과 같은 44px)에 들어가게 한다.
+    const dirBtnVertical = (text, active, onClick, isLong) => (
+      <button type="button" onClick={onClick} style={{
+        width: 44, alignSelf: 'stretch', padding: '4px 2px', fontSize: 11, fontWeight: 700, borderRadius: 5, cursor: 'pointer',
+        color: 'white', border: active ? '3px solid white' : 'none',
+        background: active ? (isLong ? TW_LONG_ON : TW_SHORT_ON) : (isLong ? TW_LONG_OFF : TW_SHORT_OFF),
+        writingMode: 'vertical-rl', textOrientation: 'mixed',
+      }}>{text}</button>
+    )
 
     // 체크박스(무장) - 1~6번 상호배타. 다른 행으로 바뀌거나 해제되면 그 행에 눌려있던 방향버튼도 원복(원본 _reset_row_buttons와 동일).
     const toggleCheck = (n) => {
@@ -4716,29 +4726,22 @@ export default function ReplayChart() {
           </div>
           {/* 옛 5,6번(H1<1분중심/H1>1분중심)이 5,6번 자리로 다시 올라옴(사용자 요청 - 옛 3,4번(5Bol)과
               위치 맞바꿈). 조건은 전에 정리한 그대로: 상태=주가 vs H1 & H1 방향, 진입=주가 자체가
-              S1(SMA20)을 크로스하는 순간. 버튼은 표시등 아래, 5번=왼쪽/6번=오른쪽. */}
+              S1(SMA20)을 크로스하는 순간. 표시등을 지우고 그 자리에 세로형 매도(5번)/매수(6번) 버튼을
+              대신 배치(사용자 요청) - 기존에 라벨 아래 있던 가로형 버튼은 없앰. */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', marginBottom: 6 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer' }}>
                 <input type="checkbox" checked={checked === 6} onChange={() => toggleCheck(6)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
                 <span style={{ color: row3Ready ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`5번: 주가 < 1분 빠른선\n1분 빠른선 하락중`}</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <TwStatusDot label="상태" active={row3Ready} colorA={TW_STATUS_RED_A} />
-                  <TwStatusDot label="진입" active={row3Entry} colorA={TW_STATUS_RED_A} />
-                </div>
+                {dirBtnVertical('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false)}
               </label>
-              <div style={{ display: 'flex', gap: 4 }}>{dirBtn('SELL 🔴 매도', dir?.row === 6, () => pressDir(6, 'sell'), false)}</div>
             </div>
             <div style={{ flex: 1, border: '1px solid #2a2e38', borderRadius: 5, padding: '4px 8px' }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', marginBottom: 6 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer' }}>
                 <input type="checkbox" checked={checked === 5} onChange={() => toggleCheck(5)} style={{ accentColor: '#4CAF50', flexShrink: 0, marginTop: 2 }} />
                 <span style={{ color: row4Ready ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.3, flex: 1 }}>{`6번: 주가 > 1분 빠른선\n1분 빠른선 상승중`}</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <TwStatusDot label="상태" active={row4Ready} colorA={TW_STATUS_LIME_A} />
-                  <TwStatusDot label="진입" active={row4Entry} colorA={TW_STATUS_LIME_A} />
-                </div>
+                {dirBtnVertical('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true)}
               </label>
-              <div style={{ display: 'flex', gap: 4 }}>{dirBtn('BUY 🟢 매수', dir?.row === 5, () => pressDir(5, 'buy'), true)}</div>
             </div>
           </div>
           {/* 5,6번 아래에 벌크 청산 버튼 하나 추가(사용자 요청) - 위/아래 두 벌과 완전히 같은 함수. */}
@@ -4794,14 +4797,15 @@ export default function ReplayChart() {
         </CollapsibleCard>
 
         {/* 하단 청산목표 위에 상단과 동일한 수동 매수/매도 버튼 추가(사용자 요청) - 위쪽 것과 완전히
-            같은 함수/옵션(twSwapped 좌우 순서도 같이 따름). */}
+            같은 함수/옵션(twSwapped 좌우 순서도 같이 따름). 크기도 위쪽과 동일하게 줄임(사용자 요청,
+            height 57 → 40). */}
         <div style={{ display: 'flex', gap: 6, marginTop: 10, marginBottom: 8, flexDirection: twSwapped ? 'row-reverse' : 'row' }}>
           <button type="button" onClick={() => openModalPosition('sell', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
             disabled={currentPrice == null || !live}
-            style={{ flex: 1, height: 57, background: TW_SHORT_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>SELL 🔴 매도</button>
+            style={{ flex: 1, height: 40, background: TW_SHORT_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 14, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>SELL 🔴 매도</button>
           <button type="button" onClick={() => openModalPosition('buy', { lot: lotSize, slPoints: twUseSl ? twSl : 0, tpPoints: twUseTp ? twTp : 0, tag: 'manual' })}
             disabled={currentPrice == null || !live}
-            style={{ flex: 1, height: 57, background: TW_LONG_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 16, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>BUY 🟢 매수</button>
+            style={{ flex: 1, height: 40, background: TW_LONG_OFF, color: 'white', border: 'none', borderRadius: 5, fontSize: 14, fontWeight: 700, cursor: live ? 'pointer' : 'not-allowed', opacity: live ? 1 : 0.5 }}>BUY 🟢 매수</button>
         </div>
 
         <div style={{ marginTop: 10 }}>{renderExitCrossButtons()}{renderMaTrailStopButtons()}</div>
