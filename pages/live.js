@@ -1140,6 +1140,11 @@ export default function ReplayChart() {
   // 🔍 찾기(검색) - 체크된 신호의 "진입" 위치를 불러온 구간 전체에서 찾아 순서대로 재생 바 위에
   // 번호로 표시(사용자 요청). [{idx, side}] 배열, idx는 dayRows 기준(1-based, playIndex와 같은 체계).
   const [twFoundPositions, setTwFoundPositions] = useState([])
+  // 9,10번 스토(70,15,15)/(210,45,45) 개별 찾기(사용자 요청) - 위 🔍 찾기는 반자동예약에 무장한 행
+  // 기준이라 9,10번은 두 기간이 "동시에" 갖춰진 순간만 찾아준다. 각 기간이 단독으로 골든/데드가
+  // 바뀌는 순간도 따로 찾아보고 싶다는 요청 - 반자동예약(checked/무장)과는 완전히 별개의 탐색
+  // 전용 체크박스라 twFoundPositions를 그대로 공유해서 재생 바 위에 똑같이 표시한다.
+  const [twFindStoch, setTwFindStoch] = useState(null) // null | '70' | '210'
   // resize/pan/zoom 핸들러는 마운트 시 한 번만 설치돼서 클로저가 고정되므로, state를 직접 읽으면
   // stale해진다(rowsRef/indexRef처럼 ref로 미러링해서 항상 최신값을 읽게 함).
   const twFoundPositionsRef = useRef([])
@@ -4250,6 +4255,28 @@ export default function ReplayChart() {
     setTwFoundPositions(found)
     updateFoundMarkerAnchors(found)
   }
+  // 9,10번 스토 개별 찾기 - 위 findSignalPositions와 독립적으로, 그 기간 하나의 골든/데드가 바뀌는
+  // (edge) 순간을 전부 찾는다. side는 마커 색상 구분용(골든=buy색, 데드=sell색)일 뿐 실제 매매 신호는
+  // 아니다 - 9,10번처럼 두 기간이 같이 갖춰질 때만 잡는 게 아니라 그 기간 혼자 바뀌는 것도 보고 싶다는
+  // 요청(사용자) - 순수 탐색 기능.
+  const findStochPositions = (period) => {
+    if (!total) { setTwFoundPositions([]); setFoundMarkerAnchors([]); return }
+    const key = period === '70' ? 'stoch70Golden' : 'stoch210Golden'
+    const found = []
+    for (let i = 1; i <= total; i++) {
+      const cur = seriesValAt(key, i), prev = seriesValAt(key, i, 1)
+      if (cur == null || prev == null || cur === prev) continue
+      found.push({ idx: i, side: cur ? 'buy' : 'sell' })
+    }
+    setTwFoundPositions(found)
+    updateFoundMarkerAnchors(found)
+  }
+  const toggleFindStoch = (period) => {
+    const next = twFindStoch === period ? null : period
+    setTwFindStoch(next)
+    if (next) findStochPositions(next)
+    else { setTwFoundPositions([]); setFoundMarkerAnchors([]) }
+  }
   // 재생 바 위 번호랑 완전히 같은 결과를 캔들 위/아래에도 그대로 얹는다(사용자 요청 - "잘 동작하는지
   // 찾아보게"). lightweight-charts 네이티브 마커(createSeriesMarkers)는 markerSeriesRef가 다른 라인
   // 추가/삭제 때마다 통째로 지웠다 다시 만들어지는 구조라(라인 위 배치 유지 목적) 그때마다 마커가
@@ -4691,6 +4718,19 @@ export default function ReplayChart() {
               </div>
             </label>
           </div>
+          {/* 9,10번 스토 개별 찾기(사용자 요청) - 위 🔍 찾기(무장한 행 기준)와 별개로, 70/210 기간
+              하나씩 단독으로 골든/데드가 바뀌는 순간을 찾아본다. 체크하면 즉시 검색해서 재생 바 위에
+              표시(다른 🔍 찾기 결과와 같은 영역 공유 - 새로 찾으면 이전 결과는 자연히 덮어써짐). */}
+          <div style={{ display: 'flex', gap: 12, marginTop: 2, fontSize: 11, color: '#9aa0ab' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <input type="checkbox" checked={twFindStoch === '70'} onChange={() => toggleFindStoch('70')} style={{ accentColor: '#4CAF50' }} />
+              70기간만 찾기
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <input type="checkbox" checked={twFindStoch === '210'} onChange={() => toggleFindStoch('210')} style={{ accentColor: '#4CAF50' }} />
+              210기간만 찾기
+            </label>
+          </div>
         </CollapsibleCard>
 
         {/* 하단 청산목표 위에 상단과 동일한 수동 매수/매도 버튼 추가(사용자 요청) - 위쪽 것과 완전히
@@ -5062,7 +5102,6 @@ export default function ReplayChart() {
             <Link href="/backtest-chart" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>학습</Link>
             <Link href="/backtest-intraday" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>📈 일중 패턴</Link>
             <Link href="/replay" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>🔁 리플레이</Link>
-            <Link href="/admin" style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9aa0ab', border: '1px solid #2a2e38', textDecoration: 'none' }}>admin</Link>
             <span style={{ padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: 'rgba(76,175,80,0.15)', color: '#4CAF50', border: '1px solid #4CAF50' }}>🔴 라이브</span>
           </nav>
         </header>
@@ -6250,6 +6289,11 @@ export default function ReplayChart() {
           </div>
 
         </main>
+
+        <footer className="site">
+          문의: minssajang@gmail.com
+          <Link href="/admin" className="admin-link">admin</Link>
+        </footer>
 
         {/* document.body에 포탈로 그린다(사용자 지적 - "항상 제일 위" 요청) - 이전엔 페이지 트리 안에
             그대로 그려서, 조상 요소 중 하나가 stacking context를 만들면(transform/opacity 등) zIndex:1000이
