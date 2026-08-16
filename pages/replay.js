@@ -3947,27 +3947,18 @@ export default function ReplayChart() {
     return false
   }
   const twSignalSide = (row) => [1, 2, 6, 4, 7].includes(row) ? 'sell' : 'buy' // 1,3,5,7,9번(화면번호)=매도, 2,4,6,8,10번=매수
-  // 🔍 찾기 버튼 - 체크된 신호가 불러온 구간(dayRows 1~total) 안에서 실제로 "진입"했던 캔들을 전부
-  // 훑어서 순서대로 모은다. 결과는 재생 바(빨간 바) 위에 번호로 표시되고, 클릭하면 그 캔들로 이동한다.
+  // 🔍 찾기 버튼(단 하나) - 체크된 신호(checked, 무장된 행)와 9,10번 70/210 개별 체크박스
+  // (twFindStochKeys)를 같이 훑어서 결과를 합친다(사용자 지적 - 버튼을 따로 또 만들지 말고 기존
+  // 찾기 버튼 하나로 다 처리할 것). 불러온 구간(dayRows 1~total) 안에서 실제로 "진입"했던 캔들을
+  // 순서대로 모은다. 결과는 재생 바(빨간 바) 위에 번호로 표시되고, 클릭하면 그 캔들로 이동한다.
   const findSignalPositions = () => {
     const checked = symbol === 'GOLD' ? twGoldChecked : twNasdaqChecked
-    if (checked == null || !total) { setTwFoundPositions([]); setFoundMarkerAnchors([]); return }
+    const stochConfigs = Array.from(twFindStochKeys).map(k => FIND_STOCH_KEY_CONFIG[k])
+    if ((checked == null && stochConfigs.length === 0) || !total) { setTwFoundPositions([]); setFoundMarkerAnchors([]); return }
     const found = []
     for (let i = 1; i <= total; i++) {
-      if (isSignalEntryAt(checked, i)) found.push({ idx: i, side: twSignalSide(checked) })
-    }
-    setTwFoundPositions(found)
-    updateFoundMarkerAnchors(found)
-  }
-  // 9,10번 스토 개별 찾기 - 위 findSignalPositions와 독립적으로, 그 기간 하나의 골든/데드가 바뀌는
-  // (edge) 순간을 전부 찾는다. side는 마커 색상 구분용(골든=buy색, 데드=sell색)일 뿐 실제 매매 신호는
-  // 아니다 - 9,10번처럼 두 기간이 같이 갖춰질 때만 잡는 게 아니라 그 기간 혼자 바뀌는 것도 보고 싶다는
-  // 요청(사용자) - 순수 탐색 기능.
-  const findStochPositionsForConfigs = (configs) => {
-    if (!total || configs.length === 0) { setTwFoundPositions([]); setFoundMarkerAnchors([]); return }
-    const found = []
-    for (let i = 1; i <= total; i++) {
-      for (const cfg of configs) {
+      if (checked != null && isSignalEntryAt(checked, i)) found.push({ idx: i, side: twSignalSide(checked) })
+      for (const cfg of stochConfigs) {
         const key = cfg.period === '70' ? 'stoch70Golden' : 'stoch210Golden'
         const cur = seriesValAt(key, i), prev = seriesValAt(key, i, 1)
         if (cur == null || prev == null) continue
@@ -3977,16 +3968,13 @@ export default function ReplayChart() {
     setTwFoundPositions(found)
     updateFoundMarkerAnchors(found)
   }
-  // 체크박스는 선택만 하고, 실제 검색은 아래 찾기 버튼을 눌러야 실행된다(사용자 지적 - 체크하는 순간
-  // 바로 찾아버리면 "체크한 것만 찾으라"는 의도와 안 맞음).
+  // 체크박스는 선택만 한다 - 실제 검색은 위 findSignalPositions(기존 🔍 찾기 버튼)가 클릭될 때
+  // twFindStochKeys를 같이 읽어서 처리한다.
   const toggleFindStoch = (checkboxKey) => {
     const next = new Set(twFindStochKeys)
     if (next.has(checkboxKey)) next.delete(checkboxKey)
     else next.add(checkboxKey)
     setTwFindStochKeys(next)
-  }
-  const runFindStoch = () => {
-    findStochPositionsForConfigs(Array.from(twFindStochKeys).map(k => FIND_STOCH_KEY_CONFIG[k]))
   }
   // 재생 바 위 번호랑 완전히 같은 결과를 캔들 위/아래에도 그대로 얹는다(사용자 요청 - "잘 동작하는지
   // 찾아보게"). lightweight-charts 네이티브 마커(createSeriesMarkers)는 markerSeriesRef가 다른 라인
@@ -4337,14 +4325,14 @@ export default function ReplayChart() {
           {/* 🔍 찾기(사용자 요청) - 지금 체크된 신호가 불러온 구간 안에서 실제로 진입했던 캔들을 전부
               찾아 아래 재생 바 위에 순서대로 번호로 표시한다(그 번호를 클릭하면 그 캔들로 이동). */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-            <button type="button" onClick={findSignalPositions} disabled={!live || checked == null}
+            <button type="button" onClick={findSignalPositions} disabled={!live || (checked == null && twFindStochKeys.size === 0)}
               style={{
-                background: (!live || checked == null) ? '#37474F' : '#4FC3F7', color: 'white', border: 'none',
+                background: (!live || (checked == null && twFindStochKeys.size === 0)) ? '#37474F' : '#4FC3F7', color: 'white', border: 'none',
                 borderRadius: 5, padding: '6px 14px', fontSize: 12.5, fontWeight: 700, width: 'auto', flexShrink: 0,
-                cursor: (!live || checked == null) ? 'not-allowed' : 'pointer', opacity: (!live || checked == null) ? 0.5 : 1,
+                cursor: (!live || (checked == null && twFindStochKeys.size === 0)) ? 'not-allowed' : 'pointer', opacity: (!live || (checked == null && twFindStochKeys.size === 0)) ? 0.5 : 1,
               }}
             >🔍 찾기</button>
-            {checked == null && <span style={{ fontSize: 11.5, color: '#9aa0ab' }}>신호를 먼저 체크하세요</span>}
+            {checked == null && twFindStochKeys.size === 0 && <span style={{ fontSize: 11.5, color: '#9aa0ab' }}>신호를 먼저 체크하세요</span>}
             {twFoundPositions.length > 0 && (
               <>
                 <span style={{ fontSize: 12, color: '#9aa0ab' }}>{twFoundPositions.length}개 찾음 (아래 재생 바 위 번호 클릭 시 이동)</span>
@@ -4468,17 +4456,6 @@ export default function ReplayChart() {
                 </div>
               </div>
             </label>
-          </div>
-          {/* 9,10번 개별 기간 찾기(사용자 요청) - 체크박스는 선택만, 실제 검색은 이 버튼을 눌러야 실행 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button type="button" onClick={runFindStoch} disabled={twFindStochKeys.size === 0}
-              style={{
-                background: twFindStochKeys.size === 0 ? '#37474F' : '#4FC3F7', color: 'white', border: 'none',
-                borderRadius: 5, padding: '6px 14px', fontSize: 12.5, fontWeight: 700, width: 'auto', flexShrink: 0,
-                cursor: twFindStochKeys.size === 0 ? 'not-allowed' : 'pointer', opacity: twFindStochKeys.size === 0 ? 0.5 : 1,
-              }}
-            >🔍 찾기</button>
-            {twFindStochKeys.size === 0 && <span style={{ fontSize: 11.5, color: '#9aa0ab' }}>70/210 체크박스를 먼저 선택하세요</span>}
           </div>
         </CollapsibleCard>
 
