@@ -119,8 +119,8 @@ class MultiVerticalLinesPrimitive {
     this._requestUpdate?.()
   }
 }
-const STOCH3_CROSS_GOLDEN_COLOR = '#C6FF00' // 70/15/15 스토캐스틱 골든크로스 세로줄(라임, 사용자 요청)
-const STOCH3_CROSS_DEAD_COLOR = '#F44336' // 70/15/15 스토캐스틱 데드크로스 세로줄(레드, 사용자 요청)
+const DEFAULT_STOCH_CROSS_UP_COLOR = '#C6FF00' // 스토(70,15,15)/(210,45,45) K/D 골든크로스 세로줄 기본색(라임)
+const DEFAULT_STOCH_CROSS_DOWN_COLOR = '#F44336' // 스토(70,15,15)/(210,45,45) K/D 데드크로스 세로줄 기본색(레드)
 const SHOOTING_5MIN_COLOR = '#00E5FF' // "5분 슈팅" 표시 색 - 캔들/다른 신호들과 안 헷갈리게 튀는 시안색(사용자 요청 "잘보이게")
 
 // 횡보 구간 배경 표시(사용자 요청) - VerticalLinePrimitive와 같은 방식이지만 선 1개가 아니라
@@ -638,10 +638,11 @@ const MACD_SIGNAL = 9
 const MACD5_FAST = 60
 const MACD5_SLOW = 130
 const MACD5_SIGNAL = 45
-// 스토캐스틱 3세트(사용자 요청 그대로): [kPeriod, kSmooth(Slow%K), dPeriod(%D)]
+// 스토캐스틱 4세트(사용자 요청 그대로): [kPeriod, kSmooth(Slow%K), dPeriod(%D)]
 const STOCH1_PARAMS = [14, 3, 3]
 const STOCH2_PARAMS = [7, 2, 2]
 const STOCH3_PARAMS = [70, 15, 15]
+const STOCH4_PARAMS = [210, 45, 45]
 // EasyTrade_MT5 데스크톱 앱의 "분리매매창" 골드/나스닥 탭 반자동 예약(3/4번 신호)이 쓰는
 // 1분 스토캐스틱 - _MarketDataWorker의 _ta.stoch(k=5, d=3, smooth_k=3)와 동일 (kPeriod,kSmooth,dPeriod 순)
 const STOCH_RESERVE_PARAMS = [5, 3, 3]
@@ -815,6 +816,8 @@ const DEFAULT_STOCH2_K_COLOR = '#FFEB3B'
 const DEFAULT_STOCH2_D_COLOR = '#FFFFFF'
 const DEFAULT_STOCH3_K_COLOR = '#FF9800'
 const DEFAULT_STOCH3_D_COLOR = '#FFFFFF'
+const DEFAULT_STOCH4_K_COLOR = '#7C4DFF'
+const DEFAULT_STOCH4_D_COLOR = '#FFFFFF'
 // RSI(0~100)/MACD(진동값)는 캔들 가격축과 스케일이 전혀 달라 같은 축에 못 그림 -
 // lightweight-charts v5의 진짜 pane API(addSeries의 세 번째 인자 paneIndex)로 별도 창에 그린다.
 const DEFAULT_UP_COLOR = '#38BDF8'   // 상승 기본색 - 스카이블루
@@ -1063,8 +1066,8 @@ export default function ReplayChart() {
   const [enabledMACD5, setEnabledMACD5] = useState(rs.enabledMACD5 ?? false)
   const [macd5LineColor, setMacd5LineColorState] = useState(rs.macd5LineColor ?? DEFAULT_MACD5_LINE_COLOR)
   const [macd5SignalColor, setMacd5SignalColorState] = useState(rs.macd5SignalColor ?? DEFAULT_MACD5_SIGNAL_COLOR)
-  // 스토캐스틱 3세트 - 14/3/3, 7/2/2, 70/15/15(사용자 요청). 70/15/15는 "5분B 볼린저 외부 상태에서
-  // K/D 크로스" 조건을 만족하면 세로줄도 같이 표시한다(아래 stoch3CrossTimesRef/토글 함수 참고).
+  // 스토캐스틱 4세트 - 14/3/3, 7/2/2, 70/15/15, 210/45/45(사용자 요청). 70/15/15, 210/45/45는
+  // K/D가 교차할 때마다 세로줄도 같이 표시한다(아래 stoch3/4CrossTimesRef/토글 함수 참고).
   const [enabledStoch1, setEnabledStoch1] = useState(rs.enabledStoch1 ?? true)
   const [stoch1KColor, setStoch1KColorState] = useState(rs.stoch1KColor ?? DEFAULT_STOCH1_K_COLOR)
   const [stoch1DColor, setStoch1DColorState] = useState(rs.stoch1DColor ?? DEFAULT_STOCH1_D_COLOR)
@@ -1074,6 +1077,18 @@ export default function ReplayChart() {
   const [enabledStoch3, setEnabledStoch3] = useState(rs.enabledStoch3 ?? true)
   const [stoch3KColor, setStoch3KColorState] = useState(rs.stoch3KColor ?? DEFAULT_STOCH3_K_COLOR)
   const [stoch3DColor, setStoch3DColorState] = useState(rs.stoch3DColor ?? DEFAULT_STOCH3_D_COLOR)
+  const [enabledStoch4, setEnabledStoch4] = useState(rs.enabledStoch4 ?? true)
+  const [stoch4KColor, setStoch4KColorState] = useState(rs.stoch4KColor ?? DEFAULT_STOCH4_K_COLOR)
+  const [stoch4DColor, setStoch4DColorState] = useState(rs.stoch4DColor ?? DEFAULT_STOCH4_D_COLOR)
+  // 스토(70,15,15)/(210,45,45) K/D 골든·데드크로스 세로줄(사용자 요청 - 기본 체크, 상승/하락 색상 선택 가능)
+  const [stoch3CrossEnabled, setStoch3CrossEnabledState] = useState(rs.stoch3CrossEnabled ?? true)
+  const [stoch3CrossUpColor, setStoch3CrossUpColorState] = useState(rs.stoch3CrossUpColor ?? DEFAULT_STOCH_CROSS_UP_COLOR)
+  const [stoch3CrossDownColor, setStoch3CrossDownColorState] = useState(rs.stoch3CrossDownColor ?? DEFAULT_STOCH_CROSS_DOWN_COLOR)
+  const [stoch3CrossOpacity, setStoch3CrossOpacityState] = useState(rs.stoch3CrossOpacity ?? 1) // 세로줄 투명도(0~1, 기본 100%, 사용자 요청)
+  const [stoch4CrossEnabled, setStoch4CrossEnabledState] = useState(rs.stoch4CrossEnabled ?? true)
+  const [stoch4CrossUpColor, setStoch4CrossUpColorState] = useState(rs.stoch4CrossUpColor ?? DEFAULT_STOCH_CROSS_UP_COLOR)
+  const [stoch4CrossDownColor, setStoch4CrossDownColorState] = useState(rs.stoch4CrossDownColor ?? DEFAULT_STOCH_CROSS_DOWN_COLOR)
+  const [stoch4CrossOpacity, setStoch4CrossOpacityState] = useState(rs.stoch4CrossOpacity ?? 1)
   const [upColor, setUpColorState] = useState(rs.upColor ?? DEFAULT_UP_COLOR)
   const [downColor, setDownColorState] = useState(rs.downColor ?? DEFAULT_DOWN_COLOR)
   const [candleVisible, setCandleVisible] = useState(() => rs.candleVisible ?? restoreRef.current?.candleVisible ?? true) // 체크 해제하면 캔들을 숨김(지표만 보고 판단 연습할 때 씀) - 기본 체크됨
@@ -1302,10 +1317,23 @@ export default function ReplayChart() {
   const stoch2SeriesRef = useRef(null)
   const stoch3DataRef = useRef({ k: [], d: [] })
   const stoch3SeriesRef = useRef(null)
-  const stoch3CrossTimesRef = useRef([]) // [{idx, time}] - 5분B 외부 상태에서 K/D 크로스가 난 지점 전체
+  const stoch3CrossTimesRef = useRef([]) // [{idx, time, type:'golden'|'dead'}] - K/D가 교차한 지점 전체(밴드 조건 삭제, 사용자 요청)
   const stoch3CrossLineRef = useRef(null) // MultiVerticalLinesPrimitive 인스턴스(메인 캔들 pane용)
   const stoch3CrossLineStochPaneRef = useRef(null) // 같은 세로줄을 스토캐스틱 pane 쪽에도 하나 더 얹은 인스턴스 - pane은
-  // 셋 중 아무거나 처음 켜질 때 생겼다 전부 꺼지면 사라지므로, 이 primitive도 그때그때 새로 만들고 null로 되돌린다.
+  // 넷 중 아무거나 처음 켜질 때 생겼다 전부 꺼지면 사라지므로, 이 primitive도 그때그때 새로 만들고 null로 되돌린다.
+  const stoch3CrossEnabledRef = useRef(stoch3CrossEnabled) // 색상/on-off를 리렌더 없이 즉시 반영하기 위한 ref(다른 색상 피커들과 동일 패턴)
+  const stoch3CrossUpColorRef = useRef(stoch3CrossUpColor)
+  const stoch3CrossDownColorRef = useRef(stoch3CrossDownColor)
+  const stoch3CrossOpacityRef = useRef(stoch3CrossOpacity)
+  const stoch4DataRef = useRef({ k: [], d: [] })
+  const stoch4SeriesRef = useRef(null)
+  const stoch4CrossTimesRef = useRef([]) // [{idx, time, type:'golden'|'dead'}] - 스토(210,45,45) K/D 교차 지점 전체(사용자 요청)
+  const stoch4CrossLineRef = useRef(null) // MultiVerticalLinesPrimitive 인스턴스(메인 캔들 pane용)
+  const stoch4CrossLineStochPaneRef = useRef(null) // 같은 세로줄을 스토캐스틱 pane 쪽에도 하나 더 얹은 인스턴스
+  const stoch4CrossEnabledRef = useRef(stoch4CrossEnabled)
+  const stoch4CrossUpColorRef = useRef(stoch4CrossUpColor)
+  const stoch4CrossDownColorRef = useRef(stoch4CrossDownColor)
+  const stoch4CrossOpacityRef = useRef(stoch4CrossOpacity)
   const crossPointsRef = useRef([])  // 체크한 이평선끼리 교차하는 지점 전체 [{idx, time, type:'golden'|'dead'}]
   const autoEventsRef = useRef([])   // 반자동진입 트리거 전체 [{idx, time, side:'buy'|'sell', source}]
   const reservationSeriesRef = useRef(null) // computeReservationSeries(fullRows) 결과 - 분리매매창 골드/나스닥 탭 라벨 표시용
@@ -1371,6 +1399,9 @@ export default function ReplayChart() {
     stoch3DataRef.current = { k: [], d: [] }
     stoch3CrossTimesRef.current = []
     syncStoch3(0)
+    stoch4DataRef.current = { k: [], d: [] }
+    stoch4CrossTimesRef.current = []
+    syncStoch4(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -1446,6 +1477,8 @@ export default function ReplayChart() {
 
     stoch3CrossLineRef.current = new MultiVerticalLinesPrimitive()
     series.attachPrimitive(stoch3CrossLineRef.current)
+    stoch4CrossLineRef.current = new MultiVerticalLinesPrimitive()
+    series.attachPrimitive(stoch4CrossLineRef.current)
 
     shooting5MinPrimitiveRef.current = new ExactPriceMarkersPrimitive(SHOOTING_5MIN_COLOR)
     series.attachPrimitive(shooting5MinPrimitiveRef.current)
@@ -1492,9 +1525,9 @@ export default function ReplayChart() {
       }
     }
 
-    // 스토캐스틱 3세트도 볼린저/이평선처럼 기본 체크(사용자 요청) - 마운트 시점에 켜져 있는 것만 여기서 직접 만든다.
-    // 셋이 같은 pane을 공유하므로 pane index는 한 번만 잡고, 세로줄(stoch3CrossLineStochPaneRef)은 그 pane에 딱 하나만 붙인다.
-    if (enabledStoch1 || enabledStoch2 || enabledStoch3) {
+    // 스토캐스틱 4세트도 볼린저/이평선처럼 기본 체크(사용자 요청) - 마운트 시점에 켜져 있는 것만 여기서 직접 만든다.
+    // 넷이 같은 pane을 공유하므로 pane index는 한 번만 잡고, 세로줄(stoch3/4CrossLineStochPaneRef)은 그 pane에 하나씩만 붙인다.
+    if (enabledStoch1 || enabledStoch2 || enabledStoch3 || enabledStoch4) {
       const stochPaneIndex = chart.panes().length
       let firstStochKSeries = null
       if (enabledStoch1) {
@@ -1518,9 +1551,18 @@ export default function ReplayChart() {
         }
         firstStochKSeries = firstStochKSeries || stoch3SeriesRef.current.k
       }
+      if (enabledStoch4) {
+        stoch4SeriesRef.current = {
+          k: chart.addSeries(LineSeries, { color: stoch4KColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }, stochPaneIndex),
+          d: chart.addSeries(LineSeries, { color: stoch4DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, stochPaneIndex),
+        }
+        firstStochKSeries = firstStochKSeries || stoch4SeriesRef.current.k
+      }
       if (firstStochKSeries) {
         stoch3CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive()
         firstStochKSeries.attachPrimitive(stoch3CrossLineStochPaneRef.current)
+        stoch4CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive()
+        firstStochKSeries.attachPrimitive(stoch4CrossLineStochPaneRef.current)
       }
       applyStochPaneRatio(chart, stochPaneIndex)
     }
@@ -1746,7 +1788,7 @@ export default function ReplayChart() {
   }
   const syncStoch2 = (idx) => applyStoch2Index(idx)
 
-  // 70/15/15 스토캐스틱 - K/D 라인뿐 아니라 "5분B 외부 상태에서 크로스" 세로줄도 재생 위치까지만 표시
+  // 70/15/15 스토캐스틱 - K/D 라인뿐 아니라 "K/D 크로스" 세로줄도 재생 위치까지만 표시
   const applyStoch3Index = (idx) => {
     const s = stoch3SeriesRef.current
     const d = stoch3DataRef.current
@@ -1754,11 +1796,30 @@ export default function ReplayChart() {
       s.k.setData(d.k.slice(0, idx).filter(Boolean))
       s.d.setData(d.d.slice(0, idx).filter(Boolean))
     }
-    const lines = stoch3CrossTimesRef.current.filter(p => p.idx < idx).map(p => ({ time: p.time, color: p.color }))
+    // 색상은 ref로 즉시 반영(리렌더 기다리지 않고 색상 피커 onChange에서 바로 이 함수를 다시 불러 새 색으로 그림)
+    const lines = stoch3CrossEnabledRef.current
+      ? stoch3CrossTimesRef.current.filter(p => p.idx < idx).map(p => ({ time: p.time, color: hexToRgba(p.type === 'golden' ? stoch3CrossUpColorRef.current : stoch3CrossDownColorRef.current, stoch3CrossOpacityRef.current) }))
+      : []
     stoch3CrossLineRef.current?.setLines(lines)
     stoch3CrossLineStochPaneRef.current?.setLines(lines)
   }
   const syncStoch3 = (idx) => applyStoch3Index(idx)
+
+  // 스토(210,45,45) - 스토(70,15,15)와 동일한 방식(사용자 요청 - "다른스토들과 같은 방식으로")
+  const applyStoch4Index = (idx) => {
+    const s = stoch4SeriesRef.current
+    const d = stoch4DataRef.current
+    if (s) {
+      s.k.setData(d.k.slice(0, idx).filter(Boolean))
+      s.d.setData(d.d.slice(0, idx).filter(Boolean))
+    }
+    const lines = stoch4CrossEnabledRef.current
+      ? stoch4CrossTimesRef.current.filter(p => p.idx < idx).map(p => ({ time: p.time, color: hexToRgba(p.type === 'golden' ? stoch4CrossUpColorRef.current : stoch4CrossDownColorRef.current, stoch4CrossOpacityRef.current) }))
+      : []
+    stoch4CrossLineRef.current?.setLines(lines)
+    stoch4CrossLineStochPaneRef.current?.setLines(lines)
+  }
+  const syncStoch4 = (idx) => applyStoch4Index(idx)
   const syncMACD5 = (idx) => applyMACD5Index(idx)
 
   // 업로드한 매매내역 CSV 청산사유별 마커 색상 (익절=흰색, 손절=빨강, 크로스전환=주황, 사용자 지정)
@@ -1989,6 +2050,7 @@ export default function ReplayChart() {
     syncStoch1(idx)
     syncStoch2(idx)
     syncStoch3(idx)
+    syncStoch4(idx)
     applyAllMarkers(idx)
     if (ribbonEnabled) recomputeSpreadExtremes(idx) // 슬라이더로 임의 위치 이동 - 되감기일 수 있어 처음부터 재스캔
     if (sidewaysEnabled) applySidewaysBands(idx)
@@ -2040,6 +2102,7 @@ export default function ReplayChart() {
     syncStoch1(to)
     syncStoch2(to)
     syncStoch3(to)
+    syncStoch4(to)
     applyAllMarkers(to)
     // 반자동진입 - 재생(자동 진행)으로 새로 드러난 구간에서만 조건을 확인한다.
     // 슬라이더로 수동 스크럽할 때는 안 걸리게(applyIndex가 아니라 여기서만 체크)
@@ -2347,29 +2410,37 @@ export default function ReplayChart() {
     stoch2DataRef.current = sliceStoch(stoch2.k, stoch2.d)
     const stoch3 = rollingStochastic(fullRows, ...STOCH3_PARAMS)
     stoch3DataRef.current = sliceStoch(stoch3.k, stoch3.d)
+    const stoch4 = rollingStochastic(fullRows, ...STOCH4_PARAMS)
+    stoch4DataRef.current = sliceStoch(stoch4.k, stoch4.d)
 
-    // 70/15/15 스토캐스틱 크로스 세로줄 - "5분B(SMA100) 외부로 나간 뒤 아직 안 돌아온 상태"에서
-    // K/D가 교차하는 캔들만 기록한다(볼린저 안으로 돌아온 뒤에 나는 크로스는 표시 안 함, 사용자 요청).
+    // 스토(70,15,15)/(210,45,45) K/D 크로스 세로줄 - K/D가 교차하는 캔들마다 전부 기록한다(밴드
+    // 바깥 상태 조건은 삭제, 사용자 요청). color는 안 담고 type만 담아서 렌더 시점에 최신 색상
+    // (ref)으로 칠한다 - 색상 피커에서 즉시 반영되게 하려고(다른 색상 피커들과 동일 패턴).
     {
-      const up100Map = new Map((newBandData.sma100?.upper || []).filter(Boolean).map(p => [p.time, p.value]))
-      const low100Map = new Map((newBandData.sma100?.lower || []).filter(Boolean).map(p => [p.time, p.value]))
       const crossTimes = []
-      let isOutsideBand = false
       for (let i = startIdx; i < endIdx; i++) {
         const t = fullRows[i].time
-        const up = up100Map.get(t), low = low100Map.get(t)
-        if (up != null && low != null) {
-          if (fullRows[i].high > up || fullRows[i].low < low) isOutsideBand = true
-          else if (fullRows[i].high <= up && fullRows[i].low >= low) isOutsideBand = false
-        }
         const k = stoch3.k[i], d = stoch3.d[i], pk = stoch3.k[i - 1], pd = stoch3.d[i - 1]
-        if (isOutsideBand && k != null && d != null && pk != null && pd != null) {
+        if (k != null && d != null && pk != null && pd != null) {
           const golden = pk <= pd && k > d
           const dead = pk >= pd && k < d
-          if (golden || dead) crossTimes.push({ idx: i - startIdx, time: t, color: golden ? STOCH3_CROSS_GOLDEN_COLOR : STOCH3_CROSS_DEAD_COLOR })
+          if (golden || dead) crossTimes.push({ idx: i - startIdx, time: t, type: golden ? 'golden' : 'dead' })
         }
       }
       stoch3CrossTimesRef.current = crossTimes
+    }
+    {
+      const crossTimes = []
+      for (let i = startIdx; i < endIdx; i++) {
+        const t = fullRows[i].time
+        const k = stoch4.k[i], d = stoch4.d[i], pk = stoch4.k[i - 1], pd = stoch4.d[i - 1]
+        if (k != null && d != null && pk != null && pd != null) {
+          const golden = pk <= pd && k > d
+          const dead = pk >= pd && k < d
+          if (golden || dead) crossTimes.push({ idx: i - startIdx, time: t, type: golden ? 'golden' : 'dead' })
+        }
+      }
+      stoch4CrossTimesRef.current = crossTimes
     }
 
     // 분리매매창 골드/나스닥 탭 반자동 예약(1~6번) - 지금 로드한 심볼 데이터 기준으로 미리 계산해둔다.
@@ -2449,6 +2520,9 @@ export default function ReplayChart() {
     stoch3DataRef.current = { k: [], d: [] }
     stoch3CrossTimesRef.current = []
     syncStoch3(0)
+    stoch4DataRef.current = { k: [], d: [] }
+    stoch4CrossTimesRef.current = []
+    syncStoch4(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -2866,6 +2940,9 @@ export default function ReplayChart() {
     stoch3DataRef.current = { k: [], d: [] }
     stoch3CrossTimesRef.current = []
     syncStoch3(0)
+    stoch4DataRef.current = { k: [], d: [] }
+    stoch4CrossTimesRef.current = []
+    syncStoch4(0)
     crossPointsRef.current = []
     autoEventsRef.current = []
     simEventsRef.current = []
@@ -2917,6 +2994,9 @@ export default function ReplayChart() {
         enabledStoch1, stoch1KColor, stoch1DColor,
         enabledStoch2, stoch2KColor, stoch2DColor,
         enabledStoch3, stoch3KColor, stoch3DColor,
+        enabledStoch4, stoch4KColor, stoch4DColor,
+        stoch3CrossEnabled, stoch3CrossUpColor, stoch3CrossDownColor, stoch3CrossOpacity,
+        stoch4CrossEnabled, stoch4CrossUpColor, stoch4CrossDownColor, stoch4CrossOpacity,
         upColor, downColor, candleVisible,
         crossPairs, goldenShape, goldenColor, goldenSize, deadShape, deadColor, deadSize,
         shooting5MinEnabled,
@@ -3384,25 +3464,32 @@ export default function ReplayChart() {
     macd5SeriesRef.current?.signal.applyOptions({ color })
   }
 
-  // 스토캐스틱 3세트 - 각자 자기만의 pane(RSI와 같은 방식, MACD1/MACD5처럼 공유 안 함)
-  // 스토캐스틱 3세트는 서로 같은 pane을 공유한다(MACD1/MACD5와 같은 방식, 사용자 요청 - "겹쳐서 나와야 함")
-  // - 셋 중 이미 켜진 게 있으면 그 pane index를 그대로 쓰고, 끌 때는 나머지 둘 다 꺼져 있을 때만 pane 자체를 지운다.
+  // 스토캐스틱 4세트 - 각자 자기만의 pane(RSI와 같은 방식, MACD1/MACD5처럼 공유 안 함)
+  // 스토캐스틱 4세트는 서로 같은 pane을 공유한다(MACD1/MACD5와 같은 방식, 사용자 요청 - "겹쳐서 나와야 함")
+  // - 넷 중 이미 켜진 게 있으면 그 pane index를 그대로 쓰고, 끌 때는 나머지 셋 다 꺼져 있을 때만 pane 자체를 지운다.
   const findStochPaneIndex = () => {
     if (stoch1SeriesRef.current) return stoch1SeriesRef.current.k.getPane().paneIndex()
     if (stoch2SeriesRef.current) return stoch2SeriesRef.current.k.getPane().paneIndex()
     if (stoch3SeriesRef.current) return stoch3SeriesRef.current.k.getPane().paneIndex()
+    if (stoch4SeriesRef.current) return stoch4SeriesRef.current.k.getPane().paneIndex()
     return chartRef.current.panes().length
   }
   const anyOtherStochOn = (exclude) => (
     (exclude !== 1 && stoch1SeriesRef.current) ||
     (exclude !== 2 && stoch2SeriesRef.current) ||
-    (exclude !== 3 && stoch3SeriesRef.current)
+    (exclude !== 3 && stoch3SeriesRef.current) ||
+    (exclude !== 4 && stoch4SeriesRef.current)
   )
-  // 70/15/15 세로줄을 메인 캔들 pane뿐 아니라 스토캐스틱 pane에도 하나 더 얹는다(사용자 지적 - 스토 부분엔 안 보였음)
+  // 70/15/15, 210/45/45 세로줄을 메인 캔들 pane뿐 아니라 스토캐스틱 pane에도 하나씩 더 얹는다(사용자 지적 - 스토 부분엔 안 보였음)
   const ensureStochPaneCrossLine = (series) => {
-    if (stoch3CrossLineStochPaneRef.current) return
-    stoch3CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive()
-    series.attachPrimitive(stoch3CrossLineStochPaneRef.current)
+    if (!stoch3CrossLineStochPaneRef.current) {
+      stoch3CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive()
+      series.attachPrimitive(stoch3CrossLineStochPaneRef.current)
+    }
+    if (!stoch4CrossLineStochPaneRef.current) {
+      stoch4CrossLineStochPaneRef.current = new MultiVerticalLinesPrimitive()
+      series.attachPrimitive(stoch4CrossLineStochPaneRef.current)
+    }
   }
 
   const toggleStoch1 = () => {
@@ -3429,6 +3516,7 @@ export default function ReplayChart() {
         if (!anyOtherStochOn(1)) {
           try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
           stoch3CrossLineStochPaneRef.current = null
+          stoch4CrossLineStochPaneRef.current = null
         }
       }
       stoch1SeriesRef.current = null
@@ -3461,6 +3549,7 @@ export default function ReplayChart() {
         if (!anyOtherStochOn(2)) {
           try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
           stoch3CrossLineStochPaneRef.current = null
+          stoch4CrossLineStochPaneRef.current = null
         }
       }
       stoch2SeriesRef.current = null
@@ -3494,6 +3583,7 @@ export default function ReplayChart() {
         if (!anyOtherStochOn(3)) {
           try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
           stoch3CrossLineStochPaneRef.current = null
+          stoch4CrossLineStochPaneRef.current = null
         }
       }
       stoch3SeriesRef.current = null
@@ -3502,6 +3592,85 @@ export default function ReplayChart() {
   }
   const setStoch3KColor = (color) => { setStoch3KColorState(color); stoch3SeriesRef.current?.k.applyOptions({ color }) }
   const setStoch3DColor = (color) => { setStoch3DColorState(color); stoch3SeriesRef.current?.d.applyOptions({ color }) }
+  // 스토(70,15,15) K/D 크로스 세로줄 on/off, 상승(골든)/하락(데드) 색상 - ref 즉시 갱신 후 재적용(사용자 요청)
+  const toggleStoch3Cross = () => {
+    const next = !stoch3CrossEnabled
+    setStoch3CrossEnabledState(next)
+    stoch3CrossEnabledRef.current = next
+    applyStoch3Index(indexRef.current)
+  }
+  const setStoch3CrossUpColor = (color) => {
+    setStoch3CrossUpColorState(color)
+    stoch3CrossUpColorRef.current = color
+    applyStoch3Index(indexRef.current)
+  }
+  const setStoch3CrossDownColor = (color) => {
+    setStoch3CrossDownColorState(color)
+    stoch3CrossDownColorRef.current = color
+    applyStoch3Index(indexRef.current)
+  }
+  const setStoch3CrossOpacity = (opacity) => {
+    setStoch3CrossOpacityState(opacity)
+    stoch3CrossOpacityRef.current = opacity
+    applyStoch3Index(indexRef.current)
+  }
+
+  // 스토(210,45,45) - 스토(70,15,15)와 동일한 방식(사용자 요청 - "다른스토들과 같은 방식으로")
+  const toggleStoch4 = () => {
+    const turningOn = !enabledStoch4
+    setEnabledStoch4(turningOn)
+    if (turningOn) {
+      if (!stoch4SeriesRef.current && chartRef.current) {
+        const paneIndex = findStochPaneIndex()
+        stoch4SeriesRef.current = {
+          k: chartRef.current.addSeries(LineSeries, { color: stoch4KColor, lineWidth: 2, lastValueVisible: false, priceLineVisible: false }, paneIndex),
+          d: chartRef.current.addSeries(LineSeries, { color: stoch4DColor, lineWidth: 1, lastValueVisible: false, priceLineVisible: false }, paneIndex),
+        }
+        ensureStochPaneCrossLine(stoch4SeriesRef.current.k)
+        applyStochPaneRatio(chartRef.current, paneIndex)
+        bumpMarkerLayer()
+      }
+      applyStoch4Index(indexRef.current)
+    } else {
+      const s = stoch4SeriesRef.current
+      if (s && chartRef.current) {
+        const pane = s.k.getPane()
+        chartRef.current.removeSeries(s.k)
+        chartRef.current.removeSeries(s.d)
+        if (!anyOtherStochOn(4)) {
+          try { chartRef.current.removePane(pane.paneIndex()) } catch (e) { /* 이미 자동 제거됐을 수 있음 */ }
+          stoch3CrossLineStochPaneRef.current = null
+          stoch4CrossLineStochPaneRef.current = null
+        }
+      }
+      stoch4SeriesRef.current = null
+      stoch4CrossLineRef.current?.setLines([])
+    }
+  }
+  const setStoch4KColor = (color) => { setStoch4KColorState(color); stoch4SeriesRef.current?.k.applyOptions({ color }) }
+  const setStoch4DColor = (color) => { setStoch4DColorState(color); stoch4SeriesRef.current?.d.applyOptions({ color }) }
+  // 스토(210,45,45) K/D 크로스 세로줄 on/off, 상승(골든)/하락(데드) 색상
+  const toggleStoch4Cross = () => {
+    const next = !stoch4CrossEnabled
+    setStoch4CrossEnabledState(next)
+    stoch4CrossEnabledRef.current = next
+    applyStoch4Index(indexRef.current)
+  }
+  const setStoch4CrossUpColor = (color) => {
+    setStoch4CrossUpColorState(color)
+    stoch4CrossUpColorRef.current = color
+    applyStoch4Index(indexRef.current)
+  }
+  const setStoch4CrossDownColor = (color) => {
+    setStoch4CrossDownColorState(color)
+    stoch4CrossDownColorRef.current = color
+    applyStoch4Index(indexRef.current)
+  }
+  const setStoch4CrossOpacity = (opacity) => {
+    setStoch4CrossOpacityState(opacity)
+    stoch4CrossOpacityRef.current = opacity
+    applyStoch4Index(indexRef.current)
+  }
 
   // 체크한 이평선들 중 기간이 짧은 쪽을 단기선, 긴 쪽을 장기선으로 보고
   // 단기선이 장기선을 아래→위로 뚫으면 골든크로스, 위→아래면 데드크로스로 분류해
@@ -5963,9 +6132,103 @@ export default function ReplayChart() {
                           title="%D선 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
                         />
                       </div>
-                      <div style={{ marginLeft: 19, marginTop: 3, fontSize: 9.5, color: '#5a5f6a', lineHeight: 1.4 }}>
-                        5분B 밖으로 나간 뒤 아직 안 돌아온 상태에서 K/D가 교차하면 세로줄 표시(골든=라임, 데드=레드). 밴드 안으로 돌아온 뒤의 교차는 표시 안 함.
+                      <label style={{ margin: '4px 0 0', marginLeft: 19, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#9aa0ab', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={stoch3CrossEnabled}
+                          onChange={toggleStoch3Cross}
+                          style={{ width: 12, height: 12, margin: 0, accentColor: stoch3CrossUpColor, flexShrink: 0 }}
+                        />
+                        <span style={{ flex: 1 }}>K/D 크로스 세로줄</span>
+                      </label>
+                      {stoch3CrossEnabled && (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                            <span>상승</span>
+                            <input
+                              type="color" value={stoch3CrossUpColor} onChange={e => setStoch3CrossUpColor(e.target.value)}
+                              title="골든크로스 세로줄 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                            />
+                            <span>하락</span>
+                            <input
+                              type="color" value={stoch3CrossDownColor} onChange={e => setStoch3CrossDownColor(e.target.value)}
+                              title="데드크로스 세로줄 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                            <span>투명도</span>
+                            <input
+                              type="number" min={10} max={100} step={5}
+                              value={Math.round(stoch3CrossOpacity * 100)}
+                              onChange={e => setStoch3CrossOpacity(Math.min(100, Math.max(10, Number(e.target.value) || 0)) / 100)}
+                              style={{ width: 36, fontSize: 10, background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 3px' }}
+                            />
+                            <span>%</span>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div style={{ padding: '3px 0' }}>
+                  <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#e8eaed', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={enabledStoch4}
+                      onChange={toggleStoch4}
+                      style={{ width: 13, height: 13, margin: 0, accentColor: stoch4KColor, flexShrink: 0 }}
+                    />
+                    <span style={{ flex: 1 }}>스토(210,45,45)</span>
+                  </label>
+                  {enabledStoch4 && (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                        <span>%K</span>
+                        <input
+                          type="color" value={stoch4KColor} onChange={e => setStoch4KColor(e.target.value)}
+                          title="%K선 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                        />
+                        <span>%D</span>
+                        <input
+                          type="color" value={stoch4DColor} onChange={e => setStoch4DColor(e.target.value)}
+                          title="%D선 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                        />
                       </div>
+                      <label style={{ margin: '4px 0 0', marginLeft: 19, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#9aa0ab', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={stoch4CrossEnabled}
+                          onChange={toggleStoch4Cross}
+                          style={{ width: 12, height: 12, margin: 0, accentColor: stoch4CrossUpColor, flexShrink: 0 }}
+                        />
+                        <span style={{ flex: 1 }}>K/D 크로스 세로줄</span>
+                      </label>
+                      {stoch4CrossEnabled && (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                            <span>상승</span>
+                            <input
+                              type="color" value={stoch4CrossUpColor} onChange={e => setStoch4CrossUpColor(e.target.value)}
+                              title="골든크로스 세로줄 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                            />
+                            <span>하락</span>
+                            <input
+                              type="color" value={stoch4CrossDownColor} onChange={e => setStoch4CrossDownColor(e.target.value)}
+                              title="데드크로스 세로줄 색상" style={{ width: 16, height: 16, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 19, marginTop: 3, fontSize: 10, color: '#5a5f6a' }}>
+                            <span>투명도</span>
+                            <input
+                              type="number" min={10} max={100} step={5}
+                              value={Math.round(stoch4CrossOpacity * 100)}
+                              onChange={e => setStoch4CrossOpacity(Math.min(100, Math.max(10, Number(e.target.value) || 0)) / 100)}
+                              style={{ width: 36, fontSize: 10, background: '#1c2028', color: '#e8eaed', border: '1px solid #2a2e38', borderRadius: 4, padding: '1px 3px' }}
+                            />
+                            <span>%</span>
+                          </div>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
