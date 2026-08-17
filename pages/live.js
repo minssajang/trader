@@ -4984,6 +4984,8 @@ export default function ReplayChart() {
                   <span style={{ color: rowW85SellState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>C: H1 &lt; W85</span>
                   <TwStatusDot label="상태" active={rowW85SellState} colorA={TW_STATUS_RED_A} />
                 </label>
+                {/* A,C 아래 구분선(사용자 요청) - A/C(H1 vs H15/W85)가 여기로 올라오면서 E~K(원래 A~H)와 구분되게 */}
+                <div style={{ height: 1, background: '#333844', margin: '3px 0' }} />
                 <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 8} onChange={() => toggleCheck(8)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowCState ? TW_TEXT_RED : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>E: H1 &lt; S1</span>
@@ -5019,6 +5021,8 @@ export default function ReplayChart() {
                   <span style={{ color: rowW85BuyState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>D: H1 &gt; W85</span>
                   <TwStatusDot label="상태" active={rowW85BuyState} colorA={TW_STATUS_LIME_A} />
                 </label>
+                {/* B,D 아래 구분선(사용자 요청) - B/D(H1 vs H15/W85)가 여기로 올라오면서 F~L(원래 B~H)와 구분되게 */}
+                <div style={{ height: 1, background: '#333844', margin: '3px 0' }} />
                 <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={checked === 8.1} onChange={() => toggleCheck(8.1)} style={{ accentColor: '#4CAF50', flexShrink: 0, margin: 0 }} />
                   <span style={{ color: rowDState ? TW_TEXT_LIME : TW_TEXT_GRAY, fontSize: 11, fontWeight: 700, lineHeight: 1.3, flex: 1 }}>F: H1 &gt; S1</span>
