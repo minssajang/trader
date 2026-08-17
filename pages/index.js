@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
@@ -59,6 +60,12 @@ const GLOSSARY = [
 // 랜딩페이지 히어로 배경 영상 - Pexels 무료 상업이용 라이선스(저작자 표시 불필요) 원본을
 // 720p/30fps/무음으로 압축해서 슈퍼베이스 site-assets 버킷(공개)에 올려둔 것.
 const HERO_VIDEO_URL = 'https://ztrdgcebsxbhtckstlhn.supabase.co/storage/v1/object/public/site-assets/finance_chart_bg.mp4'
+
+// 모네타마켓 제휴 링크(사용자 요청) - MT5는 계좌를 직접 만들어주지 않고 "브로커에 접속"만 하는
+// 방식이라, MT5 버전을 고른 사람은 결국 CFD 브로커 계좌가 따로 필요하다. 그 자리에 실계좌/모의계좌
+// 바로가기를 붙여둔다.
+const MONETA_LIVE_URL = 'https://www.monetamarkets.com/open-live-account/?affid=7748373'
+const MONETA_DEMO_URL = 'https://www.monetamarkets.com/kr/open-demo-account/?affid=7748373'
 
 function DownloadButton({ info, app, onNotReadyClick }) {
   if (info) {
@@ -225,6 +232,12 @@ export default function Home() {
             <h3>MetaTrader 5 버전</h3>
             <p>MT5 공식 파이썬 API 연동. 계정 로그인 기반, 다양한 심볼 지원.</p>
             <p className="product-note">🌍 전 세계 CFD 브로커들이 표준으로 채택한 플랫폼이에요.</p>
+            <p className="product-note">
+              🔗 브로커 계좌가 아직 없으신가요? (모네타마켓){' '}
+              <a href={MONETA_LIVE_URL} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>실계좌 개설</a>
+              {' · '}
+              <a href={MONETA_DEMO_URL} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>모의계좌 개설</a>
+            </p>
             <DownloadButton info={versions.mt5} app="mt5" onNotReadyClick={() => setShowNotReady(true)} />
           </div>
         </div>
